@@ -64,10 +64,6 @@ impl<'a> AssetUploadRepository<'a> {
     }
 
     /// Create one new session without making a Script visible.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "SQLite boundary inputs mirror authoritative persisted fields"
-    )]
     pub fn create(
         &self,
         id: &str,
@@ -159,10 +155,6 @@ impl<'a> AssetUploadRepository<'a> {
     }
 
     /// Persist one verified object for every manifest path carrying the same Wrangler hash.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "SQLite boundary inputs mirror authoritative persisted fields"
-    )]
     pub fn mark_uploaded(
         &self,
         id: &str,
@@ -384,7 +376,7 @@ fn read(
     id: &str,
     now_ms: i64,
 ) -> Result<AssetUploadSession, PlatformError> {
-    let row: Option<(String, String, String, Option<String>, i64)> = tx
+    let row: Option<(InstanceId, String, String, Option<String>, i64)> = tx
         .query_row(
             "SELECT (SELECT instance_id FROM instance_identity),script_name,status,reservation_id,expires_at_ms
              FROM asset_upload_sessions WHERE id=?1 AND status!='expired'",
@@ -434,7 +426,7 @@ fn read(
         .map_err(|_| db_error())?;
     Ok(AssetUploadSession {
         id: id.to_owned(),
-        instance_id: instance.parse().map_err(|_| db_error())?,
+        instance_id: instance,
         script_name,
         complete: matches!(status.as_str(), "complete" | "reserved" | "consumed"),
         reservation_id,

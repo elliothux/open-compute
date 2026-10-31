@@ -17,7 +17,7 @@ fn seed_v5(path: &Path, include_route: bool) -> (InstanceId, WorkerId, String) {
         .execute(
             "INSERT INTO accounts(id, name, created_at_ms, deleted_at_ms)
              VALUES(?1, 'migration-account', 1, NULL)",
-            [account.to_string()],
+            [account],
         )
         .unwrap();
     connection
@@ -25,7 +25,7 @@ fn seed_v5(path: &Path, include_route: bool) -> (InstanceId, WorkerId, String) {
             "INSERT INTO platform_meta(key, value, updated_at_ms)
          VALUES('instance_id', CAST(?1 AS BLOB), 1),
                ('created_at_ms', CAST('1' AS BLOB), 1)",
-            [account.to_string()],
+            [account],
         )
         .unwrap();
     connection
@@ -49,12 +49,7 @@ fn seed_v5(path: &Path, include_route: bool) -> (InstanceId, WorkerId, String) {
                   state, generation, created_at_ms, updated_at_ms, deleted_at_ms)
                  VALUES(?1, ?2, ?3, 'platform_path', NULL, ?4, NULL,
                         'active', 1, 3, 3, NULL)",
-                rusqlite::params![
-                    route,
-                    account.to_string(),
-                    worker.to_string(),
-                    format!("/__workers/{account}/app/")
-                ],
+                rusqlite::params![route, account, worker, format!("/__workers/{account}/app/")],
             )
             .unwrap();
     }

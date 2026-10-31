@@ -60,7 +60,7 @@ impl WorkerRepository<'_> {
                 .query_row(
                     "SELECT COUNT(*) FROM worker_versions
                      WHERE worker_id = ?1 AND deleted_at_ms IS NULL",
-                    [input.worker_id.to_string()],
+                    [input.worker_id],
                     |row| row.get(0),
                 )
                 .map_err(|_| db_error())?;
@@ -74,7 +74,7 @@ impl WorkerRepository<'_> {
                 .query_row(
                     "SELECT COALESCE(MAX(version_number), 0) + 1
                  FROM worker_versions WHERE worker_id = ?1",
-                    [input.worker_id.to_string()],
+                    [input.worker_id],
                     |row| row.get(0),
                 )
                 .map_err(|_| db_error())?;
@@ -88,8 +88,8 @@ impl WorkerRepository<'_> {
                  VALUES (?1, ?2, ?3, ?4, 'staging', ?5, ?6, ?7, ?8,
                          ?9, ?10, ?11, NULL, NULL, NULL, NULL, ?12, ?13, ?14)",
                 params![
-                    input.id.to_string(),
-                    input.worker_id.to_string(),
+                    input.id,
+                    input.worker_id,
                     version,
                     input.content_kind.as_str(),
                     input.artifact_sha256.as_ref().map(<[u8; 32]>::as_slice),
@@ -127,7 +127,7 @@ impl WorkerRepository<'_> {
                 tx.execute(
                     "INSERT INTO version_vars (version_id, name, value_json)
                      VALUES (?1, ?2, ?3)",
-                    params![input.id.to_string(), name, value],
+                    params![input.id, name, value],
                 )
                 .map_err(|_| db_error())?;
             }
@@ -137,7 +137,7 @@ impl WorkerRepository<'_> {
                      (version_id, name, revision_id, key_id, algorithm, nonce, ciphertext)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                     params![
-                        input.id.to_string(),
+                        input.id,
                         secret.name,
                         secret.revision_id,
                         secret.envelope.key_id,
@@ -152,7 +152,7 @@ impl WorkerRepository<'_> {
                 tx.execute(
                     "INSERT INTO version_annotations (version_id, name, value)
                      VALUES (?1, ?2, ?3)",
-                    params![input.id.to_string(), name, value],
+                    params![input.id, name, value],
                 )
                 .map_err(|_| invariant())?;
             }

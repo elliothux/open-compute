@@ -26,7 +26,7 @@ impl<'a> DurableObjectRepository<'a> {
             let worker: Option<(String, String, Option<i64>)> = tx
                 .query_row(
                     "SELECT (SELECT instance_id FROM instance_identity), do_storage_id, deleted_at_ms FROM workers WHERE id = ?1",
-                    [owner_worker_id.to_string()],
+                    [owner_worker_id],
                     |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
                 )
                 .optional()
@@ -51,8 +51,8 @@ impl<'a> DurableObjectRepository<'a> {
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
                  ON CONFLICT(resource_id) DO NOTHING",
                 params![
-                    resource_id.to_string(),
-                    owner_worker_id.to_string(),
+                    resource_id,
+                    owner_worker_id,
                     class_name,
                     do_storage_id,
                     storage_key,
@@ -110,20 +110,17 @@ impl<'a> DurableObjectRepository<'a> {
         &self,
         resource_id: ResourceId,
     ) -> Result<DurableObjectNamespaceRecord, PlatformError> {
-        let instance: String = self.storage.db().with_read(|conn| {
+        let instance: InstanceId = self.storage.db().with_read(|conn| {
             conn.query_row(
                 "SELECT (SELECT instance_id FROM instance_identity) FROM resources WHERE id = ?1 AND kind = 'do_namespace'",
-                [resource_id.to_string()],
+                [resource_id],
                 |row| row.get(0),
             )
             .optional()
             .map_err(|_| db_error())?
             .ok_or_else(namespace_not_found)
         })?;
-        self.get_namespace(
-            InstanceId::from_str(&instance).map_err(|_| invariant())?,
-            resource_id,
-        )
+        self.get_namespace(instance, resource_id)
     }
 
     /// List all namespace resources for one instance.
@@ -156,7 +153,7 @@ impl<'a> DurableObjectRepository<'a> {
         self.storage.db().with_read(|conn| {
             conn.query_row(
                 "SELECT lifecycle_state = 'active' FROM do_namespaces WHERE resource_id = ?1",
-                [resource_id.to_string()],
+                [resource_id],
                 |row| row.get(0),
             )
             .optional()
@@ -166,10 +163,6 @@ impl<'a> DurableObjectRepository<'a> {
     }
 
     /// List one bounded, filtered, and sorted page of namespace resources.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "SQLite boundary inputs mirror authoritative persisted fields"
-    )]
     pub fn list_namespaces_page(
         &self,
         instance_id: InstanceId,
@@ -258,10 +251,6 @@ impl<'a> DurableObjectRepository<'a> {
     }
 
     /// Atomically reauthorize a terminal call and register its live object generation.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "SQLite boundary inputs mirror authoritative persisted fields"
-    )]
     pub fn authorize_dispatch(
         &self,
         binding_id: BindingId,
@@ -304,9 +293,9 @@ impl<'a> DurableObjectRepository<'a> {
                        AND b.descriptor_sha256 = ?4 AND d.state = 'ready'
                        AND w.deleted_at_ms IS NULL",
                     params![
-                        binding_id.to_string(),
-                        version_id.to_string(),
-                        namespace_id.to_string(),
+                        binding_id,
+                        version_id,
+                        namespace_id,
                         descriptor_sha256.as_slice(),
                     ],
                     |row| {
@@ -341,7 +330,7 @@ impl<'a> DurableObjectRepository<'a> {
             // A binding belongs to immutable Version code. Resolve the current route epoch
             // here, so reactivating that Version does not require rebuilding its isolate.
             // The issued authority still carries this epoch through host admission.
-            if active_version_id != version_id.to_string() {
+            if active_version_id != version_id {
                 return Err(PlatformError::new(
                     ErrorCode::DoVersionStale,
                     "Durable Object dispatch generation is stale",
@@ -350,7 +339,6 @@ impl<'a> DurableObjectRepository<'a> {
             if worker_storage_id != namespace_storage_id {
                 return Err(invariant());
             }
-            let worker_id = WorkerId::from_str(&worker_id).map_err(|_| invariant())?;
             let object = register_object_tx(tx, namespace_id, object_id, now_ms, allow_create)?;
             let host_key = self.storage.crypto().durable_object_host_key(
                 &namespace_storage_key,
@@ -404,7 +392,7 @@ impl<'a> DurableObjectRepository<'a> {
                        AND o.generation = ?3 AND o.state IN ('creating', 'ready')
                        AND r.state = 'ready' AND w.deleted_at_ms IS NULL AND d.state = 'ready'",
                     params![
-                        namespace_id.to_string(),
+                        namespace_id,
                         object_id.to_string(),
                         i64::try_from(object_generation).map_err(|_| invariant())?,
                     ],
@@ -442,7 +430,7 @@ impl<'a> DurableObjectRepository<'a> {
             let worker_storage_id: String = connection
                 .query_row(
                     "SELECT do_storage_id FROM workers WHERE id = ?1",
-                    [worker_id.as_str()],
+                    [worker_id],
                     |row| row.get(0),
                 )
                 .map_err(|_| db_error())?;
@@ -450,10 +438,10 @@ impl<'a> DurableObjectRepository<'a> {
                 return Err(invariant());
             }
             Ok(AuthorizedDurableObjectDispatch {
-                instance_id: InstanceId::from_str(&instance_id).map_err(|_| invariant())?,
+                instance_id,
                 namespace_resource_id: namespace_id,
-                worker_id: WorkerId::from_str(&worker_id).map_err(|_| invariant())?,
-                version_id: VersionId::from_str(&version_id).map_err(|_| invariant())?,
+                worker_id,
+                version_id,
                 worker_code_sha256: hex::encode(array32(&worker_code_sha256)?),
                 route_generation: u64::try_from(route_generation).map_err(|_| invariant())?,
                 class_name,

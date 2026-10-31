@@ -66,7 +66,7 @@ fn p2_2_queue_enqueue_delay_quota_retention_and_counters_are_transactional() {
              FROM queue_messages WHERE queue_id = ?1 ORDER BY seq",
         )
         .unwrap()
-        .query_map([queue_id.to_string()], |row| {
+        .query_map([queue_id], |row| {
             Ok((
                 row.get::<_, i64>(0)?,
                 row.get::<_, i64>(1)?,

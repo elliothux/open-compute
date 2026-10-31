@@ -145,7 +145,7 @@ pub(crate) fn read_resource_conn(
                 availability_code, spec_generation, driver_schema_version,
                 created_at_ms, updated_at_ms, deleted_at_ms
          FROM resources WHERE id = ?1 AND (SELECT instance_id FROM instance_identity) = ?2",
-        params![resource_id.to_string(), instance_id.to_string()],
+        params![resource_id, instance_id],
         map_resource,
     )
     .optional()
@@ -165,16 +165,15 @@ fn has_referrers(tx: &Transaction<'_>, resource_id: ResourceId) -> Result<bool, 
     tx.query_row(
         "SELECT EXISTS(SELECT 1 FROM resource_referrers WHERE resource_id = ?1)
              OR EXISTS(SELECT 1 FROM ai_search_r2_sources WHERE bucket_resource_id = ?1)",
-        [resource_id.to_string()],
+        [resource_id],
         |row| row.get(0),
     )
     .map_err(|_| db_error())
 }
 
 fn map_ai_search_r2_referrer(row: &rusqlite::Row<'_>) -> rusqlite::Result<ResourceReferrer> {
-    let resource: String = row.get(0)?;
     Ok(ResourceReferrer {
-        resource_id: ResourceId::from_str(&resource).map_err(|_| rusqlite::Error::InvalidQuery)?,
+        resource_id: row.get(0)?,
         referrer_kind: "ai_search_r2_source".to_owned(),
         referrer_id: row.get(1)?,
         created_at_ms: row.get(2)?,
@@ -189,16 +188,14 @@ pub(crate) fn map_resource_offset(
     row: &rusqlite::Row<'_>,
     offset: usize,
 ) -> rusqlite::Result<ResourceRecord> {
-    let id: String = row.get(offset)?;
-    let instance: String = row.get(offset + 1)?;
     let kind: String = row.get(offset + 2)?;
     let state: String = row.get(offset + 4)?;
     let availability: String = row.get(offset + 5)?;
     let generation: i64 = row.get(offset + 7)?;
     let schema: i64 = row.get(offset + 8)?;
     Ok(ResourceRecord {
-        id: ResourceId::from_str(&id).map_err(|_| rusqlite::Error::InvalidQuery)?,
-        instance_id: InstanceId::from_str(&instance).map_err(|_| rusqlite::Error::InvalidQuery)?,
+        id: row.get(offset)?,
+        instance_id: row.get(offset + 1)?,
         kind: BindingKind::from_str(&kind).map_err(|_| rusqlite::Error::InvalidQuery)?,
         name: row.get(offset + 3)?,
         state: ResourceState::from_str(&state).map_err(|_| rusqlite::Error::InvalidQuery)?,
@@ -214,9 +211,8 @@ pub(crate) fn map_resource_offset(
 }
 
 fn map_referrer(row: &rusqlite::Row<'_>) -> rusqlite::Result<ResourceReferrer> {
-    let resource: String = row.get(0)?;
     Ok(ResourceReferrer {
-        resource_id: ResourceId::from_str(&resource).map_err(|_| rusqlite::Error::InvalidQuery)?,
+        resource_id: row.get(0)?,
         referrer_kind: row.get(1)?,
         referrer_id: row.get(2)?,
         created_at_ms: row.get(3)?,
@@ -237,7 +233,7 @@ fn require_instance(tx: &Transaction<'_>, instance_id: InstanceId) -> Result<(),
     let exists: bool = tx
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM instance_identity WHERE instance_id = ?1)",
-            [instance_id.to_string()],
+            [instance_id],
             |row| row.get(0),
         )
         .map_err(|_| db_error())?;
@@ -285,14 +281,7 @@ fn audit(
         "INSERT INTO control_audit_events
          (action, target_type, target_id, request_id, details_json, created_at_ms)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![
-            action,
-            target_type,
-            target_id,
-            request_id.to_string(),
-            details,
-            now_ms,
-        ],
+        params![action, target_type, target_id, request_id, details, now_ms,],
     )
     .map_err(|_| db_error())?;
     Ok(())

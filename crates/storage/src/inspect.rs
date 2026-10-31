@@ -159,7 +159,7 @@ pub fn inspect_resources(
         let rows = statement
             .query_map([i64::from(limit)], |row| {
                 Ok((
-                    row.get::<_, String>(0)?,
+                    row.get::<_, ResourceId>(0)?,
                     row.get::<_, String>(1)?,
                     row.get::<_, String>(2)?,
                     row.get::<_, Option<String>>(3)?,
@@ -170,7 +170,7 @@ pub fn inspect_resources(
         for row in rows {
             let (id, kind, availability, availability_code) = row.map_err(|_| inspect_error())?;
             resources.push(ResourceInspect {
-                id: ResourceId::from_str(&id).map_err(|_| inspect_error())?,
+                id,
                 kind: BindingKind::from_str(&kind).map_err(|_| inspect_error())?,
                 availability: ResourceAvailability::from_str(&availability)
                     .map_err(|_| inspect_error())?,

@@ -6,7 +6,6 @@ use crate::worker_repository::require_instance;
 use open_compute_core::{ErrorCode, InstanceId, PlatformError, ResourceId};
 use rusqlite::{OptionalExtension, params};
 use std::fmt;
-use std::str::FromStr as _;
 
 /// Lifecycle of one tenant-visible multipart upload.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -140,8 +139,7 @@ fn map_upload(
 ) -> rusqlite::Result<R2MultipartUploadRecord> {
     let record = R2MultipartUploadRecord {
         upload_id: row.get(0)?,
-        resource_id: ResourceId::from_str(&row.get::<_, String>(1)?)
-            .map_err(|_| rusqlite::Error::InvalidQuery)?,
+        resource_id: row.get::<_, ResourceId>(1)?,
         instance_id,
         object_key: row.get(2)?,
         provider_upload_id: row.get(3)?,
@@ -233,7 +231,7 @@ fn read_upload(
                 object_version, completion_manifest, completed_metadata, state
          FROM r2_multipart_uploads
          WHERE upload_id = ?1 AND resource_id = ?2",
-            params![upload_id, resource_id.to_string()],
+            params![upload_id, resource_id],
             |row| map_upload(row, instance_id),
         )
         .optional()

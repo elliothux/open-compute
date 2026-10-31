@@ -260,7 +260,7 @@ async fn binding_and_flags_are_frozen_and_corrupt_authority_cannot_restore() {
             .unwrap();
         assert!(
             connection
-                .execute(sql, rusqlite::params![&corrupt, version.id.to_string()])
+                .execute(sql, rusqlite::params![&corrupt, version.id])
                 .is_err()
         );
         // Simulate persisted corruption only in this owned fixture; reinstate the exact guard atomically.
@@ -270,7 +270,7 @@ async fn binding_and_flags_are_frozen_and_corrupt_authority_cannot_restore() {
             .unwrap();
         assert_eq!(
             transaction
-                .execute(sql, rusqlite::params![&corrupt, version.id.to_string()])
+                .execute(sql, rusqlite::params![&corrupt, version.id])
                 .unwrap(),
             1
         );
@@ -312,7 +312,7 @@ async fn binding_and_flags_are_frozen_and_corrupt_authority_cannot_restore() {
             .unwrap();
         assert_eq!(
             transaction
-                .execute(sql, rusqlite::params![&original, version.id.to_string()])
+                .execute(sql, rusqlite::params![&original, version.id])
                 .unwrap(),
             1
         );

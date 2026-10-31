@@ -1,9 +1,5 @@
 use super::*;
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "transport boundary inputs mirror the wire contract"
-)]
 pub(super) async fn run_worker_maintenance(
     storage: &Arc<PlatformStorage>,
     store: &ArtifactStore,

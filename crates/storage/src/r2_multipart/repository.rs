@@ -35,12 +35,7 @@ impl<'a> R2MultipartRepository<'a> {
                      SET provider_upload_id = ?1, updated_at_ms = ?2
                      WHERE upload_id = ?3 AND resource_id = ?4
                        AND state = 'initiating' AND provider_upload_id IS NULL",
-                    params![
-                        provider_upload_id,
-                        now_ms,
-                        upload_id,
-                        resource_id.to_string()
-                    ],
+                    params![provider_upload_id, now_ms, upload_id, resource_id],
                 )
                 .map_err(|_| db_error())?;
             if changed != 1 {
@@ -65,7 +60,7 @@ impl<'a> R2MultipartRepository<'a> {
                      SET state = 'open', updated_at_ms = ?1
                      WHERE upload_id = ?2 AND resource_id = ?3
                        AND state = 'initiating' AND provider_upload_id IS NOT NULL",
-                    params![now_ms, upload_id, resource_id.to_string()],
+                    params![now_ms, upload_id, resource_id],
                 )
                 .map_err(|_| db_error())?;
             if changed != 1 {
@@ -90,7 +85,7 @@ impl<'a> R2MultipartRepository<'a> {
                      SET state = 'create_unknown', updated_at_ms = ?1
                      WHERE upload_id = ?2 AND resource_id = ?3
                        AND state = 'initiating' AND provider_upload_id IS NULL",
-                    params![now_ms, upload_id, resource_id.to_string()],
+                    params![now_ms, upload_id, resource_id],
                 )
                 .map_err(|_| db_error())?;
             if changed != 1 {
@@ -113,7 +108,7 @@ impl<'a> R2MultipartRepository<'a> {
                      SET state = 'create_unknown', updated_at_ms = ?1
                      WHERE resource_id = ?2 AND state = 'initiating'
                        AND provider_upload_id IS NULL",
-                    params![now_ms, resource_id.to_string()],
+                    params![now_ms, resource_id],
                 )
                 .map_err(|_| db_error())?;
             u64::try_from(changed).map_err(|_| invariant())
@@ -138,7 +133,7 @@ impl<'a> R2MultipartRepository<'a> {
             tx.execute(
                 "DELETE FROM r2_multipart_uploads
                  WHERE upload_id = ?1 AND resource_id = ?2 AND state = 'initiating'",
-                params![upload_id, resource_id.to_string()],
+                params![upload_id, resource_id],
             )
             .map_err(|_| db_error())?;
             Ok(Some(record))
@@ -178,7 +173,7 @@ impl<'a> R2MultipartRepository<'a> {
                         completion_manifest,
                         now_ms,
                         upload_id,
-                        resource_id.to_string(),
+                        resource_id,
                         object_key,
                     ],
                 )
@@ -212,7 +207,7 @@ impl<'a> R2MultipartRepository<'a> {
                         completed_metadata,
                         now_ms,
                         upload_id,
-                        resource_id.to_string(),
+                        resource_id,
                         object_key,
                     ],
                 )
@@ -241,7 +236,7 @@ impl<'a> R2MultipartRepository<'a> {
                      WHERE upload_id = ?2 AND resource_id = ?3
                        AND object_key = ?4 AND state = 'completing'
                        AND completed_metadata IS NULL",
-                    params![now_ms, upload_id, resource_id.to_string(), object_key,],
+                    params![now_ms, upload_id, resource_id, object_key,],
                 )
                 .map_err(|_| db_error())?;
             if changed != 1 {
@@ -373,9 +368,7 @@ impl<'a> R2MultipartRepository<'a> {
                 )
                 .map_err(|_| db_error())?;
             let rows = statement
-                .query_map([resource_id.to_string()], |row| {
-                    map_upload(row, instance_id)
-                })
+                .query_map([resource_id], |row| map_upload(row, instance_id))
                 .map_err(|_| db_error())?;
             let mut uploads = Vec::new();
             for row in rows {
@@ -401,12 +394,7 @@ impl<'a> R2MultipartRepository<'a> {
                      SET provider_upload_id = ?1, state = 'aborting', updated_at_ms = ?2
                      WHERE upload_id = ?3 AND resource_id = ?4
                        AND state = 'create_unknown' AND provider_upload_id IS NULL",
-                    params![
-                        provider_upload_id,
-                        now_ms,
-                        upload_id,
-                        resource_id.to_string(),
-                    ],
+                    params![provider_upload_id, now_ms, upload_id, resource_id,],
                 )
                 .map_err(|_| db_error())?;
             if changed != 1 {
@@ -430,7 +418,7 @@ impl<'a> R2MultipartRepository<'a> {
                     "DELETE FROM r2_multipart_uploads
                      WHERE upload_id = ?1 AND resource_id = ?2
                        AND state = 'create_unknown' AND provider_upload_id IS NULL",
-                    params![upload_id, resource_id.to_string()],
+                    params![upload_id, resource_id],
                 )
                 .map_err(|_| db_error())?;
             if changed != 1 {
@@ -459,7 +447,7 @@ impl<'a> R2MultipartRepository<'a> {
                      WHERE upload_id = ?2 AND resource_id = ?3
                        AND state IN ('initiating', 'open', 'completing')
                        AND provider_upload_id IS NOT NULL",
-                    params![now_ms, upload_id, resource_id.to_string(),],
+                    params![now_ms, upload_id, resource_id,],
                 )
                 .map_err(|_| db_error())?;
             if changed != 1 {
@@ -490,7 +478,7 @@ impl<'a> R2MultipartRepository<'a> {
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?14)",
                 params![
                     record.upload_id,
-                    record.resource_id.to_string(),
+                    record.resource_id,
                     record.object_key,
                     record.provider_upload_id,
                     record.storage_class,
@@ -531,7 +519,7 @@ impl<'a> R2MultipartRepository<'a> {
                         to.as_str(),
                         now_ms,
                         upload_id,
-                        resource_id.to_string(),
+                        resource_id,
                         object_key,
                         from.as_str(),
                     ],

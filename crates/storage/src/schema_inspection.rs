@@ -69,8 +69,8 @@ pub fn inspect_current_schema(
             .query_map([], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
+                    row.get::<_, InstanceId>(1)?,
+                    row.get::<_, ResourceId>(2)?,
                     row.get::<_, String>(3)?,
                     row.get::<_, i64>(4)?,
                     row.get::<_, Option<String>>(5)?,
@@ -88,8 +88,6 @@ pub fn inspect_current_schema(
         ai_search_files: 0,
     };
     for (kind, instance, resource, lifecycle, driver_version, storage_key, version) in resources {
-        let instance: InstanceId = instance.parse().map_err(|_| schema_invalid())?;
-        let resource: ResourceId = resource.parse().map_err(|_| schema_invalid())?;
         let lifecycle: ResourceState = lifecycle.parse().map_err(|_| schema_invalid())?;
         let (product, expected_key, expected_version, database_kind, count) = match kind.as_str() {
             "kv_namespace" => (

@@ -5,7 +5,6 @@ use crate::worker_repository::{VersionContentKind, VersionState};
 use open_compute_core::{DeploymentId, ErrorCode, InstanceId, PlatformError, VersionId, WorkerId};
 use rusqlite::{OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
-use std::str::FromStr;
 
 /// Persisted logical target of a Service binding.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -159,17 +158,17 @@ impl<'a> ServiceRepository<'a> {
                      LEFT JOIN worker_deployments active ON active.id = target.active_deployment_id
                      LEFT JOIN worker_versions td ON td.id = active.version_id
                      WHERE s.version_id = ?1 AND s.binding_name = ?2",
-                    params![caller_version_id.to_string(), binding_name],
+                    params![caller_version_id, binding_name],
                     |row| {
                         let service = map_service(row)?;
-                        let instance: String = row.get(10)?;
-                        let caller_worker: String = row.get(11)?;
+                        let instance: InstanceId = row.get(10)?;
+                        let caller_worker: WorkerId = row.get(11)?;
                         let caller_deleted: Option<i64> = row.get(12)?;
                         let caller_state: String = row.get(13)?;
                         let target_deleted: Option<i64> = row.get(14)?;
                         let route_generation: Option<i64> = row.get(15)?;
-                        let target_deployment: Option<String> = row.get(16)?;
-                        let target_version: Option<String> = row.get(17)?;
+                        let target_deployment: Option<DeploymentId> = row.get(16)?;
+                        let target_version: Option<VersionId> = row.get(17)?;
                         let content_kind: Option<String> = row.get(18)?;
                         let target_state: Option<String> = row.get(19)?;
                         let target_digest: Option<Vec<u8>> = row.get(20)?;
@@ -235,10 +234,8 @@ impl<'a> ServiceRepository<'a> {
                     let content_kind = content_kind.ok_or_else(target_not_ready)?;
                     let target_digest = target_digest.ok_or_else(target_not_ready)?;
                     ResolvedServiceDestination::Worker {
-                        version_id: VersionId::from_str(&target_version)
-                            .map_err(|_| invariant())?,
-                        deployment_id: DeploymentId::from_str(&target_deployment)
-                            .map_err(|_| invariant())?,
+                        version_id: target_version,
+                        deployment_id: target_deployment,
                         worker_code_sha256: target_digest
                             .as_slice()
                             .try_into()
@@ -252,8 +249,8 @@ impl<'a> ServiceRepository<'a> {
             };
             Ok(ResolvedServiceTarget {
                 service,
-                instance_id: InstanceId::from_str(&instance).map_err(|_| invariant())?,
-                caller_worker_id: WorkerId::from_str(&caller_worker).map_err(|_| invariant())?,
+                instance_id: instance,
+                caller_worker_id: caller_worker,
                 target,
             })
         })
@@ -291,19 +288,11 @@ impl<'a> ServiceRepository<'a> {
                 .map_err(|_| db_error())?;
             let rows = statement
                 .query_map(
-                    params![
-                        target_worker_id.to_string(),
-                        instance_id.to_string(),
-                        i64::from(limit)
-                    ],
+                    params![target_worker_id, instance_id, i64::from(limit)],
                     |row| {
-                        let caller: String = row.get(0)?;
-                        let version: String = row.get(1)?;
                         Ok(ServiceReferrer {
-                            caller_worker_id: WorkerId::from_str(&caller)
-                                .map_err(|_| rusqlite::Error::InvalidQuery)?,
-                            caller_version_id: VersionId::from_str(&version)
-                                .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                            caller_worker_id: row.get(0)?,
+                            caller_version_id: row.get(1)?,
                             binding_name: row.get(2)?,
                         })
                     },
@@ -328,7 +317,7 @@ pub(crate) fn insert_staging_services(
               descriptor_sha256, created_at_ms)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
-                version_id.to_string(),
+                version_id,
                 service.binding_name,
                 target_kind(&service.target),
                 target_worker_id(&service.target),
@@ -358,21 +347,20 @@ pub(crate) fn read_version_services_conn(
         )
         .map_err(|_| db_error())?;
     let rows = statement
-        .query_map([version_id.to_string()], map_service)
+        .query_map([version_id], map_service)
         .map_err(|_| db_error())?;
     collect(rows)
 }
 
 fn map_service(row: &rusqlite::Row<'_>) -> rusqlite::Result<VersionServiceRecord> {
-    let version: String = row.get(0)?;
     let kind: String = row.get(2)?;
-    let worker: Option<String> = row.get(3)?;
+    let worker: Option<WorkerId> = row.get(3)?;
     let extension: Option<String> = row.get(4)?;
     let policy_revision: Option<String> = row.get(5)?;
     let target = match (kind.as_str(), worker, extension) {
-        ("worker", Some(worker), None) if policy_revision.is_none() => ServiceTarget::Worker {
-            worker_id: WorkerId::from_str(&worker).map_err(|_| rusqlite::Error::InvalidQuery)?,
-        },
+        ("worker", Some(worker), None) if policy_revision.is_none() => {
+            ServiceTarget::Worker { worker_id: worker }
+        }
         ("extension", None, Some(name)) => ServiceTarget::Extension {
             name,
             policy_revision: policy_revision.ok_or(rusqlite::Error::InvalidQuery)?,
@@ -381,7 +369,7 @@ fn map_service(row: &rusqlite::Row<'_>) -> rusqlite::Result<VersionServiceRecord
     };
     let digest: Vec<u8> = row.get(8)?;
     Ok(VersionServiceRecord {
-        version_id: VersionId::from_str(&version).map_err(|_| rusqlite::Error::InvalidQuery)?,
+        version_id: row.get(0)?,
         binding_name: row.get(1)?,
         target,
         entrypoint: row.get(6)?,
@@ -401,9 +389,9 @@ fn target_kind(target: &ServiceTarget) -> &'static str {
     }
 }
 
-fn target_worker_id(target: &ServiceTarget) -> Option<String> {
+fn target_worker_id(target: &ServiceTarget) -> Option<WorkerId> {
     match target {
-        ServiceTarget::Worker { worker_id } => Some(worker_id.to_string()),
+        ServiceTarget::Worker { worker_id } => Some(*worker_id),
         ServiceTarget::Extension { .. } => None,
     }
 }

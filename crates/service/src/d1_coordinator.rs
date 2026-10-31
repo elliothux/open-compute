@@ -200,10 +200,6 @@ impl D1Coordinator {
     }
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "transport boundary inputs mirror the wire contract"
-)]
 fn execute_blocking<T, F>(
     storage: &Arc<PlatformStorage>,
     config: &D1Config,
@@ -233,10 +229,6 @@ where
     result
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "transport boundary inputs mirror the wire contract"
-)]
 fn execute_blocking_inner<T, F>(
     storage: &Arc<PlatformStorage>,
     config: &D1Config,

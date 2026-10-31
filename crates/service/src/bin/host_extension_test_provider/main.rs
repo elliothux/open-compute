@@ -16,8 +16,6 @@
 #[rustfmt::skip]
 #[allow(
     unused_qualifications,
-    missing_debug_implementations,
-    missing_docs,
     dead_code,
     unreachable_pub,
     elided_lifetimes_in_paths,
@@ -31,8 +29,6 @@
     clippy::doc_markdown,
     clippy::trivially_copy_pass_by_ref,
     clippy::cloned_instead_of_copied,
-    clippy::type_complexity,
-    clippy::too_many_arguments,
     reason = "committed Cap'n Proto codegen is not maintained by hand"
 )]
 pub mod host_extension_capnp {

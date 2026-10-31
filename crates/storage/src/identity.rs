@@ -87,7 +87,7 @@ pub fn bootstrap(
         let instance_id = InstanceId::generate();
         tx.execute(
             "INSERT INTO instance_identity (instance_id, created_at_ms) VALUES (?1, ?2)",
-            rusqlite::params![instance_id.to_string(), now],
+            rusqlite::params![instance_id, now],
         )
         .map_err(|_| {
             PlatformError::new(

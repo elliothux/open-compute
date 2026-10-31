@@ -176,10 +176,6 @@ pub(crate) fn running_instances(
 }
 
 /// Open the operator Dashboard for a ready instance with a one-time login URL.
-#[allow(
-    clippy::too_many_arguments,
-    reason = "transport boundary inputs mirror the wire contract"
-)]
 pub fn open_dashboard(
     config: Option<&Path>,
     instance: Option<&InstanceSelector>,

@@ -40,10 +40,6 @@ pub(super) fn refuse_nonempty_data(path: &Path) -> Result<(), PlatformError> {
     }
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "transport boundary inputs mirror the wire contract"
-)]
 pub(super) fn prepare_staging(
     plan: &SetupPlan,
     staging_dir: &Path,

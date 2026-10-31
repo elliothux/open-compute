@@ -25,7 +25,7 @@ impl D1SnapshotRepository<'_> {
                        AND state IN ('complete', 'failed', 'expired')
                        AND token_expires_at_ms > ?2
                        AND file_key IS NOT NULL",
-                    params![resource_id.to_string(), now_ms],
+                    params![resource_id, now_ms],
                     |row| row.get(0),
                 )
                 .map_err(|_| invariant())?;
@@ -58,7 +58,7 @@ impl D1SnapshotRepository<'_> {
             let count: i64 = tx
                 .query_row(
                     "SELECT COUNT(*) FROM d1_snapshots WHERE resource_id = ?1",
-                    [resource_id.to_string()],
+                    [resource_id],
                     |row| row.get(0),
                 )
                 .map_err(|_| invariant())?;
@@ -93,12 +93,7 @@ impl D1SnapshotRepository<'_> {
                     .map_err(|_| invariant())?;
                 statement
                     .query_map(
-                        params![
-                            resource_id.to_string(),
-                            protected[0],
-                            protected[1],
-                            remove_count
-                        ],
+                        params![resource_id, protected[0], protected[1], remove_count],
                         map_snapshot,
                     )
                     .map_err(|_| invariant())?
@@ -113,7 +108,7 @@ impl D1SnapshotRepository<'_> {
                     .execute(
                         "DELETE FROM d1_snapshots
                          WHERE resource_id = ?1 AND session_version = ?2",
-                        params![resource_id.to_string(), to_i64(snapshot.session_version)?],
+                        params![resource_id, to_i64(snapshot.session_version)?],
                     )
                     .map_err(|_| invariant())?
                     != 1
@@ -146,7 +141,7 @@ impl D1SnapshotRepository<'_> {
             let count: i64 = conn
                 .query_row(
                     "SELECT COUNT(*) FROM d1_snapshots WHERE resource_id = ?1",
-                    [resource_id.to_string()],
+                    [resource_id],
                     |row| row.get(0),
                 )
                 .map_err(|_| invariant())?;
@@ -173,7 +168,7 @@ impl D1SnapshotRepository<'_> {
                                OR r.previous_session_version = s.session_version)
                          )
                      )",
-                    params![resource_id.to_string(), protected[0], protected[1]],
+                    params![resource_id, protected[0], protected[1]],
                     |row| row.get(0),
                 )
                 .map_err(|_| invariant())?;
@@ -215,7 +210,7 @@ impl D1SnapshotRepository<'_> {
                     )
                     .map_err(|_| invariant())?;
                 statement
-                    .query_map(params![resource_id.to_string(), now_ms], map_transfer)
+                    .query_map(params![resource_id, now_ms], map_transfer)
                     .map_err(|_| invariant())?
                     .collect::<Result<Vec<_>, _>>()
                     .map_err(|_| invariant())?
@@ -227,7 +222,7 @@ impl D1SnapshotRepository<'_> {
                          WHERE id = ?1 AND resource_id = ?2
                            AND state IN ('complete', 'failed', 'expired')
                            AND token_expires_at_ms <= ?3",
-                        params![transfer.id, resource_id.to_string(), now_ms],
+                        params![transfer.id, resource_id, now_ms],
                     )
                     .map_err(|_| invariant())?
                     != 1

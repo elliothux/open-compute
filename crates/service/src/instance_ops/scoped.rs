@@ -6,10 +6,6 @@ use open_compute_storage::lock::InspectLock;
 use std::io::{BufRead, IsTerminal};
 
 /// Create a fresh instance through the running daemon after showing exact paths.
-#[allow(
-    clippy::too_many_arguments,
-    reason = "CLI setup options are explicit at the boundary"
-)]
 pub async fn setup_instance(
     registry: &InstanceRegistry,
     scope: ServiceScope,

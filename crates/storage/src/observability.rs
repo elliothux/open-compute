@@ -7,7 +7,6 @@ use rusqlite::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::Path;
-use std::str::FromStr;
 use std::sync::Mutex;
 use std::time::Duration;
 

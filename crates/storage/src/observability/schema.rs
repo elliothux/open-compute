@@ -42,7 +42,7 @@ pub(super) fn bind_instance(
     connection: &Connection,
     instance_id: InstanceId,
 ) -> Result<(), PlatformError> {
-    let stored: Option<String> = connection
+    let stored: Option<InstanceId> = connection
         .query_row(
             "SELECT instance_id FROM observability_identity WHERE singleton=1",
             [],
@@ -51,7 +51,7 @@ pub(super) fn bind_instance(
         .optional()
         .map_err(|_| unavailable())?;
     match stored {
-        Some(stored) if InstanceId::from_str(&stored).ok() == Some(instance_id) => Ok(()),
+        Some(stored) if stored == instance_id => Ok(()),
         Some(_) => Err(unavailable()),
         None => {
             let count: i64 = connection
@@ -67,7 +67,7 @@ pub(super) fn bind_instance(
             connection
                 .execute(
                     "INSERT INTO observability_identity(singleton,instance_id) VALUES(1,?1)",
-                    [instance_id.as_str()],
+                    [instance_id],
                 )
                 .map_err(|_| unavailable())?;
             Ok(())

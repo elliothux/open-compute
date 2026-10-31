@@ -390,10 +390,6 @@ async fn send_text(
     assert_eq!(response.status, 200, "{}", response.body);
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "scenario helpers keep distinct fixture identities explicit"
-)]
 async fn post(
     transport: &WorkerdTransport,
     account_id: InstanceId,

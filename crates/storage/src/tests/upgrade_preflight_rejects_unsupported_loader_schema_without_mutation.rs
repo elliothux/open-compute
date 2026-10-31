@@ -46,7 +46,7 @@ fn upgrade_preflight_rejects_unsupported_loader_schema_without_mutation() {
             connection
                 .execute(
                     "UPDATE worker_versions SET loader_schema_version=1 WHERE id=?1",
-                    [version.to_string()],
+                    [version],
                 )
                 .unwrap();
             Ok(())
@@ -68,7 +68,7 @@ fn upgrade_preflight_rejects_unsupported_loader_schema_without_mutation() {
         connection
             .query_row(
                 "SELECT loader_schema_version FROM worker_versions WHERE id=?1",
-                [version.to_string()],
+                [version],
                 |row| row.get::<_, i64>(0)
             )
             .unwrap(),

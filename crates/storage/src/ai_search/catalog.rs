@@ -104,7 +104,7 @@ impl<'a> AiSearchCatalog<'a> {
             tx.execute(
                 "INSERT INTO ai_search_namespaces (resource_id, description, created_at_ms)
                  VALUES (?1, ?2, ?3) ON CONFLICT(resource_id) DO NOTHING",
-                params![resource.id.to_string(), description, resource.created_at_ms],
+                params![resource.id, description, resource.created_at_ms],
             )
             .map_err(|_| invariant())?;
             let stored = read_namespace(tx, resource)?;
@@ -134,7 +134,7 @@ impl<'a> AiSearchCatalog<'a> {
             if transaction
                 .execute(
                     "UPDATE ai_search_namespaces SET description=?1 WHERE resource_id=?2",
-                    params![description, resource_id.to_string()],
+                    params![description, resource_id],
                 )
                 .map_err(|_| invariant())?
                 != 1
@@ -146,10 +146,6 @@ impl<'a> AiSearchCatalog<'a> {
     }
 
     /// Materialize an immutable child instance locator and frozen model contract.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "SQLite boundary inputs mirror authoritative persisted fields"
-    )]
     pub fn ensure_instance(
         self,
         resource: &ResourceRecord,
@@ -172,10 +168,6 @@ impl<'a> AiSearchCatalog<'a> {
     }
 
     /// Materialize an instance and its optional immutable R2 source in one transaction.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "SQLite boundary inputs mirror authoritative persisted fields"
-    )]
     pub fn ensure_instance_with_r2_source(
         self,
         resource: &ResourceRecord,
@@ -207,10 +199,6 @@ impl<'a> AiSearchCatalog<'a> {
     }
 
     /// Materialize an instance with exactly one optional external source authority.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "SQLite boundary inputs mirror authoritative persisted fields"
-    )]
     pub fn ensure_instance_with_sources(
         self,
         resource: &ResourceRecord,
@@ -246,8 +234,8 @@ impl<'a> AiSearchCatalog<'a> {
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
                  ON CONFLICT(resource_id) DO NOTHING",
                 params![
-                    resource.id.to_string(),
-                    namespace_resource_id.to_string(),
+                    resource.id,
+                    namespace_resource_id,
                     instance_key,
                     storage_key,
                     i64::from(schema_version),
@@ -262,8 +250,8 @@ impl<'a> AiSearchCatalog<'a> {
                      (instance_resource_id, bucket_resource_id, bucket_name, created_at_ms)
                      VALUES (?1, ?2, ?3, ?4) ON CONFLICT(instance_resource_id) DO NOTHING",
                     params![
-                        resource.id.to_string(),
-                        bucket_resource_id.to_string(),
+                        resource.id,
+                        bucket_resource_id,
                         bucket_name,
                         resource.created_at_ms,
                     ],
@@ -276,7 +264,7 @@ impl<'a> AiSearchCatalog<'a> {
                      (instance_resource_id, provider_id, source_namespace, created_at_ms)
                      VALUES (?1, ?2, ?3, ?4) ON CONFLICT(instance_resource_id) DO NOTHING",
                     params![
-                        resource.id.to_string(),
+                        resource.id,
                         provider_id,
                         source_namespace,
                         resource.created_at_ms,
@@ -353,7 +341,7 @@ impl<'a> AiSearchCatalog<'a> {
                 .execute(
                     "UPDATE ai_search_instances SET model_contract_sha256=?1
                       WHERE resource_id=?2 AND model_contract_sha256=?3",
-                    params![replacement, resource_id.to_string(), expected],
+                    params![replacement, resource_id, expected],
                 )
                 .map_err(|_| invariant())?;
             Ok(updated == 1)
@@ -378,16 +366,15 @@ impl<'a> AiSearchCatalog<'a> {
                      WHERE child.namespace_resource_id=?1 AND child.instance_key=?2
                        AND (SELECT instance_id FROM instance_identity)=?3 AND resource.state != 'tombstoned'",
                     params![
-                        namespace_resource_id.to_string(),
+                        namespace_resource_id,
                         instance_key,
-                        instance_id.to_string(),
+                        instance_id,
                     ],
-                    |row| row.get::<_, String>(0),
+                    |row| row.get::<_, ResourceId>(0),
                 )
                 .optional()
                 .map_err(|_| invariant())?
                 .ok_or_else(not_found)?;
-            let resource_id = resource_id.parse::<ResourceId>().map_err(|_| invariant())?;
             let resource = read_resource_conn(connection, instance_id, resource_id)?;
             read_instance(connection, &resource)
         })
@@ -413,16 +400,13 @@ impl<'a> AiSearchCatalog<'a> {
                 .map_err(|_| invariant())?;
             let ids = statement
                 .query_map(
-                    params![namespace_resource_id.to_string(), instance_id.to_string()],
-                    |row| row.get::<_, String>(0),
+                    params![namespace_resource_id, instance_id],
+                    |row| row.get::<_, ResourceId>(0),
                 )
                 .map_err(|_| invariant())?;
             let mut records = Vec::new();
             for id in ids {
-                let id = id
-                    .map_err(|_| invariant())?
-                    .parse::<ResourceId>()
-                    .map_err(|_| invariant())?;
+                let id = id.map_err(|_| invariant())?;
                 let resource = read_resource_conn(connection, instance_id, id)?;
                 records.push(read_instance(connection, &resource)?);
             }
@@ -444,14 +428,12 @@ impl<'a> AiSearchCatalog<'a> {
                 .map_err(|_| invariant())?;
             let rows = statement
                 .query_map([], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                    Ok((row.get::<_, InstanceId>(0)?, row.get::<_, ResourceId>(1)?))
                 })
                 .map_err(|_| invariant())?;
             let mut records = Vec::new();
             for row in rows {
                 let (instance_id, resource_id) = row.map_err(|_| invariant())?;
-                let instance_id = instance_id.parse::<InstanceId>().map_err(|_| invariant())?;
-                let resource_id = resource_id.parse::<ResourceId>().map_err(|_| invariant())?;
                 let resource = read_resource_conn(connection, instance_id, resource_id)?;
                 records.push(read_instance(connection, &resource)?);
             }
@@ -473,14 +455,12 @@ impl<'a> AiSearchCatalog<'a> {
                 .map_err(|_| invariant())?;
             let rows = statement
                 .query_map([], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                    Ok((row.get::<_, InstanceId>(0)?, row.get::<_, ResourceId>(1)?))
                 })
                 .map_err(|_| invariant())?;
             let mut records = Vec::new();
             for row in rows {
                 let (instance_id, resource_id) = row.map_err(|_| invariant())?;
-                let instance_id = instance_id.parse::<InstanceId>().map_err(|_| invariant())?;
-                let resource_id = resource_id.parse::<ResourceId>().map_err(|_| invariant())?;
                 let resource = read_resource_conn(connection, instance_id, resource_id)?;
                 records.push(read_instance(connection, &resource)?);
             }
@@ -504,7 +484,7 @@ impl<'a> AiSearchCatalog<'a> {
                        WHERE child.namespace_resource_id=?1 AND (SELECT instance_id FROM instance_identity)=?2
                          AND resource.state != 'tombstoned'
                      )",
-                    params![namespace_resource_id.to_string(), instance_id.to_string()],
+                    params![namespace_resource_id, instance_id],
                     |row| row.get(0),
                 )
                 .map_err(|_| invariant())
@@ -522,7 +502,7 @@ fn read_namespace(
     let (description, created_at_ms) = connection
         .query_row(
             "SELECT description, created_at_ms FROM ai_search_namespaces WHERE resource_id=?1",
-            [resource.id.to_string()],
+            [resource.id],
             |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, i64>(1)?)),
         )
         .optional()
@@ -549,10 +529,10 @@ fn read_instance(
             "SELECT namespace_resource_id, instance_key, storage_key, schema_version,
                     model_contract_sha256, created_at_ms
              FROM ai_search_instances WHERE resource_id=?1",
-            [resource.id.to_string()],
+            [resource.id],
             |row| {
                 Ok((
-                    row.get::<_, String>(0)?,
+                    row.get::<_, ResourceId>(0)?,
                     row.get::<_, String>(1)?,
                     row.get::<_, String>(2)?,
                     row.get::<_, i64>(3)?,
@@ -571,10 +551,10 @@ fn read_instance(
         .query_row(
             "SELECT bucket_resource_id, bucket_name, created_at_ms
                FROM ai_search_r2_sources WHERE instance_resource_id=?1",
-            [resource.id.to_string()],
+            [resource.id],
             |row| {
                 Ok((
-                    row.get::<_, String>(0)?,
+                    row.get::<_, ResourceId>(0)?,
                     row.get::<_, String>(1)?,
                     row.get::<_, i64>(2)?,
                 ))
@@ -584,7 +564,7 @@ fn read_instance(
         .map_err(|_| invariant())?
         .map(|source| {
             Ok(AiSearchR2SourceRecord {
-                bucket_resource_id: source.0.parse().map_err(|_| invariant())?,
+                bucket_resource_id: source.0,
                 bucket_name: source.1,
                 created_at_ms: source.2,
             })
@@ -594,7 +574,7 @@ fn read_instance(
         .query_row(
             "SELECT provider_id, source_namespace, created_at_ms
                FROM ai_search_manual_sources WHERE instance_resource_id=?1",
-            [resource.id.to_string()],
+            [resource.id],
             |row| {
                 Ok(AiSearchManualSourceRecord {
                     provider_id: row.get(0)?,
@@ -617,7 +597,7 @@ fn read_instance(
     }
     Ok(AiSearchInstanceRecord {
         resource: resource.clone(),
-        namespace_resource_id: row.0.parse().map_err(|_| invariant())?,
+        namespace_resource_id: row.0,
         instance_key: row.1,
         storage_key: row.2,
         schema_version: u32::try_from(row.3).map_err(|_| invariant())?,

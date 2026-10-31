@@ -7,7 +7,6 @@ use open_compute_core::{
 };
 use rusqlite::{OptionalExtension, params};
 use serde::Serialize;
-use std::str::FromStr;
 
 /// Immutable product catalog row for one live Vectorize index.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -46,10 +45,6 @@ impl<'a> VectorizeIndexRepository<'a> {
     }
 
     /// Insert the immutable locator and contract for a creating Vectorize index.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "SQLite boundary inputs mirror authoritative persisted fields"
-    )]
     pub fn ensure_index(
         self,
         resource: &ResourceRecord,
@@ -73,10 +68,6 @@ impl<'a> VectorizeIndexRepository<'a> {
     }
 
     /// Insert the immutable locator and contract with an optional description.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "SQLite boundary inputs mirror authoritative persisted fields"
-    )]
     pub fn ensure_index_with_description(
         self,
         resource: &ResourceRecord,
@@ -108,7 +99,7 @@ impl<'a> VectorizeIndexRepository<'a> {
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
                  ON CONFLICT(resource_id) DO NOTHING",
                 params![
-                    resource.id.to_string(),
+                    resource.id,
                     storage_key,
                     i64::from(schema_version),
                     i64::from(dimensions),
@@ -193,19 +184,14 @@ impl<'a> VectorizeIndexRepository<'a> {
             let mut statement = conn.prepare(sql).map_err(|_| invariant())?;
             let rows = statement
                 .query_map(rusqlite::params_from_iter(parameters), |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                    Ok((row.get::<_, InstanceId>(0)?, row.get::<_, ResourceId>(1)?))
                 })
                 .map_err(|_| invariant())?;
             rows.collect::<Result<Vec<_>, _>>().map_err(|_| invariant())
         })?;
         identities
             .into_iter()
-            .map(|(instance, resource)| {
-                self.get(
-                    InstanceId::from_str(&instance).map_err(|_| invariant())?,
-                    ResourceId::from_str(&resource).map_err(|_| invariant())?,
-                )
-            })
+            .map(|(instance, resource)| self.get(instance, resource))
             .collect()
     }
 
@@ -227,7 +213,7 @@ fn read_product(
             "SELECT storage_key, schema_version, dimensions, metric, description,
                     quota_vectors, quota_bytes
              FROM vectorize_indexes WHERE resource_id = ?1",
-            [resource.id.to_string()],
+            [resource.id],
             |row| {
                 Ok((
                     row.get::<_, String>(0)?,

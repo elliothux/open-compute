@@ -95,10 +95,6 @@ impl KvEngine {
     }
 
     /// Copy a verified closed backup into a new namespace identity.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "SQLite boundary inputs mirror authoritative persisted fields"
-    )]
     pub fn restore(
         source: &Path,
         destination: &Path,

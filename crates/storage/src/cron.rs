@@ -236,7 +236,7 @@ impl<'a> CronRepository<'a> {
                 .query_row(
                     "SELECT capability_version, descriptor_sha256, created_at_ms
                      FROM version_cron_configs WHERE version_id = ?1",
-                    [version_id.to_string()],
+                    [version_id],
                     |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
                 )
                 .map_err(|_| invariant())?;
@@ -249,7 +249,7 @@ impl<'a> CronRepository<'a> {
                 )
                 .map_err(|_| invariant())?;
             let declarations = statement
-                .query_map([version_id.to_string()], map_declaration)
+                .query_map([version_id], map_declaration)
                 .map_err(|_| invariant())?
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|_| invariant())?;
@@ -272,7 +272,7 @@ impl<'a> CronRepository<'a> {
                 .query_row(
                     "SELECT COALESCE(MAX(activation_generation), 0)
                  FROM cron_activations WHERE worker_id = ?1",
-                    [worker_id.to_string()],
+                    [worker_id],
                     |row| row.get(0),
                 )
                 .map_err(|_| invariant())
@@ -297,7 +297,7 @@ impl<'a> CronRepository<'a> {
                 )
                 .map_err(|_| invariant())?;
             statement
-                .query_map([worker_id.to_string()], map_activation)
+                .query_map([worker_id], map_activation)
                 .map_err(|_| invariant())?
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|_| invariant())
@@ -314,7 +314,7 @@ impl<'a> CronRepository<'a> {
                             workflow_bindings_json, activation_generation, state, availability,
                             availability_code, created_at_ms, updated_at_ms, deleted_at_ms
                      FROM cron_activations WHERE id = ?1",
-                    [id.to_string()],
+                    [id],
                     map_activation,
                 )
                 .map_err(|_| invariant())
@@ -346,9 +346,9 @@ impl<'a> CronRepository<'a> {
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
                              'staging', 'degraded', 'CRON_PROJECTION_PENDING', ?10, ?10, NULL)",
                     params![
-                        id.to_string(),
-                        worker_id.to_string(),
-                        version_id.to_string(),
+                        id,
+                        worker_id,
+                        version_id,
                         declaration.expression,
                         declaration.expression_sha256.as_slice(),
                         i64::from(declaration.parser_version),
@@ -379,7 +379,7 @@ impl<'a> CronRepository<'a> {
                     "UPDATE cron_activations SET state = 'active', availability = 'healthy',
                             availability_code = NULL, updated_at_ms = ?1
                      WHERE worker_id = ?2 AND activation_generation = ?3 AND state = 'staging'",
-                    params![now_ms, worker_id.to_string(), as_i64(generation)?],
+                    params![now_ms, worker_id, as_i64(generation)?],
                 )
                 .map_err(|_| invariant())?;
             u64::try_from(changed).map_err(|_| invariant())
@@ -400,7 +400,7 @@ impl<'a> CronRepository<'a> {
                             availability_code = 'CRON_DRAINING', updated_at_ms = ?1
                      WHERE worker_id = ?2 AND activation_generation < ?3
                        AND state IN ('staging', 'active')",
-                    params![now_ms, worker_id.to_string(), as_i64(generation)?],
+                    params![now_ms, worker_id, as_i64(generation)?],
                 )
                 .map_err(|_| invariant())?;
             u64::try_from(changed).map_err(|_| invariant())
@@ -421,7 +421,7 @@ impl<'a> CronRepository<'a> {
                             availability_code = 'CRON_RETIRED', updated_at_ms = ?1,
                             deleted_at_ms = ?1
                      WHERE id = ?2 AND activation_generation = ?3 AND state = 'retiring'",
-                    params![now_ms, id.to_string(), as_i64(generation)?],
+                    params![now_ms, id, as_i64(generation)?],
                 )
                 .map_err(|_| invariant())?;
             Ok(changed == 1)
@@ -440,7 +440,7 @@ pub(crate) fn insert_staging_config(
          (version_id, capability_version, descriptor_sha256, created_at_ms)
          VALUES (?1, ?2, ?3, ?4)",
         params![
-            version_id.to_string(),
+            version_id,
             i64::from(config.capability_version),
             config.descriptor_sha256.as_slice(),
             now_ms,
@@ -454,8 +454,8 @@ pub(crate) fn insert_staging_config(
               scheduled_handler, workflow_bindings_json, created_at_ms)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
-                declaration.id.to_string(),
-                version_id.to_string(),
+                declaration.id,
+                version_id,
                 declaration.expression,
                 declaration.expression_sha256.as_slice(),
                 i64::from(declaration.parser_version),
@@ -479,7 +479,7 @@ fn read_activation_tx(
                 activation_generation, state,
                 availability, availability_code, created_at_ms, updated_at_ms, deleted_at_ms
          FROM cron_activations WHERE id = ?1",
-        [id.to_string()],
+        [id],
         map_activation,
     )
     .map_err(|_| invariant())
@@ -487,8 +487,8 @@ fn read_activation_tx(
 
 fn map_declaration(row: &rusqlite::Row<'_>) -> rusqlite::Result<CronDeclaration> {
     let declaration = CronDeclaration {
-        id: parse(&row.get::<_, String>(0)?)?,
-        version_id: parse(&row.get::<_, String>(1)?)?,
+        id: row.get(0)?,
+        version_id: row.get(1)?,
         expression: row.get(2)?,
         expression_sha256: digest(row.get(3)?)?,
         parser_version: unsigned(row.get(4)?)?,
@@ -511,10 +511,10 @@ fn map_declaration(row: &rusqlite::Row<'_>) -> rusqlite::Result<CronDeclaration>
 
 fn map_activation(row: &rusqlite::Row<'_>) -> rusqlite::Result<CronActivationRecord> {
     let activation = CronActivationRecord {
-        id: parse(&row.get::<_, String>(0)?)?,
-        instance_id: parse(&row.get::<_, String>(1)?)?,
-        worker_id: parse(&row.get::<_, String>(2)?)?,
-        version_id: parse(&row.get::<_, String>(3)?)?,
+        id: row.get(0)?,
+        instance_id: row.get(1)?,
+        worker_id: row.get(2)?,
+        version_id: row.get(3)?,
         expression: row.get(4)?,
         expression_sha256: digest(row.get(5)?)?,
         parser_version: unsigned(row.get(6)?)?,
@@ -570,10 +570,6 @@ fn valid_declaration(
                     .all(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
         })
         && !workflow_bindings.windows(2).any(|pair| pair[0] >= pair[1])
-}
-
-fn parse<T: FromStr>(value: &str) -> rusqlite::Result<T> {
-    value.parse().map_err(|_| rusqlite::Error::InvalidQuery)
 }
 
 fn unsigned<T: TryFrom<i64>>(value: i64) -> rusqlite::Result<T> {

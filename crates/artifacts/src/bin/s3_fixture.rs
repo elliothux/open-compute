@@ -1,6 +1,5 @@
 //! Long-lived `SigV4` network fixture for explicitly selected external conformance runs.
 
-#![deny(missing_docs)]
 #![forbid(unsafe_code)]
 
 use open_compute_artifacts::MockS3;

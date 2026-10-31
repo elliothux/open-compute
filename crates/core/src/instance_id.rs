@@ -1,6 +1,7 @@
 //! Stable instance identity persisted by the instance storage authority.
 
 use crate::error::{ErrorCode, PlatformError};
+use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSql, ToSqlOutput, ValueRef};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt::{Display, Formatter};
 use std::str::FromStr;
@@ -93,6 +94,23 @@ impl FromStr for InstanceId {
 impl Serialize for InstanceId {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_str(self.as_str())
+    }
+}
+
+impl ToSql for InstanceId {
+    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
+        Ok(ToSqlOutput::Borrowed(ValueRef::Text(
+            self.as_str().as_bytes(),
+        )))
+    }
+}
+
+impl FromSql for InstanceId {
+    fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
+        value
+            .as_str()?
+            .parse()
+            .map_err(|error| FromSqlError::Other(Box::new(error)))
     }
 }
 

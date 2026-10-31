@@ -91,3 +91,78 @@ fn workflow_operations_accept_system_random_uuid_without_relaxing_resource_ids()
         generated
     );
 }
+
+#[test]
+fn sqlite_ids_preserve_canonical_text_and_parse_errors() {
+    use rusqlite::types::{FromSql, FromSqlError, ToSql, ValueRef};
+
+    fn check<T>(id: T)
+    where
+        T: ToSql + FromSql + Display + std::fmt::Debug + PartialEq,
+    {
+        let connection = rusqlite::Connection::open_in_memory().unwrap();
+        let (stored, kind, decoded): (String, String, T) = connection
+            .query_row("SELECT ?1, typeof(?1), ?1", [&id], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })
+            .unwrap();
+        assert_eq!(stored.as_bytes(), id.to_string().as_bytes());
+        assert_eq!(kind, "text");
+        assert_eq!(decoded, id);
+        for invalid in [
+            "019C0000-0000-7000-8000-000000000001".to_owned(),
+            "not-a-uuid".to_owned(),
+        ] {
+            let error = T::column_result(ValueRef::Text(invalid.as_bytes())).unwrap_err();
+            let FromSqlError::Other(error) = error else {
+                panic!("expected the existing parse error");
+            };
+            assert!(error.downcast_ref::<PlatformError>().is_some());
+        }
+        assert!(matches!(
+            T::column_result(ValueRef::Blob(stored.as_bytes())),
+            Err(FromSqlError::InvalidType)
+        ));
+        assert!(matches!(
+            T::column_result(ValueRef::Null),
+            Err(FromSqlError::InvalidType)
+        ));
+    }
+
+    check(InstanceId::generate());
+    check(StartupId::generate());
+    check(RequestId::generate());
+    check(WorkerId::generate());
+    check(VersionId::generate());
+    check(DeploymentId::generate());
+    check(VersionUploadId::generate());
+    check(ResourceId::generate());
+    check(BindingId::generate());
+    check(ArtifactRepoId::generate());
+    check(ArtifactTokenId::generate());
+    check(QueueId::generate());
+    check(QueueMessageId::generate());
+    check(QueueConsumerId::generate());
+    check(QueueBatchId::generate());
+    check(CronActivationId::generate());
+    check(WorkflowId::generate());
+    check(WorkflowVersionId::generate());
+    check(WorkflowInstanceId::generate());
+    check(WorkflowOperationId::generate());
+    check(
+        "550e8400-e29b-41d4-a716-446655440000"
+            .parse::<WorkflowOperationId>()
+            .unwrap(),
+    );
+    check(CronRunId::generate());
+
+    for invalid in [
+        "550e8400-e29b-41d4-a716-446655440000",
+        "019c0000000070008000000000000001",
+    ] {
+        assert!(WorkerId::column_result(ValueRef::Text(invalid.as_bytes())).is_err());
+    }
+    assert!(
+        InstanceId::column_result(ValueRef::Text(b"019c0000-0000-7000-8000-000000000001")).is_err()
+    );
+}

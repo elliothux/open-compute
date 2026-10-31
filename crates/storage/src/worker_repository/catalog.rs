@@ -51,7 +51,7 @@ impl<'a> WorkerRepository<'a> {
                 .query_row(
                     "SELECT COUNT(*) FROM workers
                      WHERE (SELECT instance_id FROM instance_identity) = ?1 AND deleted_at_ms IS NULL AND ownership = 'tenant'",
-                    [instance_id.to_string()],
+                    [instance_id],
                     |row| row.get(0),
                 )
                 .map_err(|_| db_error())?;
@@ -68,7 +68,7 @@ impl<'a> WorkerRepository<'a> {
                   route_generation, created_at_ms, updated_at_ms, deleted_at_ms, ownership)
                  VALUES (?1, ?2, NULL, ?3, 1, ?4, ?4, NULL, 'tenant')",
                     params![
-                        worker_id.to_string(),
+                        worker_id,
                         name,
                         do_storage_id,
                         now_ms
@@ -86,7 +86,7 @@ impl<'a> WorkerRepository<'a> {
                  (worker_id, generation, enabled, head_sampling_rate, logs_enabled,
                   logs_head_sampling_rate, invocation_logs, persist, updated_at_ms)
                  VALUES (?1, 1, 1, NULL, 1, NULL, 1, 1, ?2)",
-                params![worker_id.to_string(), now_ms],
+                params![worker_id, now_ms],
             )
             .map_err(|_| db_error())?;
             tx.execute(
@@ -103,7 +103,7 @@ impl<'a> WorkerRepository<'a> {
                   path_prefix, entrypoint, state,
                   generation, created_at_ms, updated_at_ms, deleted_at_ms)
                  VALUES (?1, ?1, ?2, 'worker', 'local', '/', NULL, 'active', 1, ?3, ?3, NULL)",
-                params![route_id, worker_id.to_string(), now_ms],
+                params![route_id, worker_id, now_ms],
             )
             .map_err(|_| db_error())?;
             audit(
@@ -161,17 +161,13 @@ impl<'a> WorkerRepository<'a> {
                 )
                 .map_err(|_| db_error())?;
             let rows = stmt
-                .query_map([instance_id.to_string()], map_worker)
+                .query_map([instance_id], map_worker)
                 .map_err(|_| db_error())?;
             collect_rows(rows)
         })
     }
 
     /// List one bounded, filtered, and sorted page of tenant Workers.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "SQLite boundary inputs mirror authoritative persisted fields"
-    )]
     pub fn list_workers_page(
         &self,
         instance_id: InstanceId,
@@ -335,8 +331,8 @@ impl<'a> WorkerRepository<'a> {
                        updated_at_ms = excluded.updated_at_ms",
                     params![
                         record.kind.as_str(),
-                        record.worker_id.to_string(),
-                        record.active_version_id.as_ref().map(ToString::to_string),
+                        record.worker_id,
+                        record.active_version_id,
                         record.assets_sha256.as_slice(),
                         record.updated_at_ms,
                     ],
@@ -366,7 +362,7 @@ impl<'a> WorkerRepository<'a> {
                       route_generation, created_at_ms, updated_at_ms, deleted_at_ms, ownership)
                      VALUES (?1, ?2, NULL, ?3, 1, ?4, ?4, NULL, 'system')",
                     params![
-                        worker_id.to_string(),
+                        worker_id,
                         SYSTEM_DASHBOARD_WORKER_NAME,
                         do_storage_id,
                         now_ms
@@ -381,14 +377,14 @@ impl<'a> WorkerRepository<'a> {
                  (worker_id, generation, enabled, head_sampling_rate, logs_enabled,
                   logs_head_sampling_rate, invocation_logs, persist, updated_at_ms)
                  VALUES (?1, 1, 0, NULL, 0, NULL, 0, 0, ?2)",
-                params![worker_id.to_string(), now_ms],
+                params![worker_id, now_ms],
             )
             .map_err(|_| db_error())?;
             tx.execute(
                 "INSERT INTO system_owned_versions
                  (kind, worker_id, active_version_id, assets_sha256, updated_at_ms)
                  VALUES ('dashboard', ?1, NULL, zeroblob(32), ?2)",
-                params![worker_id.to_string(), now_ms],
+                params![worker_id, now_ms],
             )
             .map_err(|_| db_error())?;
             audit(
@@ -429,7 +425,7 @@ impl<'a> WorkerRepository<'a> {
                         do_storage_id, route_generation, created_at_ms, updated_at_ms, deleted_at_ms,
                         ownership, active_deployment_id
                  FROM workers WHERE id = ?1 AND (SELECT instance_id FROM instance_identity) = ?2",
-                params![worker_id.to_string(), instance_id.to_string()],
+                params![worker_id, instance_id],
                 map_worker,
             )
             .optional()
@@ -450,7 +446,7 @@ impl<'a> WorkerRepository<'a> {
                 "SELECT generation, enabled, head_sampling_rate, logs_enabled,
                         logs_head_sampling_rate, invocation_logs, persist, updated_at_ms
                  FROM worker_observability_settings WHERE worker_id = ?1",
-                [worker_id.to_string()],
+                [worker_id],
                 map_observability_settings,
             )
             .optional()
@@ -485,7 +481,7 @@ impl<'a> WorkerRepository<'a> {
                     "SELECT generation, enabled, head_sampling_rate, logs_enabled,
                             logs_head_sampling_rate, invocation_logs, persist, updated_at_ms
                      FROM worker_observability_settings WHERE worker_id = ?1",
-                    [worker_id.to_string()],
+                    [worker_id],
                     map_observability_settings,
                 )
                 .optional()
@@ -511,7 +507,7 @@ impl<'a> WorkerRepository<'a> {
                         settings.invocation_logs,
                         settings.persist,
                         now_ms,
-                        worker_id.to_string(),
+                        worker_id,
                         i64::try_from(current.generation).map_err(|_| invariant())?,
                     ],
                 )
@@ -525,7 +521,7 @@ impl<'a> WorkerRepository<'a> {
                 params![
                     i64::try_from(route_generation).map_err(|_| invariant())?,
                     now_ms,
-                    worker_id.to_string(),
+                    worker_id,
                     i64::try_from(worker.route_generation).map_err(|_| invariant())?,
                 ],
             )

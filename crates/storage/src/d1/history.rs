@@ -249,10 +249,6 @@ impl<'a> D1SnapshotRepository<'a> {
     }
 
     /// Commit one fully durable explicit checkpoint in monotonic session order.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "SQLite boundary inputs mirror authoritative persisted fields"
-    )]
     pub fn record_completed_snapshot(
         &self,
         instance_id: InstanceId,
@@ -285,7 +281,7 @@ impl<'a> D1SnapshotRepository<'a> {
                 .query_row(
                     "SELECT session_version, created_at_ms FROM d1_snapshots
                      WHERE resource_id = ?1 ORDER BY session_version DESC LIMIT 1",
-                    [resource_id.to_string()],
+                    [resource_id],
                     |row| Ok((row.get(0)?, row.get(1)?)),
                 )
                 .optional()
@@ -301,7 +297,7 @@ impl<'a> D1SnapshotRepository<'a> {
                  (resource_id, session_version, snapshot_key, sha256, size_bytes, created_at_ms)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 params![
-                    resource_id.to_string(),
+                    resource_id,
                     version,
                     snapshot_key,
                     sha256.as_slice(),
@@ -326,7 +322,7 @@ impl<'a> D1SnapshotRepository<'a> {
                 "SELECT resource_id, session_version, snapshot_key, sha256, size_bytes,
                         created_at_ms FROM d1_snapshots WHERE resource_id = ?1
                  ORDER BY session_version DESC LIMIT 1",
-                [resource_id.to_string()],
+                [resource_id],
                 map_snapshot,
             )
             .optional()
@@ -349,7 +345,7 @@ impl<'a> D1SnapshotRepository<'a> {
                 )
                 .map_err(|_| invariant())?;
             statement
-                .query_map([resource_id.to_string()], |row| row.get(0))
+                .query_map([resource_id], |row| row.get(0))
                 .map_err(|_| invariant())?
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|_| invariant())
@@ -373,7 +369,7 @@ impl<'a> D1SnapshotRepository<'a> {
                         created_at_ms FROM d1_snapshots
                  WHERE resource_id = ?1 AND created_at_ms <= ?2
                  ORDER BY created_at_ms DESC, session_version DESC LIMIT 1",
-                params![resource_id.to_string(), timestamp_ms],
+                params![resource_id, timestamp_ms],
                 map_snapshot,
             )
             .optional()
@@ -427,11 +423,7 @@ impl<'a> D1SnapshotRepository<'a> {
                             created_at_ms, updated_at_ms, completed_at_ms, error_code
                      FROM d1_transfer_sessions
                      WHERE resource_id = ?1 AND kind = ?2 AND filename = ?3",
-                    params![
-                        input.resource_id.to_string(),
-                        input.kind.as_str(),
-                        input.filename
-                    ],
+                    params![input.resource_id, input.kind.as_str(), input.filename],
                     map_transfer,
                 )
                 .optional()
@@ -465,7 +457,7 @@ impl<'a> D1SnapshotRepository<'a> {
                          ?9, ?10, NULL, NULL, NULL, NULL, NULL, ?11, ?11, NULL, NULL)",
                 params![
                     input.id,
-                    input.resource_id.to_string(),
+                    input.resource_id,
                     input.kind.as_str(),
                     initial.as_str(),
                     to_i64(input.at_session_version)?,
@@ -483,10 +475,6 @@ impl<'a> D1SnapshotRepository<'a> {
     }
 
     /// Mark an import upload verified and durable.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "SQLite boundary inputs mirror authoritative persisted fields"
-    )]
     pub fn complete_upload(
         &self,
         instance_id: InstanceId,
@@ -540,10 +528,6 @@ impl<'a> D1SnapshotRepository<'a> {
     }
 
     /// Fence an uploaded import and persist its statement count before SQL commit.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "SQLite boundary inputs mirror authoritative persisted fields"
-    )]
     pub fn begin_ingest(
         &self,
         instance_id: InstanceId,

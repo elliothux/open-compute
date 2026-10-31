@@ -10,10 +10,10 @@ impl ContainerAuthority<'_> {
     ) -> Result<(), PlatformError> {
         self.db.with_immediate(|tx| {
             require_instance(tx,instance)?;
-            let changed=tx.execute("UPDATE container_applications SET admission_paused=1,deletion_requested_at_ms=COALESCE(deletion_requested_at_ms,?2) WHERE id=?1 AND deleted_at_ms IS NULL",params![application.to_string(),now]).map_err(|_|invariant())?;
+            let changed=tx.execute("UPDATE container_applications SET admission_paused=1,deletion_requested_at_ms=COALESCE(deletion_requested_at_ms,?2) WHERE id=?1 AND deleted_at_ms IS NULL",params![application,now]).map_err(|_|invariant())?;
             if changed!=1 {return Err(not_found());}
-            tx.execute("UPDATE container_instance_leases SET state='stopping',stop_requested_at_ms=COALESCE(stop_requested_at_ms,?2),updated_at_ms=?2 WHERE application_id=?1 AND state!='stopped'",params![application.to_string(),now]).map_err(|_|invariant())?;
-            tx.execute("UPDATE container_snapshots SET state='retiring' WHERE application_id=?1",[application.to_string()]).map_err(|_|invariant())?;
+            tx.execute("UPDATE container_instance_leases SET state='stopping',stop_requested_at_ms=COALESCE(stop_requested_at_ms,?2),updated_at_ms=?2 WHERE application_id=?1 AND state!='stopped'",params![application,now]).map_err(|_|invariant())?;
+            tx.execute("UPDATE container_snapshots SET state='retiring' WHERE application_id=?1",[application]).map_err(|_|invariant())?;
             Ok(())
         })
     }
@@ -26,7 +26,7 @@ impl ContainerAuthority<'_> {
         self.db.with_read(|conn| {
             require_instance(conn,instance)?;
             let mut stmt=conn.prepare("SELECT id FROM container_applications WHERE deletion_requested_at_ms IS NOT NULL AND deleted_at_ms IS NULL ORDER BY id").map_err(|_|invariant())?;
-            stmt.query_map([],|row|{let id:String=row.get(0)?;id.parse().map_err(|_|rusqlite::Error::InvalidQuery)}).map_err(|_|invariant())?.collect::<rusqlite::Result<Vec<_>>>().map_err(|_|invariant())
+            stmt.query_map([],|row| row.get(0)).map_err(|_|invariant())?.collect::<rusqlite::Result<Vec<_>>>().map_err(|_|invariant())
         })
     }
 
@@ -39,7 +39,7 @@ impl ContainerAuthority<'_> {
     ) -> Result<(), PlatformError> {
         self.db.with_immediate(|tx| {
             require_instance(tx,instance)?;
-            let changed=tx.execute("UPDATE container_applications SET deleted_at_ms=?2 WHERE id=?1 AND deletion_requested_at_ms IS NOT NULL AND deleted_at_ms IS NULL AND NOT EXISTS(SELECT 1 FROM container_instance_leases WHERE application_id=?1 AND state!='stopped') AND NOT EXISTS(SELECT 1 FROM container_snapshots WHERE application_id=?1)",params![application.to_string(),now]).map_err(|_|invariant())?;
+            let changed=tx.execute("UPDATE container_applications SET deleted_at_ms=?2 WHERE id=?1 AND deletion_requested_at_ms IS NOT NULL AND deleted_at_ms IS NULL AND NOT EXISTS(SELECT 1 FROM container_instance_leases WHERE application_id=?1 AND state!='stopped') AND NOT EXISTS(SELECT 1 FROM container_snapshots WHERE application_id=?1)",params![application,now]).map_err(|_|invariant())?;
             if changed!=1 {return Err(invariant());} Ok(())
         })
     }

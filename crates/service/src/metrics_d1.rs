@@ -297,10 +297,6 @@ impl super::MetricsRegistry {
         values[usize::from(success)] = values[usize::from(success)].saturating_add(1);
     }
 
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "transport boundary inputs mirror the wire contract"
-    )]
     pub(crate) fn observe_d1_operation(
         &self,
         operation: D1Operation,

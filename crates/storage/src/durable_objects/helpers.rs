@@ -18,11 +18,10 @@ pub(super) fn collect_namespace_list_rows(
 pub(super) fn map_namespace_list_row(
     row: &rusqlite::Row<'_>,
 ) -> rusqlite::Result<DurableObjectNamespaceRecord> {
-    let worker: String = row.get(12)?;
     let schema: i64 = row.get(16)?;
     Ok(DurableObjectNamespaceRecord {
         resource: crate::resources::map_resource_offset(row, 0)?,
-        owner_worker_id: WorkerId::from_str(&worker).map_err(|_| rusqlite::Error::InvalidQuery)?,
+        owner_worker_id: row.get(12)?,
         class_name: row.get(13)?,
         do_storage_id: row.get(14)?,
         namespace_storage_key: row.get(15)?,
@@ -53,12 +52,11 @@ pub(super) fn read_namespace_product(
     conn.query_row(
         "SELECT owner_worker_id, class_name, do_storage_id, namespace_storage_key,
                     schema_version, created_at_ms FROM do_namespaces WHERE resource_id = ?1",
-        [resource_id.to_string()],
+        [resource_id],
         |row| {
-            let worker: String = row.get(0)?;
             let schema: i64 = row.get(4)?;
             Ok((
-                WorkerId::from_str(&worker).map_err(|_| rusqlite::Error::InvalidQuery)?,
+                row.get(0)?,
                 row.get(1)?,
                 row.get(2)?,
                 row.get(3)?,
@@ -100,7 +98,7 @@ pub(super) fn register_object_tx(
         .query_row(
             "SELECT COALESCE(MAX(generation), 0) FROM do_objects
              WHERE namespace_resource_id = ?1 AND object_id = ?2",
-            params![namespace_id.to_string(), object_id.to_string()],
+            params![namespace_id, object_id.to_string()],
             |row| row.get(0),
         )
         .map_err(|_| db_error())?;
@@ -110,12 +108,7 @@ pub(super) fn register_object_tx(
          (namespace_resource_id, object_id, generation, state,
           created_at_ms, updated_at_ms, deleted_at_ms)
          VALUES (?1, ?2, ?3, 'creating', ?4, ?4, NULL)",
-        params![
-            namespace_id.to_string(),
-            object_id.to_string(),
-            generation,
-            now_ms
-        ],
+        params![namespace_id, object_id.to_string(), generation, now_ms],
     )
     .map_err(|_| db_error())?;
     read_object(
@@ -136,7 +129,7 @@ pub(super) fn read_live_object(
                     created_at_ms, updated_at_ms, deleted_at_ms
              FROM do_objects WHERE namespace_resource_id = ?1 AND object_id = ?2
                AND state != 'tombstoned'",
-        params![namespace_id.to_string(), object_id.to_string()],
+        params![namespace_id, object_id.to_string()],
         map_object,
     )
     .optional()
@@ -155,7 +148,7 @@ pub(super) fn read_object(
              FROM do_objects WHERE namespace_resource_id = ?1 AND object_id = ?2
                AND generation = ?3",
         params![
-            namespace_id.to_string(),
+            namespace_id,
             object_id.to_string(),
             i64::try_from(generation).map_err(|_| invariant())?,
         ],
@@ -167,13 +160,11 @@ pub(super) fn read_object(
 }
 
 pub(super) fn map_object(row: &rusqlite::Row<'_>) -> rusqlite::Result<DurableObjectRecord> {
-    let namespace: String = row.get(0)?;
     let object: String = row.get(1)?;
     let generation: i64 = row.get(2)?;
     let state: String = row.get(3)?;
     Ok(DurableObjectRecord {
-        namespace_resource_id: ResourceId::from_str(&namespace)
-            .map_err(|_| rusqlite::Error::InvalidQuery)?,
+        namespace_resource_id: row.get(0)?,
         object_id: DurableObjectId::from_str(&object).map_err(|_| rusqlite::Error::InvalidQuery)?,
         generation: u64::try_from(generation).map_err(|_| rusqlite::Error::InvalidQuery)?,
         state: DurableObjectState::from_str(&state).map_err(|_| rusqlite::Error::InvalidQuery)?,

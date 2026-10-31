@@ -1,6 +1,7 @@
 //! Canonical lowercase UUID identifiers; system RPC operations also accept `UUIDv4`.
 
 use crate::error::{ErrorCode, PlatformError};
+use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSql, ToSqlOutput, ValueRef};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt::{Display, Formatter};
 use std::str::FromStr;
@@ -74,6 +75,21 @@ macro_rules! typed_id {
             fn from_str(s: &str) -> Result<Self, Self::Err> {
                 let uuid = parse_canonical_uuid(s)?;
                 Self::from_uuid(uuid)
+            }
+        }
+
+        impl ToSql for $name {
+            fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
+                Ok(ToSqlOutput::Owned(self.as_canonical_str().into()))
+            }
+        }
+
+        impl FromSql for $name {
+            fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
+                value
+                    .as_str()?
+                    .parse()
+                    .map_err(|error| FromSqlError::Other(Box::new(error)))
             }
         }
     };

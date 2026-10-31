@@ -1,9 +1,5 @@
 use super::*;
 
-#[allow(
-    clippy::type_complexity,
-    reason = "the callable signature directly models the runtime protocol"
-)]
 pub(super) fn prepare_runtime_features(
     input: &VersionRuntimeFeatures,
 ) -> Result<

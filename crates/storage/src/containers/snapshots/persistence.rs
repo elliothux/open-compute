@@ -8,7 +8,7 @@ pub(super) fn read_snapshot(
 ) -> Result<ContainerSnapshot, PlatformError> {
     conn.query_row(
         &format!("SELECT {COLUMNS} FROM container_snapshots WHERE id=?1"),
-        [id.to_string()],
+        [id],
         decode,
     )
     .optional()
@@ -29,18 +29,16 @@ pub(super) fn snapshots_conn(conn: &Connection) -> Result<Vec<ContainerSnapshot>
 }
 
 fn decode(row: &rusqlite::Row<'_>) -> rusqlite::Result<ContainerSnapshot> {
-    fn id<T: std::str::FromStr>(row: &rusqlite::Row<'_>, column: usize) -> rusqlite::Result<T> {
-        row.get::<_, String>(column)?
-            .parse()
-            .map_err(|_| rusqlite::Error::InvalidQuery)
-    }
     fn digest(row: &rusqlite::Row<'_>, column: usize) -> rusqlite::Result<Option<[u8; 32]>> {
         row.get::<_, Option<Vec<u8>>>(column)?
             .map(|bytes| bytes.try_into().map_err(|_| rusqlite::Error::InvalidQuery))
             .transpose()
     }
-    let namespace = id(row, 3)?;
-    let object: DurableObjectId = id(row, 4)?;
+    let namespace = row.get(3)?;
+    let object: DurableObjectId = row
+        .get::<_, String>(4)?
+        .parse()
+        .map_err(|_| rusqlite::Error::InvalidQuery)?;
     if !object.belongs_to(namespace) {
         return Err(rusqlite::Error::InvalidQuery);
     }
@@ -58,9 +56,9 @@ fn decode(row: &rusqlite::Row<'_>) -> rusqlite::Result<ContainerSnapshot> {
         return Err(rusqlite::Error::InvalidQuery);
     }
     Ok(ContainerSnapshot {
-        id: id(row, 0)?,
-        instance_id: id(row, 1)?,
-        application_id: id(row, 2)?,
+        id: row.get(0)?,
+        instance_id: row.get(1)?,
+        application_id: row.get(2)?,
         source: ContainerSnapshotSource {
             identity: ContainerLeaseIdentity {
                 namespace_resource_id: namespace,

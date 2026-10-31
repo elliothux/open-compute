@@ -44,7 +44,7 @@ impl ContainerAuthority<'_> {
         self.db.with_read(|conn| {
             require_instance(conn,instance)?;
             let mut stmt=conn.prepare(&format!("SELECT {LEASE_COLUMNS} FROM container_instance_leases WHERE application_id=?1 ORDER BY namespace_resource_id,object_id,object_generation,lease_generation")).map_err(|_|invariant())?;
-            stmt.query_map([application.to_string()],decode).map_err(|_|invariant())?.collect::<rusqlite::Result<Vec<_>>>().map_err(|_|invariant())
+            stmt.query_map([application],decode).map_err(|_|invariant())?.collect::<rusqlite::Result<Vec<_>>>().map_err(|_|invariant())
         })
     }
     /// Resolve an existing effective lease for the current facet without reserving capacity.
@@ -83,7 +83,7 @@ impl ContainerAuthority<'_> {
             }
             let (target, max_instances, paused): (Option<u64>,u32,bool) = tx.query_row(
                 "SELECT target_generation,max_instances,admission_paused FROM container_applications WHERE id=?1",
-                [authority.application_id.to_string()], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)),
+                [authority.application_id], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)),
             ).map_err(|_| invariant())?;
             if paused { return Err(busy()); }
             let target = target.ok_or_else(not_found)?;
@@ -106,13 +106,13 @@ impl ContainerAuthority<'_> {
             let (total, application): (u64,u64) = tx.query_row(
                 "SELECT COUNT(*),COALESCE(SUM(application_id=?1),0)
                  FROM container_instance_leases WHERE state!='stopped'",
-                [authority.application_id.to_string()], |row| Ok((row.get(0)?,row.get(1)?)),
+                [authority.application_id], |row| Ok((row.get(0)?,row.get(1)?)),
             ).map_err(|_| invariant())?;
             if total >= u64::from(instance_limit) || application >= u64::from(max_instances) { return Err(busy()); }
             let prior: u64 = tx.query_row(
                 "SELECT COALESCE(MAX(lease_generation),0) FROM container_instance_leases
                  WHERE namespace_resource_id=?1 AND object_id=?2",
-                params![authority.namespace_resource_id.to_string(),authority.object_id.to_string()], |row| row.get(0),
+                params![authority.namespace_resource_id,authority.object_id.to_string()], |row| row.get(0),
             ).map_err(|_| invariant())?;
             let generation = prior.checked_add(1).filter(|value| *value <= i64::MAX as u64).ok_or_else(invariant)?;
             tx.execute(
@@ -121,9 +121,9 @@ impl ContainerAuthority<'_> {
                   target_generation,opaque_engine_key,state,created_at_ms,updated_at_ms,
                   effective_image_sha256,effective_resources_json,enable_internet,startup_json,startup_envelope_json,snapshot_id,directory_restores_json)
                  VALUES (?1,?2,?3,?4,?5,?6,?7,'admitting',?8,?8,?9,?10,?11,?12,?13,?14,?15)",
-                params![authority.application_id.to_string(),authority.namespace_resource_id.to_string(),
+                params![authority.application_id,authority.namespace_resource_id,
                     authority.object_id.to_string(),authority.object_generation,generation,target,engine_key,now_ms,
-                    execution.image_sha256.as_slice(),resources_json,execution.enable_internet,startup_json,execution.startup_envelope,execution.startup.snapshot_id.map(|id|id.to_string()),directories_json],
+                    execution.image_sha256.as_slice(),resources_json,execution.enable_internet,startup_json,execution.startup_envelope,execution.startup.snapshot_id,directories_json],
             ).map_err(|_| invariant())?;
             read_lease(tx,ContainerLeaseIdentity {
                 namespace_resource_id: authority.namespace_resource_id,object_id: authority.object_id,
@@ -314,8 +314,8 @@ pub(super) fn require_facet_authority(
             AND o.state IN ('creating','ready') AND w.deleted_at_ms IS NULL
             AND v.state='ready' AND v.deleted_at_ms IS NULL AND d.deleted_at_ms IS NULL)",
             params![
-                authority.application_id.to_string(),
-                authority.namespace_resource_id.to_string(),
+                authority.application_id,
+                authority.namespace_resource_id,
                 authority.object_id.to_string(),
                 authority.object_generation,
                 authority.route_generation,
@@ -349,7 +349,7 @@ fn read_live(
 ) -> Result<Option<ContainerLease>, PlatformError> {
     conn.query_row(
         &format!("SELECT {LEASE_COLUMNS} FROM container_instance_leases WHERE namespace_resource_id=?1 AND object_id=?2 AND state!='stopped'"),
-        params![namespace.to_string(),object.to_string()], decode,
+        params![namespace,object.to_string()], decode,
     ).optional().map_err(|_| invariant())
 }
 
@@ -359,16 +359,12 @@ pub(super) fn read_lease(
 ) -> Result<ContainerLease, PlatformError> {
     conn.query_row(
         &format!("SELECT {LEASE_COLUMNS} FROM container_instance_leases WHERE namespace_resource_id=?1 AND object_id=?2 AND object_generation=?3 AND lease_generation=?4"),
-        params![identity.namespace_resource_id.to_string(),identity.object_id.to_string(),identity.object_generation,identity.lease_generation], decode,
+        params![identity.namespace_resource_id,identity.object_id.to_string(),identity.object_generation,identity.lease_generation], decode,
     ).optional().map_err(|_| invariant())?.ok_or_else(not_found)
 }
 
 fn decode(row: &rusqlite::Row<'_>) -> rusqlite::Result<ContainerLease> {
-    let application: String = row.get(0)?;
-    let namespace: String = row.get(1)?;
-    let namespace: ResourceId = namespace
-        .parse()
-        .map_err(|_| rusqlite::Error::InvalidQuery)?;
+    let namespace: ResourceId = row.get(1)?;
     let object: String = row.get(2)?;
     let object: DurableObjectId = object.parse().map_err(|_| rusqlite::Error::InvalidQuery)?;
     let state: String = row.get(8)?;
@@ -394,9 +390,7 @@ fn decode(row: &rusqlite::Row<'_>) -> rusqlite::Result<ContainerLease> {
         .map_err(|_| rusqlite::Error::InvalidQuery)?;
     Ok(ContainerLease {
         directory_snapshots,
-        application_id: application
-            .parse()
-            .map_err(|_| rusqlite::Error::InvalidQuery)?,
+        application_id: row.get(0)?,
         identity: ContainerLeaseIdentity {
             namespace_resource_id: namespace,
             object_id: object,

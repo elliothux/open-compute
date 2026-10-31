@@ -2,10 +2,6 @@ use super::*;
 
 impl D1SnapshotRepository<'_> {
     /// Reserve the one identity-preserving restore allowed for a database.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "SQLite boundary inputs mirror authoritative persisted fields"
-    )]
     pub fn prepare_restore(
         &self,
         instance_id: InstanceId,
@@ -50,7 +46,7 @@ impl D1SnapshotRepository<'_> {
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                 params![
                     intent_id,
-                    resource_id.to_string(),
+                    resource_id,
                     to_i64(source_session_version)?,
                     to_i64(previous_session_version)?,
                     to_i64(result_session_version)?,
@@ -92,7 +88,7 @@ impl D1SnapshotRepository<'_> {
             if tx
                 .execute(
                     "DELETE FROM d1_restore_intents WHERE resource_id = ?1 AND id = ?2",
-                    params![resource_id.to_string(), intent_id],
+                    params![resource_id, intent_id],
                 )
                 .map_err(|_| invariant())?
                 != 1

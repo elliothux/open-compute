@@ -192,10 +192,6 @@ pub fn spawn_detached_helper(exe: &Path, scope: ServiceScope) -> Result<(), Plat
 }
 
 /// Pre-command hook for interactive management CLI invocations.
-#[allow(
-    clippy::too_many_arguments,
-    reason = "CLI update-check inputs stay explicit"
-)]
 pub fn pre_command_update_check(
     no_update_check: bool,
     allow_network_refresh: bool,

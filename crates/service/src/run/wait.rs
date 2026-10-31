@@ -2,10 +2,6 @@
 
 use super::*;
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "transport boundary inputs mirror the wire contract"
-)]
 pub(super) async fn wait_instance_and_servers(
     health: &HealthCoordinator,
     supervisor: &WorkerdSupervisor,

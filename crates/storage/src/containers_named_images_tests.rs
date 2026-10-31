@@ -17,22 +17,22 @@ fn remove_application(fixture: &Fixture, application: ResourceId) {
         .with_immediate(|tx| {
             tx.execute(
                 "DELETE FROM container_application_settings WHERE application_id=?1",
-                [application.to_string()],
+                [application],
             )
             .map_err(|_| invariant())?;
             tx.execute(
                 "DELETE FROM container_target_configuration WHERE application_id=?1",
-                [application.to_string()],
+                [application],
             )
             .map_err(|_| invariant())?;
             tx.execute(
                 "DELETE FROM container_application_targets WHERE application_id=?1",
-                [application.to_string()],
+                [application],
             )
             .map_err(|_| invariant())?;
             tx.execute(
                 "DELETE FROM container_applications WHERE id=?1",
-                [application.to_string()],
+                [application],
             )
             .map_err(|_| invariant())?;
             Ok(())
@@ -76,7 +76,7 @@ fn named_container_images_are_immutable_admitted_version_authority_across_reopen
         vec![declaration.clone()]
     );
     assert!(fixture.storage.db().with_immediate(|tx| {
-        tx.execute("UPDATE version_container_images SET image_reference='changed' WHERE version_id=?1",[first.to_string()]).map_err(|_|invariant())?;
+        tx.execute("UPDATE version_container_images SET image_reference='changed' WHERE version_id=?1",[first]).map_err(|_|invariant())?;
         Ok(())
     }).is_err());
     let route = activate(&fixture.storage, fixture.worker, first);
@@ -234,7 +234,7 @@ fn named_container_images_are_immutable_admitted_version_authority_across_reopen
                 .map_err(|_| invariant())?;
             tx.execute(
                 "UPDATE version_container_images SET image_reference=?2 WHERE version_id=?1",
-                params![successor.to_string(), references["blue"]],
+                params![successor, references["blue"]],
             )
             .map_err(|_| invariant())?;
             Ok(())

@@ -17,7 +17,7 @@ impl D1SnapshotRepository<'_> {
                 .query_row(
                     "SELECT id FROM d1_transfer_sessions
                      WHERE resource_id = ?1 AND kind = ?2 AND filename = ?3",
-                    params![resource_id.to_string(), kind.as_str(), filename],
+                    params![resource_id, kind.as_str(), filename],
                     |row| row.get(0),
                 )
                 .optional()
@@ -40,10 +40,6 @@ impl D1SnapshotRepository<'_> {
     }
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "SQLite boundary inputs mirror authoritative persisted fields"
-)]
 pub(super) fn transition_file(
     db: &ControlDb,
     instance_id: InstanceId,
@@ -155,7 +151,7 @@ pub(super) fn ensure_instance_database(
             "SELECT EXISTS(SELECT 1 FROM d1_databases d JOIN resources r
              ON r.id = d.resource_id WHERE d.resource_id = ?1 AND (SELECT instance_id FROM instance_identity) = ?2
              AND r.kind = 'd1_database' AND r.state != 'tombstoned')",
-            params![resource_id.to_string(), instance_id.to_string()],
+            params![resource_id, instance_id],
             |row| row.get(0),
         )
         .map_err(|_| invariant())?;
@@ -178,7 +174,7 @@ pub(super) fn read_snapshot_optional(
     conn.query_row(
         "SELECT resource_id, session_version, snapshot_key, sha256, size_bytes, created_at_ms
          FROM d1_snapshots WHERE resource_id = ?1 AND session_version = ?2",
-        params![resource_id.to_string(), to_i64(session_version)?],
+        params![resource_id, to_i64(session_version)?],
         map_snapshot,
     )
     .optional()
@@ -192,7 +188,7 @@ pub(super) fn read_latest_snapshot(
     conn.query_row(
         "SELECT resource_id, session_version, snapshot_key, sha256, size_bytes, created_at_ms
          FROM d1_snapshots WHERE resource_id = ?1 ORDER BY session_version DESC LIMIT 1",
-        [resource_id.to_string()],
+        [resource_id],
         map_snapshot,
     )
     .optional()
@@ -200,12 +196,11 @@ pub(super) fn read_latest_snapshot(
 }
 
 pub(super) fn map_snapshot(row: &rusqlite::Row<'_>) -> rusqlite::Result<D1SnapshotRecord> {
-    let resource: String = row.get(0)?;
     let version: i64 = row.get(1)?;
     let digest: Vec<u8> = row.get(3)?;
     let size: i64 = row.get(4)?;
     Ok(D1SnapshotRecord {
-        resource_id: ResourceId::from_str(&resource).map_err(|_| rusqlite::Error::InvalidQuery)?,
+        resource_id: row.get(0)?,
         session_version: u64::try_from(version).map_err(|_| rusqlite::Error::InvalidQuery)?,
         snapshot_key: row.get(2)?,
         sha256: digest
@@ -229,7 +224,7 @@ pub(super) fn read_transfer(
                 s.created_at_ms, s.updated_at_ms, s.completed_at_ms, s.error_code
          FROM d1_transfer_sessions s JOIN resources r ON r.id = s.resource_id
          WHERE s.id = ?1 AND (SELECT instance_id FROM instance_identity) = ?2",
-        params![session_id, instance_id.to_string()],
+        params![session_id, instance_id],
         map_transfer,
     )
     .optional()
@@ -249,7 +244,7 @@ pub(super) fn read_active_transfer(
                 created_at_ms, updated_at_ms, completed_at_ms, error_code
          FROM d1_transfer_sessions WHERE resource_id = ?1
            AND state IN ('preparing', 'uploading', 'uploaded', 'ingesting')",
-        [resource_id.to_string()],
+        [resource_id],
         map_transfer,
     )
     .optional()
@@ -257,7 +252,6 @@ pub(super) fn read_active_transfer(
 }
 
 pub(super) fn map_transfer(row: &rusqlite::Row<'_>) -> rusqlite::Result<D1TransferRecord> {
-    let resource: String = row.get(1)?;
     let kind: String = row.get(2)?;
     let state: String = row.get(3)?;
     let at_version: i64 = row.get(4)?;
@@ -273,7 +267,7 @@ pub(super) fn map_transfer(row: &rusqlite::Row<'_>) -> rusqlite::Result<D1Transf
     let result_size_after: Option<i64> = row.get(18)?;
     Ok(D1TransferRecord {
         id: row.get(0)?,
-        resource_id: ResourceId::from_str(&resource).map_err(|_| rusqlite::Error::InvalidQuery)?,
+        resource_id: row.get(1)?,
         kind: D1TransferKind::from_str(&kind).map_err(|_| rusqlite::Error::InvalidQuery)?,
         state: D1TransferState::from_str(&state).map_err(|_| rusqlite::Error::InvalidQuery)?,
         at_session_version: u64::try_from(at_version).map_err(|_| rusqlite::Error::InvalidQuery)?,
@@ -332,17 +326,15 @@ pub(super) fn read_restore_optional(
         "SELECT id, resource_id, source_session_version, previous_session_version,
                 result_session_version, request_fingerprint, created_at_ms
          FROM d1_restore_intents WHERE resource_id = ?1",
-        [resource_id.to_string()],
+        [resource_id],
         |row| {
-            let resource: String = row.get(1)?;
             let source: i64 = row.get(2)?;
             let previous: i64 = row.get(3)?;
             let result: i64 = row.get(4)?;
             let fingerprint: Vec<u8> = row.get(5)?;
             Ok(D1RestoreIntent {
                 id: row.get(0)?,
-                resource_id: ResourceId::from_str(&resource)
-                    .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                resource_id: row.get(1)?,
                 source_session_version: u64::try_from(source)
                     .map_err(|_| rusqlite::Error::InvalidQuery)?,
                 previous_session_version: u64::try_from(previous)

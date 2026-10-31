@@ -181,10 +181,6 @@ pub(super) struct GateStack {
 }
 
 impl GateStack {
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "scenario helpers keep distinct fixture identities explicit"
-    )]
     pub(super) async fn start(
         storage: Arc<PlatformStorage>,
         scheduler_store: Arc<SchedulerStore>,

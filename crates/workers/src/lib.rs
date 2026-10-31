@@ -1,7 +1,5 @@
 //! P0.2 Workers control/data-plane contracts.
 
-#![deny(missing_docs)]
-
 pub mod ai_search;
 pub mod assets;
 pub mod bundle;

@@ -190,7 +190,7 @@ fn worker_migrations_publish_rename_retire_and_rollback_namespaces() {
             Ok(tx
                 .execute(
                     "UPDATE do_namespaces SET class_name = 'Corrupt' WHERE resource_id = ?1",
-                    [pending.resource.id.to_string()],
+                    [pending.resource.id],
                 )
                 .is_err())
         })
@@ -399,13 +399,13 @@ fn version_ready_and_migration_publish_are_atomic_across_failure_and_restart() {
                 .execute(
                     "UPDATE worker_do_migrations SET plan_sha256 = zeroblob(32)
                      WHERE worker_id = ?1 AND tag = ?2",
-                    rusqlite::params![worker.id.to_string(), plan.new_tag],
+                    rusqlite::params![worker.id, plan.new_tag],
                 )
                 .is_err();
             let delete_rejected = tx
                 .execute(
                     "DELETE FROM worker_do_migrations WHERE worker_id = ?1 AND tag = ?2",
-                    rusqlite::params![worker.id.to_string(), plan.new_tag],
+                    rusqlite::params![worker.id, plan.new_tag],
                 )
                 .is_err();
             Ok(update_rejected && delete_rejected)
@@ -422,7 +422,7 @@ fn version_ready_and_migration_publish_are_atomic_across_failure_and_restart() {
                     "INSERT INTO worker_do_migrations
                      (worker_id, tag, plan_sha256, version_id, created_at_ms)
                      VALUES (?1, 'invalid-v2', zeroblob(32), ?2, 105)",
-                    rusqlite::params![worker.id.to_string(), second_version.to_string()],
+                    rusqlite::params![worker.id, second_version],
                 )
                 .is_err())
         })

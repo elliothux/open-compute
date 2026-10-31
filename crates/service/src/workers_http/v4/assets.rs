@@ -430,10 +430,6 @@ fn upload_result(
     response
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "asset redemption validates one explicit signed upload command"
-)]
 pub(super) fn redeem_assets(
     api: &WorkerApiState,
     token: &str,

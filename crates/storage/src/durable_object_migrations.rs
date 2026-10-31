@@ -98,7 +98,7 @@ impl DurableObjectRepository<'_> {
             let worker: Option<(String, String, Option<i64>)> = tx
                 .query_row(
                     "SELECT (SELECT instance_id FROM instance_identity), do_storage_id, deleted_at_ms FROM workers WHERE id = ?1",
-                    [worker_id.to_string()],
+                    [worker_id],
                     |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
                 )
                 .optional()
@@ -124,7 +124,7 @@ impl DurableObjectRepository<'_> {
                 .query_row(
                     "SELECT EXISTS(SELECT 1 FROM worker_do_migrations
                      WHERE worker_id = ?1 AND tag = ?2)",
-                    params![worker_id.to_string(), plan.new_tag],
+                    params![worker_id, plan.new_tag],
                     |row| row.get(0),
                 )
                 .map_err(|_| db_error())?;
@@ -149,7 +149,7 @@ impl DurableObjectRepository<'_> {
                     .query_row(
                         "SELECT EXISTS(SELECT 1 FROM do_namespaces
                          WHERE owner_worker_id = ?1 AND class_name = ?2)",
-                        params![worker_id.to_string(), class_name],
+                        params![worker_id, class_name],
                         |row| row.get(0),
                     )
                     .map_err(|_| db_error())?;
@@ -183,7 +183,7 @@ impl DurableObjectRepository<'_> {
                         "SELECT EXISTS(SELECT 1 FROM do_namespaces
                          WHERE owner_worker_id = ?1 AND class_name = ?2
                            AND lifecycle_state = 'active')",
-                        params![worker_id.to_string(), class_name],
+                        params![worker_id, class_name],
                         |row| row.get(0),
                     )
                     .map_err(|_| db_error())?;
@@ -204,7 +204,7 @@ impl DurableObjectRepository<'_> {
         migration_tag: Option<&str>,
     ) -> Result<DurableObjectNamespaceRecord, PlatformError> {
         validate_class_name(class_name)?;
-        let resource_id: String = self.storage.db().with_read(|conn| {
+        let resource_id: ResourceId = self.storage.db().with_read(|conn| {
             conn.query_row(
                 "SELECT n.resource_id
                  FROM do_namespaces n JOIN resources r ON r.id = n.resource_id
@@ -212,22 +212,14 @@ impl DurableObjectRepository<'_> {
                    AND n.owner_worker_id = ?2 AND n.class_name = ?3
                    AND (n.lifecycle_state = 'active' OR
                         (n.lifecycle_state = 'pending' AND n.migration_tag = ?4))",
-                params![
-                    instance_id.to_string(),
-                    worker_id.to_string(),
-                    class_name,
-                    migration_tag,
-                ],
+                params![instance_id, worker_id, class_name, migration_tag,],
                 |row| row.get(0),
             )
             .optional()
             .map_err(|_| db_error())?
             .ok_or_else(namespace_not_found)
         })?;
-        self.get_namespace(
-            instance_id,
-            ResourceId::from_str(&resource_id).map_err(|_| invariant())?,
-        )
+        self.get_namespace(instance_id, resource_id)
     }
 
     /// Read the last committed Durable Object migration tag for one Worker.
@@ -269,7 +261,7 @@ impl DurableObjectRepository<'_> {
                 )
                 .map_err(|_| db_error())?;
             let rows = statement
-                .query_map(params![worker_id.to_string(), new_tag], |row| {
+                .query_map(params![worker_id, new_tag], |row| {
                     Ok((
                         row.get::<_, String>(0)?,
                         row.get::<_, String>(1)?,
@@ -355,7 +347,7 @@ pub(crate) fn validate_worker_migration_version_conn(
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM worker_do_migrations
                  WHERE worker_id = ?1 AND tag = ?2)",
-            params![worker_id.to_string(), plan.new_tag],
+            params![worker_id, plan.new_tag],
             |row| row.get(0),
         )
         .map_err(|_| db_error())?;
@@ -392,7 +384,7 @@ pub(crate) fn publish_worker_migration_tx(
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM worker_do_migrations
              WHERE worker_id = ?1 AND tag = ?2)",
-            params![worker_id.to_string(), plan.new_tag],
+            params![worker_id, plan.new_tag],
             |row| row.get(0),
         )
         .map_err(|_| db_error())?;
@@ -408,7 +400,7 @@ pub(crate) fn publish_worker_migration_tx(
         )
         .map_err(|_| db_error())?;
     let pending_rows = pending_statement
-        .query_map(params![worker_id.to_string(), plan.new_tag], |row| {
+        .query_map(params![worker_id, plan.new_tag], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
         })
         .map_err(|_| db_error())?;
@@ -437,7 +429,7 @@ pub(crate) fn publish_worker_migration_tx(
             .query_row(
                 "SELECT lifecycle_state, migration_tag FROM do_namespaces
                  WHERE owner_worker_id = ?1 AND class_name = ?2",
-                params![worker_id.to_string(), class_name],
+                params![worker_id, class_name],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .optional()
@@ -457,7 +449,7 @@ pub(crate) fn publish_worker_migration_tx(
                  WHERE owner_worker_id = ?1 AND class_name = ?2
                    AND lifecycle_state = 'pending' AND migration_tag = ?3
                    AND previous_class_name = ?4)",
-                params![worker_id.to_string(), rename.to, plan.new_tag, rename.from],
+                params![worker_id, rename.to, plan.new_tag, rename.from],
                 |row| row.get(0),
             )
             .map_err(|_| db_error())?;
@@ -471,7 +463,7 @@ pub(crate) fn publish_worker_migration_tx(
                 "SELECT EXISTS(SELECT 1 FROM do_namespaces
                  WHERE owner_worker_id = ?1 AND class_name = ?2
                    AND lifecycle_state = 'active')",
-                params![worker_id.to_string(), class_name],
+                params![worker_id, class_name],
                 |row| row.get(0),
             )
             .map_err(|_| db_error())?;
@@ -486,7 +478,7 @@ pub(crate) fn publish_worker_migration_tx(
                  previous_class_name = NULL
              WHERE owner_worker_id = ?1 AND lifecycle_state = 'pending'
                AND migration_tag = ?2",
-        params![worker_id.to_string(), plan.new_tag],
+        params![worker_id, plan.new_tag],
     )
     .map_err(|_| db_error())?;
     for class_name in &plan.deleted_classes {
@@ -495,7 +487,7 @@ pub(crate) fn publish_worker_migration_tx(
                 "UPDATE do_namespaces SET lifecycle_state = 'retired'
                  WHERE owner_worker_id = ?1 AND class_name = ?2
                    AND lifecycle_state = 'active'",
-                params![worker_id.to_string(), class_name],
+                params![worker_id, class_name],
             )
             .map_err(|_| db_error())?;
         if changed != 1 {
@@ -507,11 +499,11 @@ pub(crate) fn publish_worker_migration_tx(
          (worker_id, tag, old_tag, plan_sha256, version_id, created_at_ms)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         params![
-            worker_id.to_string(),
+            worker_id,
             plan.new_tag,
             plan.old_tag,
             plan_sha256.as_slice(),
-            version_id.to_string(),
+            version_id,
             now_ms,
         ],
     )
@@ -522,7 +514,7 @@ pub(crate) fn publish_worker_migration_tx(
          ON CONFLICT(worker_id) DO UPDATE SET
            current_tag = excluded.current_tag,
            updated_at_ms = excluded.updated_at_ms",
-        params![worker_id.to_string(), plan.new_tag, now_ms],
+        params![worker_id, plan.new_tag, now_ms],
     )
     .map_err(|_| db_error())?;
     Ok(())
@@ -532,14 +524,14 @@ fn read_migration_head(
     conn: &rusqlite::Connection,
     worker_id: WorkerId,
 ) -> Result<Option<DurableObjectMigrationHead>, PlatformError> {
-    let row: Option<(String, Option<String>, Vec<u8>, String)> = conn
+    let row: Option<(String, Option<String>, Vec<u8>, VersionId)> = conn
         .query_row(
             "SELECT h.current_tag, m.old_tag, m.plan_sha256, m.version_id
              FROM worker_do_migration_heads h
              JOIN worker_do_migrations m
                ON m.worker_id = h.worker_id AND m.tag = h.current_tag
              WHERE h.worker_id = ?1",
-            [worker_id.to_string()],
+            [worker_id],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
         )
         .optional()
@@ -549,7 +541,7 @@ fn read_migration_head(
             tag,
             old_tag,
             plan_sha256: digest.try_into().map_err(|_| invariant())?,
-            version_id: VersionId::from_str(&version).map_err(|_| invariant())?,
+            version_id: version,
         })
     })
     .transpose()
@@ -608,10 +600,6 @@ fn validate_migration_plan(plan: &DurableObjectMigrationPlan) -> Result<(), Plat
     Ok(())
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "SQLite boundary inputs mirror authoritative persisted fields"
-)]
 fn prepare_new_namespace(
     tx: &rusqlite::Transaction<'_>,
     worker_id: WorkerId,
@@ -625,7 +613,7 @@ fn prepare_new_namespace(
         .query_row(
             "SELECT resource_id, lifecycle_state, migration_tag
              FROM do_namespaces WHERE owner_worker_id = ?1 AND class_name = ?2",
-            params![worker_id.to_string(), class_name],
+            params![worker_id, class_name],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .optional()
@@ -660,8 +648,8 @@ fn prepare_new_namespace(
          VALUES (?1, 'do_namespace', ?2, 'creating', 'healthy', NULL,
                  1, ?3, ?4, ?4, NULL)",
         params![
-            resource_id.to_string(),
-            resource_id.to_string(),
+            resource_id,
+            resource_id,
             i64::from(DO_NAMESPACE_SCHEMA_VERSION),
             now_ms,
         ],
@@ -674,8 +662,8 @@ fn prepare_new_namespace(
           previous_class_name, created_at_ms)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'pending', ?7, NULL, ?8)",
         params![
-            resource_id.to_string(),
-            worker_id.to_string(),
+            resource_id,
+            worker_id,
             class_name,
             do_storage_id,
             namespace_storage_key(do_storage_id, resource_id),
@@ -688,7 +676,7 @@ fn prepare_new_namespace(
     let changed = tx
         .execute(
             "UPDATE resources SET state = 'ready', updated_at_ms = ?2 WHERE id = ?1",
-            params![resource_id.to_string(), now_ms],
+            params![resource_id, now_ms],
         )
         .map_err(|_| db_error())?;
     if changed != 1 {
@@ -710,7 +698,7 @@ fn prepare_namespace_rename(
              WHERE owner_worker_id = ?1 AND class_name = ?2
                AND lifecycle_state = 'pending' AND migration_tag = ?3
                AND previous_class_name = ?4)",
-            params![worker_id.to_string(), rename.to, migration_tag, rename.from],
+            params![worker_id, rename.to, migration_tag, rename.from],
             |row| row.get(0),
         )
         .map_err(|_| db_error())?;
@@ -721,7 +709,7 @@ fn prepare_namespace_rename(
         .query_row(
             "SELECT resource_id FROM do_namespaces
              WHERE owner_worker_id = ?1 AND class_name = ?2 AND lifecycle_state = 'active'",
-            params![worker_id.to_string(), rename.from],
+            params![worker_id, rename.from],
             |row| row.get(0),
         )
         .optional()
@@ -731,7 +719,7 @@ fn prepare_namespace_rename(
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM do_namespaces
              WHERE owner_worker_id = ?1 AND class_name = ?2)",
-            params![worker_id.to_string(), rename.to],
+            params![worker_id, rename.to],
             |row| row.get(0),
         )
         .map_err(|_| db_error())?;

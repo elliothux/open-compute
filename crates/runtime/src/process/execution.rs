@@ -28,10 +28,6 @@ pub(crate) async fn run_verified_fd(
     .await
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "runtime boundary inputs keep distinct capabilities explicit"
-)]
 pub(crate) async fn run_verified_fd_with_lease(
     file: &File,
     lease_path: &Path,

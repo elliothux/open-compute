@@ -33,10 +33,6 @@ pub(super) use super::authority::{ensure_worker, resolve_instance, worker_by_nam
 pub(super) use super::cloning::{CloneVersionOptions, clone_version};
 use super::errors::{invalid, invariant, unsupported};
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the immutable Version creation boundary keeps authority and audit inputs explicit"
-)]
 pub(super) async fn create_from_upload(
     api: &WorkerApiState,
     account_authority: &V4InstanceContext,
@@ -86,10 +82,6 @@ pub(super) async fn create_from_upload(
     }
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "transport boundary inputs mirror the wire contract"
-)]
 async fn create_from_prepared_upload(
     api: &WorkerApiState,
     account_authority: &V4InstanceContext,

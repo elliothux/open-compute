@@ -103,10 +103,6 @@ impl CfLaunch {
 }
 
 /// Resolve the execution target, certified pin, and exact project-local command.
-#[allow(
-    clippy::too_many_arguments,
-    reason = "launcher boundary mirrors the three selectors and injected authorities"
-)]
 pub async fn prepare_cf_launch(
     target: Option<&TargetName>,
     config: Option<&Path>,

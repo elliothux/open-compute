@@ -27,7 +27,7 @@ fn require_default_image_association(
 ) -> Result<(), PlatformError> {
     let named: bool = conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM version_container_images i JOIN version_containers c ON c.version_id=i.version_id AND c.namespace_resource_id=i.namespace_resource_id WHERE c.version_id=?1 AND c.namespace_resource_id=?2 AND c.application_name=?3)",
-        params![version.to_string(), namespace.to_string(), name], |row| row.get(0),
+        params![version, namespace, name], |row| row.get(0),
     ).map_err(|_| invariant())?;
     if named {
         return Err(PlatformError::new(
@@ -44,18 +44,13 @@ pub(crate) fn require_container_policy_associations(
 ) -> Result<(), PlatformError> {
     let mut stmt = conn.prepare("SELECT a.namespace_resource_id,a.name FROM container_applications a JOIN version_containers c ON c.namespace_resource_id=a.namespace_resource_id AND c.application_name=a.name WHERE c.version_id=?1 AND a.scheduling_policy='default' AND a.deleted_at_ms IS NULL").map_err(|_| invariant())?;
     let associations = stmt
-        .query_map([version.to_string()], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        .query_map([version], |row| {
+            Ok((row.get::<_, ResourceId>(0)?, row.get::<_, String>(1)?))
         })
         .map_err(|_| invariant())?;
     for association in associations {
         let (namespace, name) = association.map_err(|_| invariant())?;
-        require_default_image_association(
-            conn,
-            namespace.parse().map_err(|_| invariant())?,
-            &name,
-            version,
-        )?;
+        require_default_image_association(conn, namespace, &name, version)?;
     }
     Ok(())
 }
@@ -133,7 +128,7 @@ impl ContainerAuthority<'_> {
     ) -> Result<Option<Vec<u8>>, PlatformError> {
         self.db.with_read(|conn| {
             require_instance(conn,instance)?;
-            conn.query_row("SELECT configuration_json FROM container_target_configuration WHERE application_id=?1 AND target_generation=?2",params![application.to_string(),generation],|row|row.get(0)).optional().map_err(|_|invariant())?.ok_or_else(not_found)
+            conn.query_row("SELECT configuration_json FROM container_target_configuration WHERE application_id=?1 AND target_generation=?2",params![application,generation],|row|row.get(0)).optional().map_err(|_|invariant())?.ok_or_else(not_found)
         })
     }
     /// Read declarations for one immutable Version within the installation boundary.
@@ -145,11 +140,10 @@ impl ContainerAuthority<'_> {
         self.db.with_read(|conn| {
             require_instance(conn, instance)?;
             let mut stmt = conn.prepare("SELECT namespace_resource_id,application_name,descriptor_sha256 FROM version_containers WHERE version_id=?1 ORDER BY namespace_resource_id").map_err(|_| invariant())?;
-            let rows = stmt.query_map([version.to_string()], |row| {
-                let namespace: String = row.get(0)?;
+            let rows = stmt.query_map([version], |row| {
                 let digest: Vec<u8> = row.get(2)?;
                 Ok(VersionContainerDeclaration {
-                    namespace_resource_id: namespace.parse().map_err(|_| rusqlite::Error::InvalidQuery)?,
+                    namespace_resource_id: row.get(0)?,
                     application_name: row.get(1)?,
                     images: std::collections::BTreeMap::new(),
                     descriptor_sha256: digest.try_into().map_err(|_| rusqlite::Error::InvalidQuery)?,
@@ -158,7 +152,7 @@ impl ContainerAuthority<'_> {
             let mut declarations = rows.collect::<rusqlite::Result<Vec<_>>>().map_err(|_| invariant())?;
             for declaration in &mut declarations {
                 let mut images = conn.prepare("SELECT image_name,image_reference,image_sha256 FROM version_container_images WHERE version_id=?1 AND namespace_resource_id=?2 ORDER BY image_name").map_err(|_| invariant())?;
-                let rows = images.query_map(params![version.to_string(),declaration.namespace_resource_id.to_string()], |row| Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,Vec<u8>>(2)?))).map_err(|_| invariant())?;
+                let rows = images.query_map(params![version,declaration.namespace_resource_id], |row| Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,Vec<u8>>(2)?))).map_err(|_| invariant())?;
                 for row in rows {
                     let (name, reference, digest) = row.map_err(|_| invariant())?;
                     if registry_image_digest(&reference)?.as_slice() != digest { return Err(invariant()); }
@@ -179,9 +173,7 @@ impl ContainerAuthority<'_> {
             require_instance(conn, instance)?;
             let mut stmt = conn.prepare("SELECT id,namespace_resource_id,name,max_instances,target_generation,admission_paused,created_at_ms,scheduling_policy FROM container_applications WHERE deleted_at_ms IS NULL ORDER BY id").map_err(|_| invariant())?;
             stmt.query_map([], |row| {
-                let id: String = row.get(0)?;
-                let namespace: String = row.get(1)?;
-                Ok(ContainerApplication { id: id.parse().map_err(|_| rusqlite::Error::InvalidQuery)?, namespace_resource_id: namespace.parse().map_err(|_| rusqlite::Error::InvalidQuery)?, name: row.get(2)?, max_instances: row.get(3)?, target_generation: row.get(4)?, admission_paused: row.get(5)?, created_at_ms: row.get(6)?, scheduling_policy: match row.get::<_,String>(7)?.as_str() { "default" => ContainerSchedulingPolicy::Default, "durable_object" => ContainerSchedulingPolicy::DurableObject, _ => return Err(rusqlite::Error::InvalidQuery) } })
+                                                Ok(ContainerApplication { id: row.get(0)?, namespace_resource_id: row.get(1)?, name: row.get(2)?, max_instances: row.get(3)?, target_generation: row.get(4)?, admission_paused: row.get(5)?, created_at_ms: row.get(6)?, scheduling_policy: match row.get::<_,String>(7)?.as_str() { "default" => ContainerSchedulingPolicy::Default, "durable_object" => ContainerSchedulingPolicy::DurableObject, _ => return Err(rusqlite::Error::InvalidQuery) } })
             }).map_err(|_| invariant())?.collect::<rusqlite::Result<Vec<_>>>().map_err(|_| invariant())
         })
     }
@@ -236,7 +228,7 @@ pub(crate) fn insert_version_declarations(
         if !declaration.images.is_empty() {
             let default_application: bool = conn.query_row(
                 "SELECT EXISTS(SELECT 1 FROM container_applications WHERE namespace_resource_id=?1 AND name=?2 AND scheduling_policy='default' AND deleted_at_ms IS NULL)",
-                params![declaration.namespace_resource_id.to_string(),declaration.application_name], |row| row.get(0),
+                params![declaration.namespace_resource_id,declaration.application_name], |row| row.get(0),
             ).map_err(|_| invariant())?;
             if default_application {
                 return Err(PlatformError::new(
@@ -247,7 +239,7 @@ pub(crate) fn insert_version_declarations(
         }
         let (state, class, tag): (String, String, Option<String>) = conn.query_row(
             "SELECT n.lifecycle_state,n.class_name,n.migration_tag FROM do_namespaces n JOIN resources r ON r.id=n.resource_id AND r.state='ready' JOIN worker_versions v ON v.worker_id=n.owner_worker_id WHERE v.id=?1 AND n.resource_id=?2",
-            params![version.to_string(),declaration.namespace_resource_id.to_string()],
+            params![version,declaration.namespace_resource_id],
             |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)),
         ).map_err(|_| invariant())?;
         let prepared_tag = match state.as_str() {
@@ -264,11 +256,11 @@ pub(crate) fn insert_version_declarations(
             }
             _ => return Err(invariant()),
         };
-        conn.execute("INSERT INTO version_containers(version_id,namespace_resource_id,application_name,descriptor_sha256,prepared_migration_tag) VALUES (?1,?2,?3,?4,?5)", params![version.to_string(), declaration.namespace_resource_id.to_string(), declaration.application_name, declaration.descriptor_sha256,prepared_tag]).map_err(|_| invariant())?;
+        conn.execute("INSERT INTO version_containers(version_id,namespace_resource_id,application_name,descriptor_sha256,prepared_migration_tag) VALUES (?1,?2,?3,?4,?5)", params![version, declaration.namespace_resource_id, declaration.application_name, declaration.descriptor_sha256,prepared_tag]).map_err(|_| invariant())?;
         for (name, reference) in &declaration.images {
             let digest = registry_image_digest(reference)?;
             require_ordinary_image(conn, &digest)?;
-            conn.execute("INSERT INTO version_container_images(version_id,namespace_resource_id,image_name,image_reference,image_sha256) VALUES(?1,?2,?3,?4,?5)",params![version.to_string(),declaration.namespace_resource_id.to_string(),name,reference,digest]).map_err(|_|invariant())?;
+            conn.execute("INSERT INTO version_container_images(version_id,namespace_resource_id,image_name,image_reference,image_sha256) VALUES(?1,?2,?3,?4,?5)",params![version,declaration.namespace_resource_id,name,reference,digest]).map_err(|_|invariant())?;
         }
     }
     Ok(())
@@ -280,7 +272,7 @@ pub(crate) fn require_ready_container_namespaces(
 ) -> Result<(), PlatformError> {
     let invalid: bool = conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM version_containers c JOIN worker_versions v ON v.id=c.version_id WHERE c.version_id=?1 AND NOT EXISTS(SELECT 1 FROM do_namespaces n JOIN resources r ON r.id=n.resource_id WHERE n.resource_id=c.namespace_resource_id AND n.owner_worker_id=v.worker_id AND n.lifecycle_state='active' AND r.state='ready'))",
-        [version.to_string()], |row| row.get(0),
+        [version], |row| row.get(0),
     ).map_err(|_| invariant())?;
     if invalid {
         return Err(invariant());
@@ -300,7 +292,7 @@ impl ContainerAuthority<'_> {
     ) -> Result<Option<ContainerApplication>, PlatformError> {
         self.db.with_read(|conn| {
             require_instance(conn, instance)?;
-            let declared: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM do_namespaces n JOIN resources r ON r.id=n.resource_id AND r.state='ready' JOIN do_objects o ON o.namespace_resource_id=n.resource_id JOIN workers w ON w.id=n.owner_worker_id JOIN worker_deployments d ON d.id=w.active_deployment_id JOIN worker_versions v ON v.id=d.version_id AND v.worker_id=w.id JOIN version_containers c ON c.version_id=v.id AND c.namespace_resource_id=n.resource_id WHERE n.resource_id=?1 AND o.object_id=?2 AND o.generation=?3 AND w.route_generation=?4 AND c.application_name=?5 AND c.descriptor_sha256=?6 AND n.lifecycle_state='active' AND o.state IN ('creating','ready') AND v.state='ready' AND v.deleted_at_ms IS NULL AND w.deleted_at_ms IS NULL AND d.deleted_at_ms IS NULL)", params![declaration.namespace_resource_id.to_string(),object.to_string(),object_generation,route_generation,declaration.application_name,declaration.descriptor_sha256], |row| row.get(0)).map_err(|_| invariant())?;
+            let declared: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM do_namespaces n JOIN resources r ON r.id=n.resource_id AND r.state='ready' JOIN do_objects o ON o.namespace_resource_id=n.resource_id JOIN workers w ON w.id=n.owner_worker_id JOIN worker_deployments d ON d.id=w.active_deployment_id JOIN worker_versions v ON v.id=d.version_id AND v.worker_id=w.id JOIN version_containers c ON c.version_id=v.id AND c.namespace_resource_id=n.resource_id WHERE n.resource_id=?1 AND o.object_id=?2 AND o.generation=?3 AND w.route_generation=?4 AND c.application_name=?5 AND c.descriptor_sha256=?6 AND n.lifecycle_state='active' AND o.state IN ('creating','ready') AND v.state='ready' AND v.deleted_at_ms IS NULL AND w.deleted_at_ms IS NULL AND d.deleted_at_ms IS NULL)", params![declaration.namespace_resource_id,object.to_string(),object_generation,route_generation,declaration.application_name,declaration.descriptor_sha256], |row| row.get(0)).map_err(|_| invariant())?;
             if !declared { return Err(PlatformError::new(ErrorCode::DoVersionStale,"Container facet authority is stale or undeclared")); }
             Ok(())
         })?;
@@ -319,8 +311,8 @@ impl ContainerAuthority<'_> {
     ) -> Result<VersionId, PlatformError> {
         self.db.with_read(|conn| {
             require_instance(conn, instance)?;
-            let id: String = conn.query_row("SELECT v.id FROM do_namespaces n JOIN resources r ON r.id=n.resource_id AND r.state='ready' JOIN workers w ON w.id=n.owner_worker_id JOIN worker_deployments d ON d.id=w.active_deployment_id JOIN worker_versions v ON v.id=d.version_id AND v.worker_id=w.id JOIN version_containers c ON c.version_id=v.id AND c.namespace_resource_id=n.resource_id WHERE n.resource_id=?1 AND c.application_name=?2 AND n.lifecycle_state='active' AND v.state='ready' AND v.deleted_at_ms IS NULL AND w.deleted_at_ms IS NULL AND d.deleted_at_ms IS NULL", params![namespace.to_string(),name], |row| row.get(0)).optional().map_err(|_| invariant())?.ok_or_else(not_found)?;
-            id.parse().map_err(|_| invariant())
+            let id: VersionId = conn.query_row("SELECT v.id FROM do_namespaces n JOIN resources r ON r.id=n.resource_id AND r.state='ready' JOIN workers w ON w.id=n.owner_worker_id JOIN worker_deployments d ON d.id=w.active_deployment_id JOIN worker_versions v ON v.id=d.version_id AND v.worker_id=w.id JOIN version_containers c ON c.version_id=v.id AND c.namespace_resource_id=n.resource_id WHERE n.resource_id=?1 AND c.application_name=?2 AND n.lifecycle_state='active' AND v.state='ready' AND v.deleted_at_ms IS NULL AND w.deleted_at_ms IS NULL AND d.deleted_at_ms IS NULL", params![namespace,name], |row| row.get(0)).optional().map_err(|_| invariant())?.ok_or_else(not_found)?;
+            Ok(id)
         })
     }
 
@@ -337,9 +329,9 @@ impl ContainerAuthority<'_> {
         }
         self.db.with_immediate(|tx| {
             require_instance(tx,instance)?;
-            let changed = tx.execute("UPDATE container_applications SET max_instances=COALESCE(?2,max_instances) WHERE id=?1 AND deletion_requested_at_ms IS NULL AND deleted_at_ms IS NULL", params![application.to_string(),metadata.max_instances]).map_err(|_| invariant())?;
+            let changed = tx.execute("UPDATE container_applications SET max_instances=COALESCE(?2,max_instances) WHERE id=?1 AND deletion_requested_at_ms IS NULL AND deleted_at_ms IS NULL", params![application,metadata.max_instances]).map_err(|_| invariant())?;
             if changed != 1 { return Err(not_found()); }
-            let changed = tx.execute("UPDATE container_application_settings SET observability_logs=COALESCE(?2,observability_logs),updated_at_ms=?3 WHERE application_id=?1", params![application.to_string(),metadata.observability_logs,now_ms]).map_err(|_| invariant())?;
+            let changed = tx.execute("UPDATE container_application_settings SET observability_logs=COALESCE(?2,observability_logs),updated_at_ms=?3 WHERE application_id=?1", params![application,metadata.observability_logs,now_ms]).map_err(|_| invariant())?;
             if changed != 1 { return Err(invariant()); }
             Ok(())
         })
@@ -353,7 +345,7 @@ impl ContainerAuthority<'_> {
     ) -> Result<(Option<Vec<u8>>, bool, i64), PlatformError> {
         self.db.with_read(|conn| {
             require_instance(conn,instance)?;
-            conn.query_row("SELECT configuration_json,observability_logs,updated_at_ms FROM container_application_settings WHERE application_id=?1", [application.to_string()], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?))).optional().map_err(|_| invariant())?.ok_or_else(not_found)
+            conn.query_row("SELECT configuration_json,observability_logs,updated_at_ms FROM container_application_settings WHERE application_id=?1", [application], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?))).optional().map_err(|_| invariant())?.ok_or_else(not_found)
         })
     }
 }
@@ -384,18 +376,18 @@ impl ContainerAuthority<'_> {
         self.db.with_immediate(|tx| {
             require_instance(tx,instance)?;
             require_default_image_association(tx, application.namespace_resource_id, &application.name, spec.worker_version_id)?;
-            let active: Option<String> = tx.query_row("SELECT d.version_id FROM do_namespaces n JOIN workers w ON w.id=n.owner_worker_id JOIN worker_deployments d ON d.id=w.active_deployment_id WHERE n.resource_id=?1 AND w.deleted_at_ms IS NULL AND d.deleted_at_ms IS NULL", [application.namespace_resource_id.to_string()], |row| row.get(0)).optional().map_err(|_| invariant())?;
+            let active: Option<VersionId> = tx.query_row("SELECT d.version_id FROM do_namespaces n JOIN workers w ON w.id=n.owner_worker_id JOIN worker_deployments d ON d.id=w.active_deployment_id WHERE n.resource_id=?1 AND w.deleted_at_ms IS NULL AND d.deleted_at_ms IS NULL", [application.namespace_resource_id], |row| row.get(0)).optional().map_err(|_| invariant())?;
             if let Some(active) = active {
-                require_default_image_association(tx, application.namespace_resource_id, &application.name, active.parse().map_err(|_| invariant())?)?;
+                require_default_image_association(tx, application.namespace_resource_id, &application.name, active)?;
             }
-            let conflict:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM container_applications WHERE id!=?1 AND deleted_at_ms IS NULL AND (namespace_resource_id=?2 OR name=?3))",params![application.id.to_string(),application.namespace_resource_id.to_string(),application.name],|r|r.get(0)).map_err(|_|invariant())?;
+            let conflict:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM container_applications WHERE id!=?1 AND deleted_at_ms IS NULL AND (namespace_resource_id=?2 OR name=?3))",params![application.id,application.namespace_resource_id,application.name],|r|r.get(0)).map_err(|_|invariant())?;
             if conflict {return Err(PlatformError::new(ErrorCode::ResourceNameConflict,"Container application already exists"));}
-            tx.execute("INSERT INTO container_applications(id,namespace_resource_id,name,max_instances,created_at_ms,scheduling_policy) VALUES(?1,?2,?3,?4,?5,'default') ON CONFLICT(id) DO NOTHING", params![application.id.to_string(),application.namespace_resource_id.to_string(),application.name,application.max_instances,application.created_at_ms]).map_err(|_| invariant())?;
-            let same: bool = tx.query_row("SELECT namespace_resource_id=?2 AND name=?3 AND created_at_ms=?4 AND deletion_requested_at_ms IS NULL AND deleted_at_ms IS NULL AND scheduling_policy='default' FROM container_applications WHERE id=?1", params![application.id.to_string(),application.namespace_resource_id.to_string(),application.name,application.created_at_ms], |row|row.get(0)).map_err(|_|invariant())?;
+            tx.execute("INSERT INTO container_applications(id,namespace_resource_id,name,max_instances,created_at_ms,scheduling_policy) VALUES(?1,?2,?3,?4,?5,'default') ON CONFLICT(id) DO NOTHING", params![application.id,application.namespace_resource_id,application.name,application.max_instances,application.created_at_ms]).map_err(|_| invariant())?;
+            let same: bool = tx.query_row("SELECT namespace_resource_id=?2 AND name=?3 AND created_at_ms=?4 AND deletion_requested_at_ms IS NULL AND deleted_at_ms IS NULL AND scheduling_policy='default' FROM container_applications WHERE id=?1", params![application.id,application.namespace_resource_id,application.name,application.created_at_ms], |row|row.get(0)).map_err(|_|invariant())?;
             if !same { return Err(invariant()); }
             let target = applications::publish_target_conn(tx,application.id,spec,configuration_json,now_ms)?;
-            tx.execute("INSERT INTO container_application_settings(application_id,configuration_json,observability_logs,updated_at_ms) VALUES(?1,?2,COALESCE(?3,(SELECT observability_logs FROM container_application_settings WHERE application_id=?1)),?4) ON CONFLICT(application_id) DO UPDATE SET configuration_json=excluded.configuration_json,observability_logs=excluded.observability_logs,updated_at_ms=excluded.updated_at_ms", params![application.id.to_string(),configuration_json,metadata.observability_logs,now_ms]).map_err(|_|invariant())?;
-            tx.execute("UPDATE container_applications SET max_instances=COALESCE(?2,max_instances),admission_paused=0 WHERE id=?1", params![application.id.to_string(),metadata.max_instances]).map_err(|_|invariant())?;
+            tx.execute("INSERT INTO container_application_settings(application_id,configuration_json,observability_logs,updated_at_ms) VALUES(?1,?2,COALESCE(?3,(SELECT observability_logs FROM container_application_settings WHERE application_id=?1)),?4) ON CONFLICT(application_id) DO UPDATE SET configuration_json=excluded.configuration_json,observability_logs=excluded.observability_logs,updated_at_ms=excluded.updated_at_ms", params![application.id,configuration_json,metadata.observability_logs,now_ms]).map_err(|_|invariant())?;
+            tx.execute("UPDATE container_applications SET max_instances=COALESCE(?2,max_instances),admission_paused=0 WHERE id=?1", params![application.id,metadata.max_instances]).map_err(|_|invariant())?;
             Ok(target)
         })
     }

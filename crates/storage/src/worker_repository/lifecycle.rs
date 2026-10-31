@@ -84,7 +84,7 @@ impl<'a> WorkerRepository<'a> {
                 .execute(
                     "UPDATE worker_versions SET state = 'ready', ready_at_ms = ?1
                      WHERE id = ?2 AND worker_id = ?3 AND state = 'validating'",
-                    params![now_ms, version_id.to_string(), worker_id.to_string()],
+                    params![now_ms, version_id, worker_id],
                 )
                 .map_err(|_| db_error())?;
             if changed != 1 {
@@ -141,7 +141,7 @@ impl<'a> WorkerRepository<'a> {
                         target.as_str(),
                         now_ms,
                         rejection_code,
-                        version_id.to_string(),
+                        version_id,
                         expected.as_str()
                     ],
                 )
@@ -183,10 +183,6 @@ impl<'a> WorkerRepository<'a> {
 
     /// Promote only if both the optional active pointer and route generation still match.
     #[cfg(any(test, feature = "test-support"))]
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "SQLite boundary inputs mirror authoritative persisted fields"
-    )]
     pub fn promote_checked(
         &self,
         instance_id: InstanceId,
@@ -211,10 +207,6 @@ impl<'a> WorkerRepository<'a> {
 
     /// Promote a version for any live Worker in the instance, including system-owned Workers.
     #[cfg(any(test, feature = "test-support"))]
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "SQLite boundary inputs mirror authoritative persisted fields"
-    )]
     pub fn promote_worker_checked(
         &self,
         instance_id: InstanceId,
@@ -246,10 +238,6 @@ impl<'a> WorkerRepository<'a> {
     }
 
     /// Create one immutable 100-percent Deployment and atomically make it current.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "SQLite boundary inputs mirror authoritative persisted fields"
-    )]
     pub fn create_deployment_checked(
         &self,
         instance_id: InstanceId,
@@ -274,7 +262,7 @@ impl<'a> WorkerRepository<'a> {
             let state: Option<String> = tx
                 .query_row(
                     "SELECT state FROM worker_versions WHERE id = ?1 AND worker_id = ?2",
-                    params![target.to_string(), worker_id.to_string()],
+                    params![target, worker_id],
                     |row| row.get(0),
                 )
                 .optional()
@@ -294,7 +282,7 @@ impl<'a> WorkerRepository<'a> {
                     "SELECT EXISTS(SELECT 1 FROM worker_deployments d
                        JOIN deployment_runtime_assessments a ON a.deployment_id=d.id
                        WHERE d.worker_id=?1 AND d.version_id=?2 AND a.state='quarantined')",
-                    params![worker_id.to_string(), target.to_string()],
+                    params![worker_id, target],
                     |row| row.get(0),
                 )
                 .map_err(|_| db_error())?;
@@ -318,9 +306,9 @@ impl<'a> WorkerRepository<'a> {
                  (id, worker_id, version_id, source, annotations_json, created_at_ms, deleted_at_ms)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL)",
                 params![
-                    deployment_id.to_string(),
-                    worker_id.to_string(),
-                    target.to_string(),
+                    deployment_id,
+                    worker_id,
+                    target,
                     source.as_str(),
                     serde_json::to_vec(annotations).map_err(|_| invariant())?,
                     now_ms,
@@ -332,8 +320,8 @@ impl<'a> WorkerRepository<'a> {
                  (deployment_id, state, startup_id, reason, updated_at_ms)
                  VALUES (?1, 'dispatchable', ?2, NULL, ?3)",
                 params![
-                    deployment_id.to_string(),
-                    runtime_startup_id.to_string(),
+                    deployment_id,
+                    runtime_startup_id,
                     now_ms,
                 ],
             )
@@ -345,10 +333,10 @@ impl<'a> WorkerRepository<'a> {
                      WHERE id = ?3 AND (SELECT instance_id FROM instance_identity) = ?4 AND deleted_at_ms IS NULL
                        AND route_generation = ?5",
                     params![
-                        deployment_id.to_string(),
+                        deployment_id,
                         now_ms,
-                        worker_id.to_string(),
-                        instance_id.to_string(),
+                        worker_id,
+                        instance_id,
                         i64::try_from(current.route_generation).map_err(|_| invariant())?
                     ],
                 )
@@ -365,7 +353,7 @@ impl<'a> WorkerRepository<'a> {
                         "SELECT generation, enabled, head_sampling_rate, logs_enabled,
                                 logs_head_sampling_rate, invocation_logs, persist, updated_at_ms
                          FROM worker_observability_settings WHERE worker_id = ?1",
-                        [worker_id.to_string()],
+                        [worker_id],
                         map_observability_settings,
                     )
                     .optional()
@@ -389,7 +377,7 @@ impl<'a> WorkerRepository<'a> {
                             patch.invocation_logs.unwrap_or(current.invocation_logs),
                             patch.persist.unwrap_or(current.persist),
                             now_ms,
-                            worker_id.to_string(),
+                            worker_id,
                             i64::try_from(current.generation).map_err(|_| invariant())?,
                         ],
                     )
@@ -449,7 +437,7 @@ impl<'a> WorkerRepository<'a> {
                      JOIN worker_deployments d ON d.id=w.active_deployment_id
                      JOIN deployment_runtime_assessments a ON a.deployment_id=d.id
                      WHERE d.id=?1 AND d.deleted_at_ms IS NULL AND a.state='dispatchable'",
-                    [deployment_id.to_string()],
+                    [deployment_id],
                     |row| Ok((row.get(0)?, row.get(1)?)),
                 )
                 .optional()
@@ -465,15 +453,14 @@ impl<'a> WorkerRepository<'a> {
                      WHERE d.worker_id=?1 AND d.id!=?2 AND d.deleted_at_ms IS NULL
                        AND a.state='dispatchable' AND v.state='ready'
                      ORDER BY d.created_at_ms DESC, d.id DESC LIMIT 1",
-                    params![worker_id_text, deployment_id.to_string()],
-                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                    params![worker_id_text, deployment_id],
+                    |row| Ok((row.get::<_, DeploymentId>(0)?, row.get::<_, VersionId>(1)?)),
                 )
                 .optional()
                 .map_err(|_| db_error())?;
             let previous = if let Some((deployment, version)) = previous {
-                let version = version.parse().map_err(|_| invariant())?;
                 match crate::containers::require_container_policy_associations(tx, version) {
-                    Ok(()) => Some(deployment.parse::<DeploymentId>().map_err(|_| invariant())?),
+                    Ok(()) => Some(deployment),
                     Err(error) if error.code() == ErrorCode::ConfigInvalid => None,
                     Err(error) => return Err(error),
                 }
@@ -485,7 +472,7 @@ impl<'a> WorkerRepository<'a> {
                     "UPDATE deployment_runtime_assessments
                      SET state='quarantined', reason=?2, updated_at_ms=?3
                      WHERE deployment_id=?1 AND state='dispatchable'",
-                    params![deployment_id.to_string(), reason, now_ms],
+                    params![deployment_id, reason, now_ms],
                 )
                 .map_err(|_| db_error())?;
             if updated != 1 {
@@ -497,11 +484,11 @@ impl<'a> WorkerRepository<'a> {
                        route_generation=route_generation+1, updated_at_ms=?2
                      WHERE id=?3 AND (SELECT instance_id FROM instance_identity)=?4 AND active_deployment_id=?5",
                     params![
-                        previous.map(|value: DeploymentId| value.to_string()),
+                        previous,
                         now_ms,
                         worker_id_text,
                         account_id_text,
-                        deployment_id.to_string(),
+                        deployment_id,
                     ],
                 )
                 .map_err(|_| db_error())?;

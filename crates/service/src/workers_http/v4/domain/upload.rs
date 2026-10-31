@@ -322,10 +322,6 @@ impl UploadInput {
         Ok(())
     }
 
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "binding validation keeps each authority and reservation control explicit"
-    )]
     pub(in crate::workers_http::v4) fn apply_explicit_bindings(
         &mut self,
         api: &WorkerApiState,

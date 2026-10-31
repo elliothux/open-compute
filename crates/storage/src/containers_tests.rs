@@ -183,7 +183,7 @@ fn insert_object(storage: &PlatformStorage, namespace: ResourceId, fill: u8) -> 
     let object = DurableObjectId::for_namespace(bytes, namespace).unwrap();
     storage.db().with_immediate(|tx| {
         tx.execute("INSERT INTO do_objects(namespace_resource_id,object_id,generation,state,created_at_ms,updated_at_ms)
-                    VALUES (?1,?2,1,'ready',1,1)",params![namespace.to_string(),object.to_string()]).map_err(|_| invariant())?;
+                    VALUES (?1,?2,1,'ready',1,1)",params![namespace,object.to_string()]).map_err(|_| invariant())?;
         Ok(())
     }).unwrap();
     object

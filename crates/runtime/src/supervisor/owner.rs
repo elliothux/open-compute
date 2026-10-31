@@ -133,10 +133,6 @@ pub(crate) struct ChildHandle {
 }
 
 impl ChildHandle {
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "runtime boundary inputs keep distinct capabilities explicit"
-    )]
     pub(crate) fn start(
         child: Child,
         pid: i32,

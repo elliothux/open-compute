@@ -596,11 +596,7 @@ fn current_fence_class_corruption_fails_catalog_integrity() {
                 .map_err(sql_error)?;
             tx.execute(
                 "UPDATE workflow_bindings SET class_name=?2,descriptor_sha256=?3 WHERE id=?1",
-                params![
-                    binding.descriptor.binding_id.to_string(),
-                    "Other",
-                    digest.as_slice()
-                ],
+                params![binding.descriptor.binding_id, "Other", digest.as_slice()],
             )
             .map_err(sql_error)?;
             Ok(())
@@ -641,7 +637,7 @@ fn current_fence_version_class_corruption_fails_catalog_integrity() {
             tx.execute(
                 "UPDATE workflow_versions SET class_name=?2,descriptor_sha256=?3 WHERE id=?1",
                 params![
-                    version.target.workflow_version_id.to_string(),
+                    version.target.workflow_version_id,
                     "Other",
                     digest.as_slice()
                 ],

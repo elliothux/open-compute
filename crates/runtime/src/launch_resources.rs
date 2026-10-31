@@ -43,13 +43,6 @@ impl VerifiedLaunchImage {
 }
 
 impl ExecImage {
-    #[cfg_attr(
-        not(target_os = "macos"),
-        allow(
-            clippy::unnecessary_wraps,
-            reason = "macOS stages verified sibling resources fallibly"
-        )
-    )]
     pub(crate) fn stage_resources(
         &self,
         resources: &[(String, File)],

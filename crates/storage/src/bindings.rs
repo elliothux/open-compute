@@ -124,7 +124,7 @@ impl<'a> BindingRepository<'a> {
                      JOIN workers w ON w.id = d.worker_id
                      JOIN resources r ON r.id = b.resource_id
                      WHERE b.id = ?1 AND b.version_id = ?2",
-                    params![binding_id.to_string(), version_id.to_string()],
+                    params![binding_id, version_id],
                     |row| {
                         let binding = map_binding_offset(row, 0)?;
                         let resource = map_resource_offset(row, 11)?;
@@ -196,13 +196,12 @@ pub(crate) fn read_version_bindings_conn(
         )
         .map_err(|_| db_error())?;
     let rows = statement
-        .query_map([version_id.to_string()], |row| {
+        .query_map([version_id], |row| {
             let binding = map_binding(row)?;
             let resource_kind: String = row.get(11)?;
             let resource_generation: i64 = row.get(12)?;
             let resource_state: String = row.get(13)?;
-            let resource_account: String = row.get(14)?;
-            InstanceId::from_str(&resource_account).map_err(|_| rusqlite::Error::InvalidQuery)?;
+            row.get::<_, InstanceId>(14)?;
             let referrer: bool = row.get(15)?;
             if binding.kind.as_str() != resource_kind
                 || i64::try_from(binding.resource_spec_generation)
@@ -233,11 +232,11 @@ pub(crate) fn insert_staging_bindings(
               created_at_ms)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
-                binding.id.to_string(),
-                version_id.to_string(),
+                binding.id,
+                version_id,
                 binding.name,
                 binding.kind.as_str(),
-                binding.resource_id.to_string(),
+                binding.resource_id,
                 i64::try_from(binding.resource_spec_generation).map_err(|_| binding_invariant())?,
                 i64::from(binding.capability_version),
                 binding.permissions_json,
@@ -264,10 +263,7 @@ fn map_binding_offset(
     row: &rusqlite::Row<'_>,
     offset: usize,
 ) -> rusqlite::Result<VersionBindingRecord> {
-    let id: String = row.get(offset)?;
-    let version: String = row.get(offset + 1)?;
     let kind: String = row.get(offset + 3)?;
-    let resource: String = row.get(offset + 4)?;
     let generation: i64 = row.get(offset + 5)?;
     let capability: i64 = row.get(offset + 6)?;
     let permissions_json: Vec<u8> = row.get(offset + 7)?;
@@ -284,11 +280,11 @@ fn map_binding_offset(
         return Err(rusqlite::Error::InvalidQuery);
     }
     Ok(VersionBindingRecord {
-        id: BindingId::from_str(&id).map_err(|_| rusqlite::Error::InvalidQuery)?,
-        version_id: VersionId::from_str(&version).map_err(|_| rusqlite::Error::InvalidQuery)?,
+        id: row.get(offset)?,
+        version_id: row.get(offset + 1)?,
         name: row.get(offset + 2)?,
         kind: BindingKind::from_str(&kind).map_err(|_| rusqlite::Error::InvalidQuery)?,
-        resource_id: ResourceId::from_str(&resource).map_err(|_| rusqlite::Error::InvalidQuery)?,
+        resource_id: row.get(offset + 4)?,
         resource_spec_generation: u64::try_from(generation)
             .map_err(|_| rusqlite::Error::InvalidQuery)?,
         capability_version: u32::try_from(capability).map_err(|_| rusqlite::Error::InvalidQuery)?,
@@ -303,16 +299,14 @@ fn map_binding_offset(
 }
 
 fn map_resource_offset(row: &rusqlite::Row<'_>, offset: usize) -> rusqlite::Result<ResourceRecord> {
-    let id: String = row.get(offset)?;
-    let instance: String = row.get(offset + 1)?;
     let kind: String = row.get(offset + 2)?;
     let state: String = row.get(offset + 4)?;
     let availability: String = row.get(offset + 5)?;
     let generation: i64 = row.get(offset + 7)?;
     let schema: i64 = row.get(offset + 8)?;
     Ok(ResourceRecord {
-        id: ResourceId::from_str(&id).map_err(|_| rusqlite::Error::InvalidQuery)?,
-        instance_id: InstanceId::from_str(&instance).map_err(|_| rusqlite::Error::InvalidQuery)?,
+        id: row.get(offset)?,
+        instance_id: row.get(offset + 1)?,
         kind: BindingKind::from_str(&kind).map_err(|_| rusqlite::Error::InvalidQuery)?,
         name: row.get(offset + 3)?,
         state: ResourceState::from_str(&state).map_err(|_| rusqlite::Error::InvalidQuery)?,

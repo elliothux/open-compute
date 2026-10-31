@@ -651,7 +651,7 @@ fn bucket_usage_counts_only_committed_objects_and_replaces_their_size() {
         .with_immediate(|tx| {
             tx.execute(
                 "UPDATE r2_objects SET size_bytes = NULL WHERE resource_id = ?1",
-                [resource.id.to_string()],
+                [resource.id],
             )
             .unwrap();
             Ok(())

@@ -18,7 +18,7 @@ impl<'a> QueueConsumerRepository<'a> {
                             consumer_generation, state, availability,
                             availability_code, created_at_ms, updated_at_ms, deleted_at_ms
                      FROM queue_consumers WHERE id = ?1",
-                    [id.to_string()],
+                    [id],
                     map_record,
                 )
                 .map_err(|_| invariant())
@@ -39,7 +39,7 @@ impl<'a> QueueConsumerRepository<'a> {
                             dlq_queue_id, dlq_lifecycle_generation, capability_version,
                             descriptor_sha256, created_at_ms
                      FROM version_queue_consumers WHERE id = ?1",
-                    [id.to_string()],
+                    [id],
                     map_declaration,
                 )
                 .map_err(|_| invariant())
@@ -88,7 +88,7 @@ impl<'a> QueueConsumerRepository<'a> {
                 )
                 .map_err(|_| invariant())?;
             let rows = statement
-                .query_map([version_id.to_string()], map_declaration)
+                .query_map([version_id], map_declaration)
                 .map_err(|_| invariant())?;
             collect(rows)
         })
@@ -110,7 +110,7 @@ impl<'a> QueueConsumerRepository<'a> {
                         dlq_queue_id, dlq_lifecycle_generation, capability_version,
                         descriptor_sha256, created_at_ms
                  FROM version_queue_consumers WHERE id = ?1",
-                [declaration.id.to_string()],
+                [declaration.id],
                 map_declaration,
             )
             .map_err(|_| invariant())
@@ -131,7 +131,7 @@ impl<'a> QueueConsumerRepository<'a> {
                             consumer_generation, state, availability,
                             availability_code, created_at_ms, updated_at_ms, deleted_at_ms
                      FROM queue_consumers WHERE queue_id = ?1 AND state != 'tombstoned'",
-                    [queue_id.to_string()],
+                    [queue_id],
                     map_record,
                 )
                 .optional()
@@ -157,7 +157,7 @@ impl<'a> QueueConsumerRepository<'a> {
                 )
                 .map_err(|_| invariant())?;
             let rows = statement
-                .query_map([worker_id.to_string()], map_record)
+                .query_map([worker_id], map_record)
                 .map_err(|_| invariant())?;
             collect(rows)
         })
@@ -188,11 +188,11 @@ impl<'a> QueueConsumerRepository<'a> {
                  VALUES (?1, ?2, ?3, ?4, ?5, 1, 'activating', 'degraded',
                          'QUEUE_CONSUMER_PROJECTION_PENDING', ?6, ?6, NULL)",
                 params![
-                    id.to_string(),
-                    declaration.queue_id.to_string(),
-                    worker_id.to_string(),
-                    declaration.id.to_string(),
-                    declaration.version_id.to_string(),
+                    id,
+                    declaration.queue_id,
+                    worker_id,
+                    declaration.id,
+                    declaration.version_id,
                     now_ms,
                 ],
             )
@@ -289,12 +289,12 @@ impl<'a> QueueConsumerRepository<'a> {
                        AND state IN ('active', 'paused')",
                     params![
                         as_i64(next)?,
-                        declaration.id.to_string(),
-                        declaration.version_id.to_string(),
-                        worker_id.to_string(),
+                        declaration.id,
+                        declaration.version_id,
+                        worker_id,
                         now_ms,
-                        id.to_string(),
-                        declaration.queue_id.to_string(),
+                        id,
+                        declaration.queue_id,
                         as_i64(generation)?,
                     ],
                 )
@@ -322,11 +322,11 @@ impl<'a> QueueConsumerRepository<'a> {
                        AND state = 'updating' AND pending_declaration_id = ?1
                        AND pending_version_id = ?2",
                     params![
-                        declaration.id.to_string(),
-                        declaration.version_id.to_string(),
+                        declaration.id,
+                        declaration.version_id,
                         now_ms,
-                        id.to_string(),
-                        declaration.queue_id.to_string(),
+                        id,
+                        declaration.queue_id,
                         as_i64(generation)?,
                     ],
                 )
@@ -371,7 +371,7 @@ impl<'a> QueueConsumerRepository<'a> {
                             availability_code = 'QUEUE_CONSUMER_DRAINING', updated_at_ms = ?1
                      WHERE id = ?2 AND consumer_generation = ?3
                        AND state IN ('activating', 'active', 'paused', 'updating')",
-                    params![now_ms, id.to_string(), as_i64(generation)?],
+                    params![now_ms, id, as_i64(generation)?],
                 )
                 .map_err(|_| invariant())?;
             Ok(changed == 1)
@@ -393,7 +393,7 @@ impl<'a> QueueConsumerRepository<'a> {
                             deleted_at_ms = ?1, pending_declaration_id = NULL,
                             pending_version_id = NULL, pending_worker_id = NULL
                      WHERE id = ?2 AND consumer_generation = ?3 AND state = 'deleting'",
-                    params![now_ms, id.to_string(), as_i64(generation)?],
+                    params![now_ms, id, as_i64(generation)?],
                 )
                 .map_err(|_| invariant())?;
             Ok(changed == 1)
@@ -415,13 +415,7 @@ impl<'a> QueueConsumerRepository<'a> {
                     "UPDATE queue_consumers SET state = ?1, availability = 'healthy',
                             availability_code = NULL, updated_at_ms = ?2
                      WHERE id = ?3 AND consumer_generation = ?4 AND state = ?5",
-                    params![
-                        to.as_str(),
-                        now_ms,
-                        id.to_string(),
-                        as_i64(generation)?,
-                        from.as_str(),
-                    ],
+                    params![to.as_str(), now_ms, id, as_i64(generation)?, from.as_str(),],
                 )
                 .map_err(|_| invariant())?;
             if changed == 1

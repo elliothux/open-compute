@@ -65,9 +65,9 @@ impl WorkflowRepository<'_> {
             if current!=*operation {return Err(error(ErrorCode::WorkflowInstanceBusy));}
             if operation.kind==WorkflowOperationKind::Restart {
                 tx.execute("UPDATE workflow_instance_referrers SET state=?2,updated_at_ms=?3 WHERE instance_id=?1 AND state='restarting'",
-                    params![operation.identity.instance_id.to_string(),if operation.prior_state==WorkflowRefState::Live {"live"} else {"retained"},now_ms]).map_err(sql_error)?;
+                    params![operation.identity.instance_id,if operation.prior_state==WorkflowRefState::Live {"live"} else {"retained"},now_ms]).map_err(sql_error)?;
             }
-            tx.execute("DELETE FROM workflow_instance_operations WHERE operation_id=?1",[operation.id.to_string()]).map_err(sql_error)?;
+            tx.execute("DELETE FROM workflow_instance_operations WHERE operation_id=?1",[operation.id]).map_err(sql_error)?;
             Ok(())
         })
     }
@@ -83,7 +83,7 @@ impl WorkflowRepository<'_> {
                 OR EXISTS(SELECT 1 FROM workflow_instance_operations WHERE instance_id=?1)
                 OR EXISTS(SELECT 1 FROM version_referrers WHERE kind='workflow_instance' AND ref_id=?1)
                 OR EXISTS(SELECT 1 FROM workflow_referrers WHERE referrer_kind='instance' AND referrer_id=?1)",
-                [receipt.instance_id.to_string()],|row|row.get(0)).map_err(sql_error)?;
+                [receipt.instance_id],|row|row.get(0)).map_err(sql_error)?;
             if remaining {return Err(error(ErrorCode::WorkflowInstanceBusy));}
             Ok(WorkflowGcAcknowledgement{receipt:receipt.clone()})
         })

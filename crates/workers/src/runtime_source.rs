@@ -414,10 +414,6 @@ impl RuntimeSource {
     }
 }
 
-#[allow(
-    clippy::needless_pass_by_value,
-    reason = "the callback contract transfers ownership of this value"
-)]
 pub(crate) fn map_artifact_error(error: PlatformError) -> PlatformError {
     match error.code() {
         ErrorCode::ArtifactIntegrityError | ErrorCode::CacheEntryCorrupt => PlatformError::new(

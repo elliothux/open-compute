@@ -302,7 +302,7 @@ fn worker_repository_rejects_invalid_routes_retention_and_deletion() {
             conn.execute(
                 "INSERT INTO version_referrers
                  (version_id, kind, ref_id, created_at_ms) VALUES (?1, 'test', 'late', 31)",
-                [referenced.to_string()],
+                [referenced],
             )
             .map_err(|_| {
                 open_compute_core::PlatformError::new(ErrorCode::Internal, "test insert failed")

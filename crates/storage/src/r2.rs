@@ -76,7 +76,7 @@ impl<'a> R2BucketRepository<'a> {
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, NULL)
                  ON CONFLICT(resource_id) DO NOTHING",
                 params![
-                    resource.id.to_string(),
+                    resource.id,
                     physical_prefix,
                     i64::from(R2_SCHEMA_VERSION),
                     i64::try_from(max_object_bytes).map_err(|_| invariant())?,
@@ -114,7 +114,7 @@ impl<'a> R2BucketRepository<'a> {
                 .prepare(&format!("{SELECT_BUCKETS} ORDER BY r.name, r.id"))
                 .map_err(|_| db_error())?;
             let rows = statement
-                .query_map([instance_id.to_string()], map_bucket)
+                .query_map([instance_id], map_bucket)
                 .map_err(|_| db_error())?;
             let mut buckets = Vec::new();
             for row in rows {
@@ -125,10 +125,6 @@ impl<'a> R2BucketRepository<'a> {
     }
 
     /// List one bounded, filtered, and sorted page of buckets.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "SQLite boundary inputs mirror authoritative persisted fields"
-    )]
     pub fn list_page(
         &self,
         instance_id: InstanceId,
@@ -227,7 +223,7 @@ impl<'a> R2BucketRepository<'a> {
                      WHERE resource_id = ?2
                        AND (SELECT state FROM resources
                             WHERE id = r2_buckets.resource_id) = 'deleting'",
-                    params![now_ms, resource_id.to_string()],
+                    params![now_ms, resource_id],
                 )
                 .map_err(|_| db_error())?;
             if changed != 1 {
@@ -246,7 +242,7 @@ impl<'a> R2BucketRepository<'a> {
             let changed = tx
                 .execute(
                     "UPDATE r2_buckets SET last_probe_at_ms = ?1 WHERE resource_id = ?2",
-                    params![now_ms, resource_id.to_string()],
+                    params![now_ms, resource_id],
                 )
                 .map_err(|_| db_error())?;
             if changed != 1 {
@@ -281,7 +277,7 @@ fn read_bucket(
 ) -> Result<R2BucketRecord, PlatformError> {
     conn.query_row(
         &format!("{SELECT_BUCKETS} AND r.id = ?2"),
-        params![instance_id.to_string(), resource_id.to_string()],
+        params![instance_id, resource_id],
         map_bucket,
     )
     .optional()
@@ -303,8 +299,6 @@ fn collect_bucket_rows(
 }
 
 fn map_bucket(row: &rusqlite::Row<'_>) -> rusqlite::Result<R2BucketRecord> {
-    let resource_id: String = row.get(0)?;
-    let instance_id: String = row.get(1)?;
     let kind: String = row.get(2)?;
     let state: String = row.get(4)?;
     let availability: String = row.get(5)?;
@@ -315,9 +309,8 @@ fn map_bucket(row: &rusqlite::Row<'_>) -> rusqlite::Result<R2BucketRecord> {
     let object_authority_sha256: Vec<u8> = row.get(15)?;
     Ok(R2BucketRecord {
         resource: ResourceRecord {
-            id: ResourceId::from_str(&resource_id).map_err(|_| rusqlite::Error::InvalidQuery)?,
-            instance_id: InstanceId::from_str(&instance_id)
-                .map_err(|_| rusqlite::Error::InvalidQuery)?,
+            id: row.get(0)?,
+            instance_id: row.get(1)?,
             kind: BindingKind::from_str(&kind).map_err(|_| rusqlite::Error::InvalidQuery)?,
             name: row.get(3)?,
             state: ResourceState::from_str(&state).map_err(|_| rusqlite::Error::InvalidQuery)?,

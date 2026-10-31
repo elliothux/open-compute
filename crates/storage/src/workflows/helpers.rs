@@ -9,10 +9,6 @@ pub(crate) fn invariant() -> PlatformError {
     error(ErrorCode::WorkflowInvariantViolation)
 }
 // `Result::map_err` transfers the driver error; no raw SQL detail escapes this boundary.
-#[allow(
-    clippy::needless_pass_by_value,
-    reason = "the callback contract transfers ownership of this value"
-)]
 pub(super) fn sql_error(err: rusqlite::Error) -> PlatformError {
     let code = match err {
         rusqlite::Error::SqliteFailure(info, _)
@@ -55,8 +51,8 @@ pub(super) fn digest(row: &rusqlite::Row<'_>, index: usize) -> rusqlite::Result<
 
 pub(super) fn definition_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkflowDefinition> {
     Ok(WorkflowDefinition {
-        id: parse(row, 0)?,
-        instance_id: parse(row, 1)?,
+        id: row.get(0)?,
+        instance_id: row.get(1)?,
         name: row.get(2)?,
         state: parse(row, 3)?,
         availability: parse(row, 4)?,
@@ -71,10 +67,7 @@ pub(super) fn definition_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Workfl
             .transpose()?,
         reservation_created_definition: row.get(11)?,
         delete_fence: row.get(12)?,
-        current_version_id: row
-            .get::<_, Option<String>>(13)?
-            .map(|value| value.parse().map_err(|_| rusqlite::Error::InvalidQuery))
-            .transpose()?,
+        current_version_id: row.get(13)?,
         created_at_ms: row.get(14)?,
         updated_at_ms: row.get(15)?,
     })
@@ -82,12 +75,12 @@ pub(super) fn definition_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Workfl
 
 pub(super) fn target_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkflowTarget> {
     Ok(WorkflowTarget {
-        instance_id: parse(row, 0)?,
-        definition_id: parse(row, 1)?,
+        instance_id: row.get(0)?,
+        definition_id: row.get(1)?,
         definition_name: row.get(2)?,
-        workflow_version_id: parse(row, 3)?,
-        worker_id: parse(row, 4)?,
-        worker_version_id: parse(row, 5)?,
+        workflow_version_id: row.get(3)?,
+        worker_id: row.get(4)?,
+        worker_version_id: row.get(5)?,
         worker_code_sha256: digest(row, 6)?,
         class_name: row.get(7)?,
         loader_schema_version: row.get(8)?,

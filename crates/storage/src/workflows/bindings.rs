@@ -39,10 +39,6 @@ impl WorkflowBindingDescriptor {
 
 impl WorkflowRepository<'_> {
     /// Prepare an immutable binding from a ready same-instance definition, without inserting it yet.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "SQLite boundary inputs mirror authoritative persisted fields"
-    )]
     pub fn prepare_binding(
         &self,
         instance: InstanceId,
@@ -127,11 +123,11 @@ impl WorkflowRepository<'_> {
                 AND w.deleted_at_ms IS NULL AND EXISTS(SELECT 1 FROM instance_identity)
                 AND b.definition_lifecycle_generation=f.lifecycle_generation AND f.state='ready'
                 AND f.availability='healthy' AND v.state='ready' AND v.definition_id=f.id
-                AND v.class_name=b.class_name"),params![id.to_string(),version.to_string()],binding_row)
+                AND v.class_name=b.class_name"),params![id,version],binding_row)
                 .optional().map_err(sql_error)?.ok_or_else(||error(ErrorCode::WorkflowBindingStale))?;
             if binding.descriptor_sha256 != *expected || binding.descriptor.sha256()? != *expected { return Err(error(ErrorCode::WorkflowBindingStale)); }
             let instance = conn.query_row("SELECT (SELECT instance_id FROM instance_identity) FROM workflow_definitions WHERE id=?1",
-                [binding.descriptor.definition_id.to_string()],|row|parse(row,0)).map_err(sql_error)?;
+                [binding.descriptor.definition_id],|row|row.get(0)).map_err(sql_error)?;
             Ok((instance,binding))
         })
     }
@@ -159,7 +155,7 @@ impl WorkflowRepository<'_> {
             let existing = tx.query_row(
                 "SELECT binding_id,kind,fingerprint,request_json,state,response_json
                  FROM workflow_binding_operations WHERE operation_id=?1",
-                [operation.to_string()],
+                [operation],
                 |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, Vec<u8>>(2)?,
                     row.get::<_, Vec<u8>>(3)?, row.get::<_, String>(4)?, row.get::<_, Option<Vec<u8>>>(5)?)),
             ).optional().map_err(sql_error)?;
@@ -174,7 +170,7 @@ impl WorkflowRepository<'_> {
                         let locked: bool = tx.query_row(
                             "SELECT EXISTS(SELECT 1 FROM workflow_binding_operation_locks
                              WHERE binding_id=?1 AND operation_id=?2)",
-                            params![binding.to_string(), operation.to_string()],
+                            params![binding, operation],
                             |row| row.get(0),
                         ).map_err(sql_error)?;
                         if !locked { return Err(invariant()); }
@@ -187,11 +183,11 @@ impl WorkflowRepository<'_> {
             tx.execute(
                 "INSERT INTO workflow_binding_operations(operation_id,binding_id,kind,fingerprint,request_json,state,
                  response_json,created_at_ms,updated_at_ms) VALUES(?1,?2,?3,?4,?5,'prepared',NULL,?6,?6)",
-                params![operation.to_string(), binding.to_string(), kind, fingerprint.as_slice(), request_json, now_ms],
+                params![operation, binding, kind, fingerprint.as_slice(), request_json, now_ms],
             ).map_err(sql_error)?;
             tx.execute(
                 "INSERT INTO workflow_binding_operation_locks(binding_id,operation_id,created_at_ms) VALUES(?1,?2,?3)",
-                params![binding.to_string(), operation.to_string(), now_ms],
+                params![binding, operation, now_ms],
             ).map_err(sql_error)?;
             Ok(None)
         })
@@ -212,7 +208,7 @@ impl WorkflowRepository<'_> {
             let state = tx.query_row(
                 "SELECT state,response_json FROM workflow_binding_operations
                  WHERE operation_id=?1 AND binding_id=?2",
-                params![operation.to_string(), binding.to_string()],
+                params![operation, binding],
                 |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<Vec<u8>>>(1)?)),
             ).optional().map_err(sql_error)?.ok_or_else(invariant)?;
             if state.0 == "applied" {
@@ -228,12 +224,12 @@ impl WorkflowRepository<'_> {
             let changed = tx.execute(
                 "UPDATE workflow_binding_operations SET state='applied',response_json=?3,updated_at_ms=?4
                  WHERE operation_id=?1 AND binding_id=?2 AND state='prepared'",
-                params![operation.to_string(), binding.to_string(), response_json, now_ms],
+                params![operation, binding, response_json, now_ms],
             ).map_err(sql_error)?;
             if changed != 1 { return Err(invariant()); }
             let removed = tx.execute(
                 "DELETE FROM workflow_binding_operation_locks WHERE binding_id=?1 AND operation_id=?2",
-                params![binding.to_string(), operation.to_string()],
+                params![binding, operation],
             ).map_err(sql_error)?;
             if removed != 1 { return Err(invariant()); }
             Ok(())
@@ -254,7 +250,7 @@ pub(crate) fn insert_workflow_bindings(
         tx.execute("INSERT INTO workflow_bindings(id,version_id,name,definition_id,definition_lifecycle_generation,
             class_name,capability_version,schedules_json,descriptor_sha256,reservation_owner,reservation_fence,created_at_ms)
             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",params![
-            descriptor.binding_id.to_string(),binding.version_id.to_string(),descriptor.name,descriptor.definition_id.to_string(),
+            descriptor.binding_id,binding.version_id,descriptor.name,descriptor.definition_id,
             descriptor.definition_lifecycle_generation,descriptor.class_name,descriptor.capability_version,
             serde_json::to_vec(&descriptor.schedules).map_err(|_| invariant())?,binding.descriptor_sha256.as_slice(),
             binding.reservation_owner,binding.reservation_fence,binding.created_at_ms]).map_err(sql_error)?;
@@ -272,7 +268,7 @@ pub(crate) fn read_workflow_bindings(
         ))
         .map_err(sql_error)?;
     statement
-        .query_map([version.to_string()], binding_row)
+        .query_map([version], binding_row)
         .map_err(sql_error)?
         .collect::<Result<Vec<_>, _>>()
         .map_err(sql_error)
@@ -287,16 +283,16 @@ pub(super) fn binding_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkflowB
         descriptor: WorkflowBindingDescriptor {
             kind: open_compute_core::BindingKind::Workflow,
             schema_version: 1,
-            binding_id: parse(row, 0)?,
+            binding_id: row.get(0)?,
             name: row.get(2)?,
-            definition_id: parse(row, 3)?,
+            definition_id: row.get(3)?,
             definition_lifecycle_generation: row.get(4)?,
             class_name: row.get(5)?,
             capability_version: row.get(6)?,
             schedules: serde_json::from_slice(&row.get::<_, Vec<u8>>(7)?)
                 .map_err(|_| rusqlite::Error::InvalidQuery)?,
         },
-        version_id: parse(row, 1)?,
+        version_id: row.get(1)?,
         descriptor_sha256: digest(row, 8)?,
         reservation_owner: row.get(10)?,
         reservation_fence: row.get(11)?,

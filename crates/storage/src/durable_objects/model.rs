@@ -113,8 +113,8 @@ pub struct AuthorizedDurableObjectDelete {
 }
 
 pub(super) struct DispatchAuthorityRow {
-    pub(super) worker_id: String,
-    pub(super) active_version_id: String,
+    pub(super) worker_id: WorkerId,
+    pub(super) active_version_id: VersionId,
     pub(super) route_generation: i64,
     pub(super) worker_storage_id: String,
     pub(super) worker_code_sha256: Vec<u8>,
@@ -124,9 +124,9 @@ pub(super) struct DispatchAuthorityRow {
 }
 
 pub(super) struct AlarmDispatchAuthorityRow {
-    pub(super) instance_id: String,
-    pub(super) worker_id: String,
-    pub(super) version_id: String,
+    pub(super) instance_id: InstanceId,
+    pub(super) worker_id: WorkerId,
+    pub(super) version_id: VersionId,
     pub(super) route_generation: i64,
     pub(super) worker_code_sha256: Vec<u8>,
     pub(super) class_name: String,

@@ -12,12 +12,12 @@ impl WorkflowRepository<'_> {
         self.db.with_immediate(|tx| {
             verify_identity(tx, identity)?;
             let state: String = tx.query_row("SELECT state FROM workflow_instance_referrers WHERE instance_id=?1",
-                [identity.instance_id.to_string()], |row| row.get(0)).map_err(sql_error)?;
+                [identity.instance_id], |row| row.get(0)).map_err(sql_error)?;
             match state.as_str() {
                 "retained" => Ok(()),
                 "live" => {
                     tx.execute("UPDATE workflow_instance_referrers SET state='retained',updated_at_ms=?2 WHERE instance_id=?1",
-                        params![identity.instance_id.to_string(),now_ms]).map_err(sql_error)?;
+                        params![identity.instance_id,now_ms]).map_err(sql_error)?;
                     Ok(())
                 }
                 _ => Err(error(ErrorCode::WorkflowInstanceStateConflict)),
@@ -95,7 +95,7 @@ impl WorkflowRepository<'_> {
                 .map(|(operation, _, _)| {
                     tx.query_row(
                         &format!("{RESERVATION_SELECT} WHERE r.creation_operation_id=?1"),
-                        [operation.to_string()],
+                        [operation],
                         reservation_row,
                     )
                     .optional()
@@ -105,7 +105,7 @@ impl WorkflowRepository<'_> {
             let batch_count: usize = tx
                 .query_row(
                     "SELECT COUNT(*) FROM workflow_instance_referrers WHERE creation_batch_id=?1",
-                    [batch_operation.to_string()],
+                    [batch_operation],
                     |row| row.get(0),
                 )
                 .map_err(sql_error)?;
@@ -138,7 +138,7 @@ impl WorkflowRepository<'_> {
             }
             let version = tx.query_row(&format!("{VERSION_SELECT} WHERE (SELECT instance_id FROM instance_identity)=?1 AND f.id=?2
                 AND f.state='ready' AND f.availability='healthy' AND f.current_version_id=v.id AND v.state='ready'"),
-                params![instance.to_string(),definition.to_string()],version_row).optional().map_err(sql_error)?
+                params![instance,definition],version_row).optional().map_err(sql_error)?
                 .ok_or_else(||error(ErrorCode::WorkflowNotReady))?;
             if version_digest(&version.target)? != version.target.descriptor_sha256 { return Err(invariant()); }
             let mut operation_ids = std::collections::HashSet::with_capacity(requests.len());
@@ -159,7 +159,7 @@ impl WorkflowRepository<'_> {
                     }
                     let exists = tx.query_row(
                         "SELECT EXISTS(SELECT 1 FROM workflow_instance_referrers WHERE definition_id=?1 AND external_instance_id=?2)",
-                        params![definition.to_string(), external],
+                        params![definition, external],
                         |row| row.get::<_, bool>(0),
                     ).map_err(sql_error)?;
                     if exists {
@@ -174,7 +174,7 @@ impl WorkflowRepository<'_> {
             let (total,active,definition_total): (u64,u64,u64) = tx.query_row(
                 "SELECT COUNT(*),coalesce(SUM(r.state IN ('creating','live','restarting')),0),coalesce(SUM(r.definition_id=?2),0)
                  FROM workflow_instance_referrers r JOIN workflow_definitions f ON f.id=r.definition_id WHERE (SELECT instance_id FROM instance_identity)=?1",
-                params![instance.to_string(),definition.to_string()],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?))).map_err(sql_error)?;
+                params![instance,definition],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?))).map_err(sql_error)?;
             let added = u64::try_from(requests.len()).map_err(|_| invariant())?;
             if total.saturating_add(added) > u64::from(limits.max_instances)
                 || active.saturating_add(added) > u64::from(limits.max_active)
@@ -189,10 +189,10 @@ impl WorkflowRepository<'_> {
                 tx.execute("INSERT INTO workflow_instance_referrers(instance_id,definition_id,definition_name,external_instance_id,
                     workflow_version_id,worker_version_id,instance_generation,creation_nonce,creation_operation_id,creation_batch_id,state,
                     trigger_cron,trigger_scheduled_time_ms,created_at_ms,updated_at_ms)
-                    VALUES(?1,?2,?3,?4,?5,?6,1,?7,?8,?9,'creating',?10,?11,?12,?12)", params![identity.instance_id.to_string(),definition.to_string(),
-                    identity.target.definition_name,identity.external_instance_id,identity.target.workflow_version_id.to_string(),
-                    identity.target.worker_version_id.to_string(),identity.creation_nonce.as_bytes().as_slice(),operation.to_string(),
-                    batch_operation.to_string(),identity.schedule.as_ref().map(|value| &value.cron),
+                    VALUES(?1,?2,?3,?4,?5,?6,1,?7,?8,?9,'creating',?10,?11,?12,?12)", params![identity.instance_id,definition,
+                    identity.target.definition_name,identity.external_instance_id,identity.target.workflow_version_id,
+                    identity.target.worker_version_id,identity.creation_nonce.as_bytes().as_slice(),operation,
+                    batch_operation,identity.schedule.as_ref().map(|value| &value.cron),
                     identity.schedule.as_ref().map(|value| value.scheduled_time),now_ms]).map_err(sql_error)?;
                 reservations.push(WorkflowReservation { identity,state: WorkflowRefState::Creating,updated_at_ms: now_ms });
             }
@@ -208,7 +208,7 @@ impl WorkflowRepository<'_> {
         self.db.with_read(|conn| {
             conn.query_row(
                 &format!("{RESERVATION_SELECT} WHERE r.instance_id=?1"),
-                [id.to_string()],
+                [id],
                 reservation_row,
             )
             .optional()
@@ -228,7 +228,7 @@ impl WorkflowRepository<'_> {
                 &format!(
                     "{RESERVATION_SELECT} WHERE r.definition_id=?1 AND r.external_instance_id=?2"
                 ),
-                params![definition.to_string(), external],
+                params![definition, external],
                 reservation_row,
             )
             .optional()
@@ -265,7 +265,7 @@ impl WorkflowRepository<'_> {
             }
             let batch_count: usize = tx.query_row(
                 "SELECT COUNT(*) FROM workflow_instance_referrers WHERE creation_batch_id=?1",
-                [batch.to_string()],
+                [batch],
                 |row| row.get(0),
             ).map_err(sql_error)?;
             if batch_count != reservations.len() {
@@ -276,7 +276,7 @@ impl WorkflowRepository<'_> {
                 verify_identity(tx,reservation)?;
                 let state: String = tx.query_row(
                     "SELECT state FROM workflow_instance_referrers WHERE instance_id=?1 AND creation_nonce=?2",
-                    params![reservation.instance_id.to_string(),reservation.creation_nonce.as_bytes().as_slice()],
+                    params![reservation.instance_id,reservation.creation_nonce.as_bytes().as_slice()],
                     |row| row.get(0),
                 ).map_err(sql_error)?;
                 states.push(state);
@@ -289,7 +289,7 @@ impl WorkflowRepository<'_> {
             }
             for reservation in reservations {
                 let changed = tx.execute("UPDATE workflow_instance_referrers SET state='live',updated_at_ms=?3
-                            WHERE instance_id=?1 AND creation_nonce=?2 AND state='creating'",params![reservation.instance_id.to_string(),
+                            WHERE instance_id=?1 AND creation_nonce=?2 AND state='creating'",params![reservation.instance_id,
                             reservation.creation_nonce.as_bytes().as_slice(),now_ms]).map_err(sql_error)?;
                 if changed != 1 { return Err(invariant()); }
             }
@@ -324,7 +324,7 @@ impl WorkflowRepository<'_> {
             let batch_count: usize = tx
                 .query_row(
                     "SELECT COUNT(*) FROM workflow_instance_referrers WHERE creation_batch_id=?1",
-                    [batch.to_string()],
+                    [batch],
                     |row| row.get(0),
                 )
                 .map_err(sql_error)?;
@@ -337,7 +337,7 @@ impl WorkflowRepository<'_> {
                 let state: String = tx
                     .query_row(
                         "SELECT state FROM workflow_instance_referrers WHERE instance_id=?1",
-                        [reservation.instance_id.to_string()],
+                        [reservation.instance_id],
                         |row| row.get(0),
                     )
                     .map_err(sql_error)?;
@@ -356,9 +356,9 @@ impl WorkflowRepository<'_> {
                         "DELETE FROM workflow_instance_referrers WHERE instance_id=?1
                 AND creation_nonce=?2 AND creation_operation_id=?3 AND state='creating'",
                         params![
-                            reservation.instance_id.to_string(),
+                            reservation.instance_id,
                             reservation.creation_nonce.as_bytes().as_slice(),
-                            reservation.creation_operation_id.to_string(),
+                            reservation.creation_operation_id,
                         ],
                     )
                     .map_err(sql_error)?;
@@ -406,7 +406,7 @@ impl WorkflowRepository<'_> {
                 ))
                 .map_err(sql_error)?;
             let rows = statement
-                .query_map([batch.to_string()], reservation_row)
+                .query_map([batch], reservation_row)
                 .map_err(sql_error)?
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(sql_error)?;
@@ -433,12 +433,12 @@ impl WorkflowRepository<'_> {
     ) -> Result<(), PlatformError> {
         self.db.with_immediate(|tx| {
             let reservation = tx.query_row(&format!("{RESERVATION_SELECT} WHERE r.instance_id=?1"),
-                [identity.instance_id.to_string()],reservation_row).optional().map_err(sql_error)?.ok_or_else(invariant)?;
+                [identity.instance_id],reservation_row).optional().map_err(sql_error)?.ok_or_else(invariant)?;
             if reservation.identity != *identity || !matches!(reservation.state,WorkflowRefState::Creating|WorkflowRefState::Live) { return Err(invariant()); }
             tx.execute("INSERT OR IGNORE INTO version_referrers(version_id,kind,ref_id,created_at_ms) VALUES(?1,'workflow_instance',?2,?3)",
-                params![identity.target.worker_version_id.to_string(),identity.instance_id.to_string(),identity.created_at_ms]).map_err(sql_error)?;
+                params![identity.target.worker_version_id,identity.instance_id,identity.created_at_ms]).map_err(sql_error)?;
             tx.execute("INSERT OR IGNORE INTO workflow_referrers(definition_id,referrer_kind,referrer_id,created_at_ms) VALUES(?1,'instance',?2,?3)",
-                params![identity.target.definition_id.to_string(),identity.instance_id.to_string(),identity.created_at_ms]).map_err(sql_error)?;
+                params![identity.target.definition_id,identity.instance_id,identity.created_at_ms]).map_err(sql_error)?;
             Ok(())
         })
     }
@@ -458,7 +458,7 @@ pub(super) fn verify_identity(
     let stored = conn
         .query_row(
             &format!("{RESERVATION_SELECT} WHERE r.instance_id=?1"),
-            [identity.instance_id.to_string()],
+            [identity.instance_id],
             reservation_row,
         )
         .optional()
@@ -479,7 +479,7 @@ pub(super) fn referrers_intact(
     conn.query_row("SELECT EXISTS(SELECT 1 FROM version_referrers
         WHERE version_id=?1 AND kind='workflow_instance' AND ref_id=?2 AND created_at_ms=?4)
         AND EXISTS(SELECT 1 FROM workflow_referrers WHERE definition_id=?3 AND referrer_kind='instance' AND referrer_id=?2 AND created_at_ms=?4)",
-        params![identity.target.worker_version_id.to_string(),identity.instance_id.to_string(),identity.target.definition_id.to_string(),identity.created_at_ms],
+        params![identity.target.worker_version_id,identity.instance_id,identity.target.definition_id,identity.created_at_ms],
         |row|row.get(0)).map_err(sql_error)
 }
 
@@ -496,12 +496,12 @@ pub(super) fn reservation_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Workf
     Ok(WorkflowReservation {
         identity: WorkflowInstanceIdentity {
             target: target_row(row)?,
-            instance_id: parse(row, 11)?,
+            instance_id: row.get(11)?,
             external_instance_id: row.get(12)?,
             instance_generation: row.get(13)?,
             creation_nonce: WorkflowToken::from_bytes(digest(row, 14)?),
-            creation_operation_id: parse(row, 18)?,
-            creation_batch_id: parse(row, 19)?,
+            creation_operation_id: row.get(18)?,
+            creation_batch_id: row.get(19)?,
             created_at_ms: row.get(16)?,
             schedule: match (
                 row.get::<_, Option<String>>(20)?,

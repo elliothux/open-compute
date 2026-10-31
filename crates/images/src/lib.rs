@@ -4,8 +4,6 @@
 //! request, and owns no session or tenant authority. Callers supply verified,
 //! bounded bytes and enforce wall-clock/concurrency policy around each call.
 
-#![deny(missing_docs)]
-
 use image::codecs::jpeg::JpegEncoder;
 use image::imageops::FilterType;
 use image::metadata::Orientation;

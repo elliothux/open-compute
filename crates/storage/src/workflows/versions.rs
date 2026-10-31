@@ -16,7 +16,7 @@ impl WorkflowRepository<'_> {
         self.definition(instance, definition)?;
         self.db.with_read(|conn| {
             let mut statement = conn.prepare(&format!("{VERSION_SELECT} WHERE (SELECT instance_id FROM instance_identity)=?1 AND f.id=?2 AND v.version_number>?3 ORDER BY v.version_number LIMIT ?4")).map_err(sql_error)?;
-            let versions = statement.query_map(params![instance.to_string(),definition.to_string(),after,limit], version_row).map_err(sql_error)?.collect::<Result<Vec<_>,_>>().map_err(sql_error)?;
+            let versions = statement.query_map(params![instance,definition,after,limit], version_row).map_err(sql_error)?.collect::<Result<Vec<_>,_>>().map_err(sql_error)?;
             for version in &versions {
                 if version_digest(&version.target)? != version.target.descriptor_sha256 { return Err(invariant()); }
             }
@@ -35,7 +35,7 @@ impl WorkflowRepository<'_> {
         }
         self.db.with_read(|conn| {
             let mut statement = conn.prepare(&format!("{VERSION_SELECT} WHERE v.state='validating' AND (?1 IS NULL OR v.id>?1) ORDER BY v.id LIMIT ?2")).map_err(sql_error)?;
-            let versions = statement.query_map(params![after.map(|id|id.to_string()),limit], version_row).map_err(sql_error)?.collect::<Result<Vec<_>,_>>().map_err(sql_error)?;
+            let versions = statement.query_map(params![after,limit], version_row).map_err(sql_error)?.collect::<Result<Vec<_>,_>>().map_err(sql_error)?;
             for version in &versions {
                 if version_digest(&version.target)? != version.target.descriptor_sha256 { return Err(invariant()); }
             }
@@ -93,7 +93,7 @@ impl WorkflowRepository<'_> {
         validate_class_name(class_name)?;
         self.db.with_immediate(|tx| {
             let definition_row = tx.query_row(&format!("{DEFINITION_SELECT} WHERE id=?1 AND (SELECT instance_id FROM instance_identity)=?2"),
-                params![definition.to_string(),instance.to_string()], definition_row).optional().map_err(sql_error)?
+                params![definition,instance], definition_row).optional().map_err(sql_error)?
                 .ok_or_else(||error(ErrorCode::WorkflowNotFound))?;
             if !matches!(definition_row.state, ResourceState::Creating|ResourceState::Ready) {
                 return Err(error(ErrorCode::WorkflowNotReady));
@@ -109,7 +109,7 @@ impl WorkflowRepository<'_> {
                         "UPDATE workflow_definitions SET reservation_state='bound',updated_at_ms=?4
                          WHERE id=?1 AND reservation_owner=?2 AND reservation_fence=?3
                          AND reservation_state IN ('reserved','bound')",
-                        params![definition.to_string(),owner,fence,now_ms],
+                        params![definition,owner,fence,now_ms],
                     ).map_err(sql_error)?;
                     if changed != 1 {
                         return Err(error(ErrorCode::WorkflowVersionNotReady));
@@ -124,13 +124,13 @@ impl WorkflowRepository<'_> {
                 FROM worker_versions d JOIN workers w ON w.id=d.worker_id
                 WHERE d.id=?1 AND (SELECT instance_id FROM instance_identity)=?2
                   AND (d.state='ready' OR (?3 IS NOT NULL AND d.state='validating')) AND w.deleted_at_ms IS NULL",
-                params![version.to_string(),instance.to_string(),reservation.map(|value| value.0)], |row| {
-                    Ok((parse(row,0)?,parse(row,1)?,digest(row,2)?,row.get::<_,i64>(3)?))
+                params![version,instance,reservation.map(|value| value.0)], |row| {
+                    Ok((row.get::<_, WorkerId>(0)?,row.get::<_, VersionId>(1)?,digest(row,2)?,row.get::<_,i64>(3)?))
                 }).optional().map_err(sql_error)?.ok_or_else(||error(ErrorCode::WorkflowVersionNotReady))?;
             if let Some((owner, fence)) = reservation {
                 let existing = tx.query_row(&format!("{VERSION_SELECT} WHERE v.definition_id=?1 AND v.worker_version_id=?2
                     AND v.class_name=?3 AND v.reservation_owner=?4 AND v.reservation_fence=?5"),
-                    params![definition.to_string(),version.1.to_string(),class_name,owner,fence],version_row)
+                    params![definition,version.1,class_name,owner,fence],version_row)
                     .optional().map_err(sql_error)?;
                 if let Some(existing) = existing {
                     if version_digest(&existing.target)? != existing.target.descriptor_sha256 { return Err(invariant()); }
@@ -138,7 +138,7 @@ impl WorkflowRepository<'_> {
                 }
             }
             let version_number: i64 = tx.query_row("SELECT coalesce(MAX(version_number),0)+1 FROM workflow_versions WHERE definition_id=?1",
-                [definition.to_string()],|row|row.get(0)).map_err(sql_error)?;
+                [definition],|row|row.get(0)).map_err(sql_error)?;
             if version_number > 10000 { return Err(error(ErrorCode::QuotaExceeded)); }
             let mut target = WorkflowTarget { instance_id: instance, definition_id: definition,
                 definition_name: definition_row.name, workflow_version_id: WorkflowVersionId::generate(),
@@ -149,11 +149,11 @@ impl WorkflowRepository<'_> {
             tx.execute("INSERT INTO workflow_versions(id,definition_id,version_number,state,worker_id,worker_version_id,
                 class_name,reservation_owner,reservation_fence,worker_code_sha256,loader_schema_version,
                 capability_version,descriptor_sha256,created_at_ms)
-                VALUES(?1,?2,?3,'staging',?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)", params![target.workflow_version_id.to_string(),
-                definition.to_string(),version_number,target.worker_id.to_string(),target.worker_version_id.to_string(),
+                VALUES(?1,?2,?3,'staging',?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)", params![target.workflow_version_id,
+                definition,version_number,target.worker_id,target.worker_version_id,
                 class_name,reservation.map(|value| value.0),reservation.map(|value| value.1),
                 target.worker_code_sha256.as_slice(),target.loader_schema_version,1,target.descriptor_sha256.as_slice(),now_ms]).map_err(sql_error)?;
-            tx.execute("UPDATE workflow_versions SET state='validating' WHERE id=?1",[target.workflow_version_id.to_string()]).map_err(sql_error)?;
+            tx.execute("UPDATE workflow_versions SET state='validating' WHERE id=?1",[target.workflow_version_id]).map_err(sql_error)?;
             Ok(WorkflowVersion { target, version_number, state: VersionState::Validating,
                 created_at_ms: now_ms, rejection_code: None,
                 reservation_owner: reservation.map(|value| value.0.to_owned()),
@@ -170,7 +170,7 @@ impl WorkflowRepository<'_> {
         let version = self.db.with_read(|conn| {
             conn.query_row(
                 &format!("{VERSION_SELECT} WHERE (SELECT instance_id FROM instance_identity)=?1 AND v.id=?2"),
-                params![instance.to_string(), id.to_string()],
+                params![instance, id],
                 version_row,
             )
             .optional()
@@ -193,13 +193,13 @@ impl WorkflowRepository<'_> {
     ) -> Result<WorkflowVersion, PlatformError> {
         self.db.with_immediate(|tx| {
             let version = tx.query_row(&format!("{VERSION_SELECT} WHERE (SELECT instance_id FROM instance_identity)=?1 AND v.id=?2"),
-                params![instance.to_string(),id.to_string()],version_row).optional().map_err(sql_error)?
+                params![instance,id],version_row).optional().map_err(sql_error)?
                 .ok_or_else(||error(ErrorCode::WorkflowVersionNotReady))?;
             if version.state == if accepted { VersionState::Ready } else { VersionState::Rejected } { return Ok(version); }
             if version.state != VersionState::Validating { return Err(error(ErrorCode::WorkflowVersionNotReady)); }
             let definition = tx.query_row(
                 &format!("{DEFINITION_SELECT} WHERE id=?1 AND (SELECT instance_id FROM instance_identity)=?2"),
-                params![version.target.definition_id.to_string(),instance.to_string()],
+                params![version.target.definition_id,instance],
                 definition_row,
             ).map_err(sql_error)?;
             let reservation_is_current = match (&version.reservation_owner, version.reservation_fence) {
@@ -212,18 +212,18 @@ impl WorkflowRepository<'_> {
             };
             if accepted && reservation_is_current {
                 tx.execute("UPDATE workflow_versions SET state='ready',ready_at_ms=?2 WHERE id=?1 AND state='validating'",
-                    params![id.to_string(),now_ms]).map_err(sql_error)?;
+                    params![id,now_ms]).map_err(sql_error)?;
                 let changed = tx.execute("UPDATE workflow_definitions SET state='ready',availability='healthy',availability_code=NULL,
                     reserved_class_name=NULL,reservation_owner=NULL,reservation_state=NULL,reservation_created_definition=NULL,
                     current_version_id=?2,updated_at_ms=?3 WHERE id=?1 AND state IN ('creating','ready')
                     AND (current_version_id IS NULL OR (SELECT version_number FROM workflow_versions WHERE id=current_version_id)<?4)",
-                    params![version.target.definition_id.to_string(),id.to_string(),now_ms,version.version_number]).map_err(sql_error)?;
+                    params![version.target.definition_id,id,now_ms,version.version_number]).map_err(sql_error)?;
                 if changed != 1 && version.reservation_owner.is_some() {
                     return Err(invariant());
                 }
             } else {
                 tx.execute("UPDATE workflow_versions SET state='rejected',rejected_at_ms=?2,rejection_code='WORKFLOW_VERSION_NOT_READY'
-                    WHERE id=?1 AND state='validating'",params![id.to_string(),now_ms]).map_err(sql_error)?;
+                    WHERE id=?1 AND state='validating'",params![id,now_ms]).map_err(sql_error)?;
                 if let (Some(owner), Some(fence)) =
                     (&version.reservation_owner, version.reservation_fence)
                     && reservation_is_current
@@ -234,10 +234,10 @@ impl WorkflowRepository<'_> {
                              WHERE definition_id=?1 AND reservation_owner=?2 AND reservation_fence=?3
                                AND id!=?4 AND state IN ('staging','validating','ready'))",
                             params![
-                                version.target.definition_id.to_string(),
+                                version.target.definition_id,
                                 owner,
                                 fence,
-                                id.to_string()
+                                id
                             ],
                             |row| row.get::<_, bool>(0),
                         )
@@ -251,8 +251,8 @@ impl WorkflowRepository<'_> {
                                  WHERE (SELECT instance_id FROM instance_identity)=?1 AND id=?2 AND reservation_owner=?3
                                    AND reservation_fence=?4 AND state IN ('creating','ready')",
                                 params![
-                                    instance.to_string(),
-                                    version.target.definition_id.to_string(),
+                                    instance,
+                                    version.target.definition_id,
                                     owner,
                                     fence,
                                     now_ms
@@ -265,7 +265,7 @@ impl WorkflowRepository<'_> {
                     }
                 }
             }
-            tx.query_row(&format!("{VERSION_SELECT} WHERE v.id=?1"),[id.to_string()],version_row).map_err(sql_error)
+            tx.query_row(&format!("{VERSION_SELECT} WHERE v.id=?1"),[id],version_row).map_err(sql_error)
         })
     }
 

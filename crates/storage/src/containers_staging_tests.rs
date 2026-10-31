@@ -183,7 +183,7 @@ fn container_staging_requires_current_prepared_plan_and_ready_commit_closes_name
             Ok(conn
                 .query_row(
                     "SELECT prepared_migration_tag FROM version_containers WHERE version_id=?1",
-                    [id.to_string()],
+                    [id],
                     |row| row.get(0),
                 )
                 .unwrap())
@@ -263,7 +263,7 @@ fn container_staging_requires_current_prepared_plan_and_ready_commit_closes_name
             Ok(conn
                 .query_row(
                     "SELECT prepared_migration_tag FROM version_containers WHERE version_id=?1",
-                    [active.to_string()],
+                    [active],
                     |row| row.get(0),
                 )
                 .unwrap())

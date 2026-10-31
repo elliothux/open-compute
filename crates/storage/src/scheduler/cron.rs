@@ -568,10 +568,6 @@ fn as_i64(value: u64) -> Result<i64, PlatformError> {
     i64::try_from(value).map_err(|_| cron_invariant())
 }
 
-#[allow(
-    clippy::needless_pass_by_value,
-    reason = "the callback contract transfers ownership of this value"
-)]
 fn cron_sql_error(error: rusqlite::Error) -> PlatformError {
     let message = error.to_string();
     if message.contains("digest conflict") {

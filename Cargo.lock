@@ -4788,6 +4788,7 @@ dependencies = [
  "hex",
  "ipnet",
  "psl",
+ "rusqlite",
  "semver",
  "serde",
  "serde_json",

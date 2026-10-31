@@ -6,7 +6,6 @@ use crate::r2::valid_ssec_key_md5;
 use crate::worker_repository::require_instance;
 use open_compute_core::{ErrorCode, InstanceId, PlatformError, ResourceId};
 use rusqlite::{OptionalExtension, params};
-use std::str::FromStr as _;
 
 /// One committed object identity and optional sealed SSE-C key.
 #[derive(Clone, Eq, PartialEq)]
@@ -157,7 +156,7 @@ impl<'a> R2ObjectRepository<'a> {
                              THEN COALESCE(SUM(size_bytes), 0)
                              ELSE NULL END
                  FROM r2_objects WHERE resource_id = ?1",
-                [resource_id.to_string()],
+                [resource_id],
                 |row| {
                     let count: i64 = row.get(0)?;
                     let size: Option<i64> = row.get(1)?;
@@ -214,9 +213,7 @@ impl<'a> R2ObjectRepository<'a> {
                 )
                 .map_err(|_| db_error())?;
             let rows = statement
-                .query_map([resource_id.to_string()], |row| {
-                    map_mutation(row, instance_id)
-                })
+                .query_map([resource_id], |row| map_mutation(row, instance_id))
                 .map_err(|_| db_error())?;
             rows.map(|row| row.map_err(|_| invariant())).collect()
         })
@@ -249,7 +246,7 @@ impl<'a> R2ObjectRepository<'a> {
                 )
                 .map_err(|_| db_error())?;
             let mut rows = statement
-                .query_map(params![resource_id.to_string(), prefix, after], |row| {
+                .query_map(params![resource_id, prefix, after], |row| {
                     map_object(row, instance_id)
                 })
                 .map_err(|_| db_error())?;
@@ -322,7 +319,7 @@ impl<'a> R2ObjectRepository<'a> {
                 .map_err(|_| db_error())?;
             let rows = statement
                 .query_map(
-                    params![resource_id.to_string(), prefix, i64::from(maximum) + 1],
+                    params![resource_id, prefix, i64::from(maximum) + 1],
                     |row| map_object(row, instance_id),
                 )
                 .map_err(|_| db_error())?;
@@ -350,7 +347,7 @@ impl<'a> R2ObjectRepository<'a> {
                   pending_ssec_key_md5, pending_ssec_envelope, started_at_ms)
                  VALUES (?1, ?2, 'put', ?3, ?4, ?5, ?6)",
                 params![
-                    record.resource_id.to_string(),
+                    record.resource_id,
                     record.object_key,
                     record.object_version,
                     record.ssec_key_md5,
@@ -394,7 +391,7 @@ impl<'a> R2ObjectRepository<'a> {
                    size_bytes = excluded.size_bytes,
                    updated_at_ms = excluded.updated_at_ms",
                 params![
-                    resource_id.to_string(),
+                    resource_id,
                     object_key,
                     object_version,
                     mutation.pending_ssec_key_md5,
@@ -451,7 +448,7 @@ impl<'a> R2ObjectRepository<'a> {
                      (resource_id, object_key, kind, pending_version,
                       pending_ssec_key_md5, pending_ssec_envelope, started_at_ms)
                      VALUES (?1, ?2, 'delete', NULL, NULL, NULL, ?3)",
-                    params![resource_id.to_string(), object_key, now_ms],
+                    params![resource_id, object_key, now_ms],
                 )
                 .map_err(|_| invariant())?;
             }
@@ -479,7 +476,7 @@ impl<'a> R2ObjectRepository<'a> {
                     .execute(
                         "DELETE FROM r2_objects
                          WHERE resource_id = ?1 AND object_key = ?2",
-                        params![resource_id.to_string(), object_key],
+                        params![resource_id, object_key],
                     )
                     .map_err(|_| db_error())?
                     != 1
@@ -541,7 +538,7 @@ fn read_object(
     conn.query_row(
         "SELECT resource_id, object_key, object_version, ssec_key_md5, ssec_envelope
          FROM r2_objects WHERE resource_id = ?1 AND object_key = ?2",
-        params![resource_id.to_string(), object_key],
+        params![resource_id, object_key],
         |row| map_object(row, instance_id),
     )
     .optional()
@@ -564,7 +561,7 @@ fn read_mutation(
                 pending_ssec_key_md5, pending_ssec_envelope
          FROM r2_object_mutations
          WHERE resource_id = ?1 AND object_key = ?2",
-        params![resource_id.to_string(), object_key],
+        params![resource_id, object_key],
         |row| map_mutation(row, instance_id),
     )
     .optional()
@@ -580,8 +577,7 @@ fn map_object(
     instance_id: InstanceId,
 ) -> rusqlite::Result<R2ObjectRecord> {
     Ok(R2ObjectRecord {
-        resource_id: ResourceId::from_str(&row.get::<_, String>(0)?)
-            .map_err(|_| rusqlite::Error::InvalidQuery)?,
+        resource_id: row.get::<_, ResourceId>(0)?,
         instance_id,
         object_key: row.get(1)?,
         object_version: row.get(2)?,
@@ -595,8 +591,7 @@ fn map_mutation(
     instance_id: InstanceId,
 ) -> rusqlite::Result<R2ObjectMutationRecord> {
     Ok(R2ObjectMutationRecord {
-        resource_id: ResourceId::from_str(&row.get::<_, String>(0)?)
-            .map_err(|_| rusqlite::Error::InvalidQuery)?,
+        resource_id: row.get::<_, ResourceId>(0)?,
         instance_id,
         object_key: row.get(1)?,
         kind: R2ObjectMutationKind::parse(&row.get::<_, String>(2)?)
@@ -636,7 +631,7 @@ fn delete_mutation(
         .execute(
             "DELETE FROM r2_object_mutations
              WHERE resource_id = ?1 AND object_key = ?2 AND kind = ?3",
-            params![resource_id.to_string(), object_key, kind.as_str()],
+            params![resource_id, object_key, kind.as_str()],
         )
         .map_err(|_| db_error())?
         != 1

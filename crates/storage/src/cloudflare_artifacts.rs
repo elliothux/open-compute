@@ -22,7 +22,6 @@ use open_compute_core::{
     VersionId,
 };
 use rusqlite::{OptionalExtension, Transaction, params};
-use std::str::FromStr;
 use subtle::ConstantTimeEq as _;
 
 /// SQLite authority for Cloudflare Artifacts metadata.
@@ -66,7 +65,7 @@ impl<'a> CloudflareArtifactsRepository<'a> {
                   max_tokens_per_repository, created_at_ms, updated_at_ms)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)",
                 params![
-                    id.to_string(),
+                    id,
                     name,
                     jurisdiction,
                     i64::from(ARTIFACT_MAX_REPOSITORIES),
@@ -93,7 +92,7 @@ impl<'a> CloudflareArtifactsRepository<'a> {
                 )
                 .map_err(|_| db_error())?;
             let rows = statement
-                .query_map([instance_id.to_string()], map_namespace)
+                .query_map([instance_id], map_namespace)
                 .map_err(|_| db_error())?;
             collect(rows)
         })
@@ -143,7 +142,7 @@ impl<'a> CloudflareArtifactsRepository<'a> {
                 .query_row(
                     "SELECT COUNT(*) FROM artifact_repositories
                      WHERE namespace_id = ?1 AND state != 'tombstoned'",
-                    [namespace.id.to_string()],
+                    [namespace.id],
                     |row| row.get(0),
                 )
                 .map_err(|_| db_error())?;
@@ -160,8 +159,8 @@ impl<'a> CloudflareArtifactsRepository<'a> {
                   source, generation, created_at_ms, updated_at_ms)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1, ?9, ?9)",
                 params![
-                    id.to_string(),
-                    namespace.id.to_string(),
+                    id,
+                    namespace.id,
                     request.name,
                     request.description,
                     request.default_branch,
@@ -209,7 +208,7 @@ impl<'a> CloudflareArtifactsRepository<'a> {
                     "UPDATE artifact_repositories
                      SET state = 'ready', default_branch = ?2, updated_at_ms = ?3
                      WHERE id = ?1 AND state = 'importing'",
-                    params![id.to_string(), default_branch, now_ms],
+                    params![id, default_branch, now_ms],
                 )
                 .map_err(|_| db_error())?;
             if changed != 1 {
@@ -234,7 +233,7 @@ impl<'a> CloudflareArtifactsRepository<'a> {
                  JOIN artifact_namespaces n ON n.id = r.namespace_id
                  WHERE (SELECT instance_id FROM instance_identity) = ?1 AND n.name = ?2 AND r.name = ?3
                    AND r.state != 'tombstoned'",
-                params![instance_id.to_string(), namespace, name],
+                params![instance_id, namespace, name],
                 map_repository,
             )
             .optional()
@@ -259,7 +258,7 @@ impl<'a> CloudflareArtifactsRepository<'a> {
                 )
                 .map_err(|_| db_error())?;
             let rows = statement
-                .query_map([namespace_id.to_string()], map_repository)
+                .query_map([namespace_id], map_repository)
                 .map_err(|_| db_error())?;
             collect(rows)
         })
@@ -295,7 +294,7 @@ impl<'a> CloudflareArtifactsRepository<'a> {
                 .execute(
                     "UPDATE artifact_repositories SET state = 'deleting', generation = generation + 1,
                             updated_at_ms = ?2 WHERE id = ?1 AND state IN ('ready', 'failed')",
-                    params![id.to_string(), now_ms],
+                    params![id, now_ms],
                 )
                 .map_err(|_| db_error())?;
             if changed != 1 {
@@ -315,7 +314,7 @@ impl<'a> CloudflareArtifactsRepository<'a> {
             tx.execute(
                 "UPDATE artifact_repo_tokens SET revoked_at_ms = COALESCE(revoked_at_ms, ?2)
                  WHERE repository_id = ?1",
-                params![id.to_string(), now_ms],
+                params![id, now_ms],
             )
             .map_err(|_| db_error())?;
             let changed = tx
@@ -323,7 +322,7 @@ impl<'a> CloudflareArtifactsRepository<'a> {
                     "UPDATE artifact_repositories
                      SET state = 'tombstoned', deleted_at_ms = ?2, updated_at_ms = ?2
                      WHERE id = ?1 AND state = 'deleting'",
-                    params![id.to_string(), now_ms],
+                    params![id, now_ms],
                 )
                 .map_err(|_| db_error())?;
             if changed != 1 {
@@ -345,7 +344,7 @@ impl<'a> CloudflareArtifactsRepository<'a> {
                     "UPDATE artifact_repositories
                      SET state = 'ready', generation = generation + 1, updated_at_ms = ?2
                      WHERE id = ?1 AND state = 'deleting'",
-                    params![id.to_string(), now_ms],
+                    params![id, now_ms],
                 )
                 .map_err(|_| db_error())?;
             if changed != 1 {
@@ -362,7 +361,7 @@ impl<'a> CloudflareArtifactsRepository<'a> {
                 .execute(
                     "UPDATE artifact_repositories SET last_push_at_ms = ?2, updated_at_ms = ?2
                      WHERE id = ?1 AND state = 'ready' AND read_only = 0",
-                    params![id.to_string(), now_ms],
+                    params![id, now_ms],
                 )
                 .map_err(|_| db_error())?;
             if changed != 1 {
@@ -389,7 +388,7 @@ impl<'a> CloudflareArtifactsRepository<'a> {
                 .query_row(
                     "SELECT COUNT(*) FROM artifact_repo_tokens
                      WHERE repository_id = ?1 AND revoked_at_ms IS NULL AND expires_at_ms > ?2",
-                    params![repository.id.to_string(), request.now_ms],
+                    params![repository.id, request.now_ms],
                     |row| row.get(0),
                 )
                 .map_err(|_| db_error())?;
@@ -400,7 +399,7 @@ impl<'a> CloudflareArtifactsRepository<'a> {
                 "INSERT INTO artifact_repo_tokens
                  (id, repository_id, token_digest, scope, expires_at_ms, created_at_ms, revoked_at_ms)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL)",
-                params![request.id.to_string(), repository.id.to_string(), request.digest.as_slice(), request.scope.as_str(), request.expires_at_ms, request.now_ms],
+                params![request.id, repository.id, request.digest.as_slice(), request.scope.as_str(), request.expires_at_ms, request.now_ms],
             )
             .map_err(|_| db_error())?;
             read_token(tx, request.id)
@@ -417,7 +416,7 @@ impl<'a> CloudflareArtifactsRepository<'a> {
                 "SELECT id, repository_id, scope, expires_at_ms, created_at_ms, revoked_at_ms
                  FROM artifact_repo_tokens WHERE repository_id = ?1 ORDER BY created_at_ms DESC, id DESC",
             ).map_err(|_| db_error())?;
-            let rows = statement.query_map([repository_id.to_string()], map_token).map_err(|_| db_error())?;
+            let rows = statement.query_map([repository_id], map_token).map_err(|_| db_error())?;
             collect(rows)
         })
     }
@@ -433,7 +432,7 @@ impl<'a> CloudflareArtifactsRepository<'a> {
             tx.execute(
                 "UPDATE artifact_repo_tokens SET revoked_at_ms = ?3
                  WHERE id = ?1 AND repository_id = ?2 AND revoked_at_ms IS NULL",
-                params![id.to_string(), repository_id.to_string(), now_ms],
+                params![id, repository_id, now_ms],
             )
             .map_err(|_| db_error())
         })?;
@@ -457,7 +456,7 @@ impl<'a> CloudflareArtifactsRepository<'a> {
                    AND repository_id IN (
                      SELECT id FROM artifact_repositories WHERE namespace_id = ?2
                    )",
-                params![id.to_string(), namespace_id.to_string(), now_ms],
+                params![id, namespace_id, now_ms],
             )
             .map_err(|_| db_error())
         })?;
@@ -485,15 +484,11 @@ impl<'a> CloudflareArtifactsRepository<'a> {
                 )
                 .map_err(|_| db_error())?;
             let mut rows = statement
-                .query(params![repository_id.to_string(), now_ms])
+                .query(params![repository_id, now_ms])
                 .map_err(|_| db_error())?;
             let mut matched = None;
             while let Some(row) = rows.next().map_err(|_| db_error())? {
-                let id = row
-                    .get::<_, String>(0)
-                    .map_err(|_| invariant())?
-                    .parse::<ArtifactTokenId>()
-                    .map_err(|_| invariant())?;
+                let id = row.get::<_, ArtifactTokenId>(0).map_err(|_| invariant())?;
                 let scope: String = row.get(1).map_err(|_| invariant())?;
                 let stored_digest: Vec<u8> = row.get(2).map_err(|_| invariant())?;
                 if stored_digest.len() != 32 {
@@ -531,7 +526,7 @@ impl<'a> CloudflareArtifactsRepository<'a> {
                  JOIN workers w ON w.id = v.worker_id
                  WHERE b.version_id = ?1 AND EXISTS(SELECT 1 FROM instance_identity) ORDER BY b.name, b.id",
             ).map_err(|_| db_error())?;
-            let rows = statement.query_map([version_id.to_string()], map_version_binding).map_err(|_| db_error())?;
+            let rows = statement.query_map([version_id], map_version_binding).map_err(|_| db_error())?;
             collect(rows)
         })
     }
@@ -556,7 +551,7 @@ impl<'a> CloudflareArtifactsRepository<'a> {
                      WHERE b.id = ?1 AND b.version_id = ?2 AND v.state = 'ready'
                        AND v.deleted_at_ms IS NULL AND w.deleted_at_ms IS NULL
                        AND EXISTS(SELECT 1 FROM instance_identity)",
-                    params![binding_id.to_string(), version_id.to_string()],
+                    params![binding_id, version_id],
                     map_version_binding,
                 )
                 .optional()
@@ -573,7 +568,7 @@ impl<'a> CloudflareArtifactsRepository<'a> {
                     "SELECT id, (SELECT instance_id FROM instance_identity), name, jurisdiction, max_repositories,
                             max_tokens_per_repository, created_at_ms, updated_at_ms
                      FROM artifact_namespaces WHERE id = ?1",
-                    [binding.namespace_id.to_string()],
+                    [binding.namespace_id],
                     map_namespace,
                 )
                 .map_err(|_| invariant())?;
@@ -596,10 +591,10 @@ pub(crate) fn insert_version_bindings(
               permissions_json, descriptor_sha256, created_at_ms)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
-                binding.id.to_string(),
-                version_id.to_string(),
+                binding.id,
+                version_id,
                 binding.name,
-                binding.namespace_id.to_string(),
+                binding.namespace_id,
                 i64::try_from(binding.namespace_generation).map_err(|_| invariant())?,
                 i64::from(binding.capability_version),
                 permissions,
@@ -621,7 +616,7 @@ fn read_namespace(
         "SELECT id, (SELECT instance_id FROM instance_identity), name, jurisdiction, max_repositories,
                 max_tokens_per_repository, created_at_ms, updated_at_ms
          FROM artifact_namespaces WHERE (SELECT instance_id FROM instance_identity) = ?1 AND id = ?2",
-        params![instance_id.to_string(), id.to_string()],
+        params![instance_id, id],
         map_namespace,
     )
     .optional()
@@ -638,7 +633,7 @@ fn read_namespace_by_name(
         "SELECT id, (SELECT instance_id FROM instance_identity), name, jurisdiction, max_repositories,
                 max_tokens_per_repository, created_at_ms, updated_at_ms
          FROM artifact_namespaces WHERE (SELECT instance_id FROM instance_identity) = ?1 AND name = ?2",
-        params![instance_id.to_string(), name],
+        params![instance_id, name],
         map_namespace,
     )
     .optional()
@@ -653,7 +648,7 @@ fn read_repository(
         "SELECT id, namespace_id, name, description, default_branch, state, read_only,
                 source, generation, created_at_ms, updated_at_ms, last_push_at_ms, deleted_at_ms
          FROM artifact_repositories WHERE id = ?1",
-        [id.to_string()],
+        [id],
         map_repository,
     )
     .optional()
@@ -668,7 +663,7 @@ fn read_token(
     conn.query_row(
         "SELECT id, repository_id, scope, expires_at_ms, created_at_ms, revoked_at_ms
          FROM artifact_repo_tokens WHERE id = ?1",
-        [id.to_string()],
+        [id],
         map_token,
     )
     .map_err(|_| db_error())
@@ -676,8 +671,8 @@ fn read_token(
 
 fn map_namespace(row: &rusqlite::Row<'_>) -> rusqlite::Result<ArtifactNamespaceRecord> {
     Ok(ArtifactNamespaceRecord {
-        id: parse(row, 0)?,
-        instance_id: parse(row, 1)?,
+        id: row.get(0)?,
+        instance_id: row.get(1)?,
         name: row.get(2)?,
         jurisdiction: row.get(3)?,
         max_repositories: positive(row.get(4)?)?,
@@ -690,8 +685,8 @@ fn map_namespace(row: &rusqlite::Row<'_>) -> rusqlite::Result<ArtifactNamespaceR
 fn map_repository(row: &rusqlite::Row<'_>) -> rusqlite::Result<ArtifactRepositoryRecord> {
     let state: String = row.get(5)?;
     Ok(ArtifactRepositoryRecord {
-        id: parse(row, 0)?,
-        namespace_id: parse(row, 1)?,
+        id: row.get(0)?,
+        namespace_id: row.get(1)?,
         name: row.get(2)?,
         description: row.get(3)?,
         default_branch: row.get(4)?,
@@ -709,8 +704,8 @@ fn map_repository(row: &rusqlite::Row<'_>) -> rusqlite::Result<ArtifactRepositor
 fn map_token(row: &rusqlite::Row<'_>) -> rusqlite::Result<ArtifactTokenRecord> {
     let scope: String = row.get(2)?;
     Ok(ArtifactTokenRecord {
-        id: parse(row, 0)?,
-        repository_id: parse(row, 1)?,
+        id: row.get(0)?,
+        repository_id: row.get(1)?,
         scope: scope.parse().map_err(|_| rusqlite::Error::InvalidQuery)?,
         expires_at_ms: row.get(3)?,
         created_at_ms: row.get(4)?,
@@ -722,10 +717,10 @@ fn map_version_binding(row: &rusqlite::Row<'_>) -> rusqlite::Result<VersionArtif
     let permissions: Vec<u8> = row.get(6)?;
     let digest: Vec<u8> = row.get(7)?;
     Ok(VersionArtifactBindingRecord {
-        id: parse(row, 0)?,
-        version_id: parse(row, 1)?,
+        id: row.get(0)?,
+        version_id: row.get(1)?,
         name: row.get(2)?,
-        namespace_id: parse(row, 3)?,
+        namespace_id: row.get(3)?,
         namespace_generation: positive_u64(row.get(4)?)?,
         capability_version: positive(row.get(5)?)?,
         permissions: serde_json::from_slice(&permissions)
@@ -737,11 +732,6 @@ fn map_version_binding(row: &rusqlite::Row<'_>) -> rusqlite::Result<VersionArtif
     })
 }
 
-fn parse<T: FromStr>(row: &rusqlite::Row<'_>, index: usize) -> rusqlite::Result<T> {
-    row.get::<_, String>(index)?
-        .parse()
-        .map_err(|_| rusqlite::Error::InvalidQuery)
-}
 fn positive(value: i64) -> rusqlite::Result<u32> {
     u32::try_from(value)
         .ok()

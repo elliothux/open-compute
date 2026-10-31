@@ -5,7 +5,6 @@
 //! is responsible for running it in the short-lived parser child and enforcing
 //! process-level CPU, memory, and wall-clock limits.
 
-#![deny(missing_docs)]
 #![forbid(unsafe_code)]
 
 mod admission;

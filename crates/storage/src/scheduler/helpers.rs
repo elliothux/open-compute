@@ -34,10 +34,6 @@ pub(super) fn map_open_error(error: rusqlite::Error) -> PlatformError {
     map_sql_error(error)
 }
 
-#[allow(
-    clippy::needless_pass_by_value,
-    reason = "the callback contract transfers ownership of this value"
-)]
 pub(super) fn map_sql_error(error: rusqlite::Error) -> PlatformError {
     if let rusqlite::Error::SqliteFailure(code, _) = &error {
         return match code.code {

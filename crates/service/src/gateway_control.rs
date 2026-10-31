@@ -64,10 +64,6 @@ pub(crate) struct GatewayControl {
 
 impl GatewayControl {
     /// Construct the one gateway control owner.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "shared Gateway resources are passed explicitly"
-    )]
     pub(crate) fn new(
         shared: DaemonGatewayConfig,
         domains: Vec<String>,

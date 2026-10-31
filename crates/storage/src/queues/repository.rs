@@ -8,10 +8,6 @@ impl<'a> QueueRepository<'a> {
     }
 
     /// Atomically reserve Queue create idempotency and insert its creating identity.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "SQLite boundary inputs mirror authoritative persisted fields"
-    )]
     pub fn reserve_create(
         &self,
         instance_id: InstanceId,
@@ -79,7 +75,7 @@ impl<'a> QueueRepository<'a> {
                     request_fingerprint.as_slice(),
                     now_ms,
                     expires_at_ms,
-                    queue_id.to_string(),
+                    queue_id,
                 ],
             )
             .map_err(|_| db_error())?;
@@ -115,10 +111,6 @@ impl<'a> QueueRepository<'a> {
     }
 
     /// List one bounded, filtered, and sorted Queue catalog page.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "SQLite boundary inputs mirror authoritative persisted fields"
-    )]
     pub fn list(
         &self,
         instance_id: InstanceId,
@@ -212,7 +204,7 @@ impl<'a> QueueRepository<'a> {
                 )
                 .map_err(|_| db_error())?;
             let rows = statement
-                .query_map([instance_id.to_string()], map_queue)
+                .query_map([instance_id], map_queue)
                 .map_err(|_| db_error())?;
             collect(rows)
         })
@@ -261,7 +253,7 @@ impl<'a> QueueRepository<'a> {
                     "UPDATE queues SET delivery_paused = ?1, updated_at_ms = ?2
                      WHERE id = ?3 AND (SELECT instance_id FROM instance_identity) = ?4 AND state = 'ready'
                        AND availability = 'healthy'",
-                    params![paused, now_ms, queue_id.to_string(), instance_id.to_string()],
+                    params![paused, now_ms, queue_id, instance_id],
                 )
                 .map_err(|_| db_error())?;
             if changed != 1 {
@@ -291,20 +283,13 @@ impl<'a> QueueRepository<'a> {
                 )
                 .map_err(|_| db_error())?;
             let rows = statement
-                .query_map(
-                    params![queue_id.to_string(), instance_id.to_string()],
-                    |row| row.get(0),
-                )
+                .query_map(params![queue_id, instance_id], |row| row.get(0))
                 .map_err(|_| db_error())?;
             collect(rows)
         })
     }
 
     /// Atomically reserve a restart-recoverable Queue mutation intent.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "SQLite boundary inputs mirror authoritative persisted fields"
-    )]
     pub fn reserve_mutation(
         &self,
         instance_id: InstanceId,
@@ -344,7 +329,7 @@ impl<'a> QueueRepository<'a> {
                         intent_json,
                         now_ms,
                         expires_at_ms,
-                        queue_id.to_string(),
+                        queue_id,
                     ],
                 )
                 .map_err(|_| db_error())?;
@@ -390,7 +375,7 @@ impl<'a> QueueRepository<'a> {
                         mutation.scope,
                         mutation.idempotency_key,
                         mutation.request_fingerprint.as_slice(),
-                        mutation.queue_id.to_string(),
+                        mutation.queue_id,
                     ],
                 )
                 .map_err(|_| db_error())?;
@@ -416,12 +401,11 @@ impl<'a> QueueRepository<'a> {
             ));
         }
         self.db.with_read(|connection| {
-            let identity: String = connection
+            let instance_id: InstanceId = connection
                 .query_row("SELECT instance_id FROM instance_identity", [], |row| {
                     row.get(0)
                 })
                 .map_err(|_| invariant())?;
-            let instance_id = InstanceId::from_str(&identity).map_err(|_| invariant())?;
             let mut statement = connection
                 .prepare(
                     "SELECT scope, idempotency_key, request_fingerprint,
@@ -439,7 +423,7 @@ impl<'a> QueueRepository<'a> {
                         row.get::<_, String>(0)?,
                         row.get::<_, String>(1)?,
                         row.get::<_, Vec<u8>>(2)?,
-                        row.get::<_, String>(3)?,
+                        row.get::<_, QueueId>(3)?,
                         row.get::<_, Vec<u8>>(4)?,
                     ))
                 })
@@ -454,7 +438,7 @@ impl<'a> QueueRepository<'a> {
                     scope,
                     idempotency_key: key,
                     request_fingerprint,
-                    queue_id: QueueId::from_str(&queue).map_err(|_| invariant())?,
+                    queue_id: queue,
                     intent_json,
                 });
             }
@@ -475,7 +459,7 @@ impl<'a> QueueRepository<'a> {
                     "UPDATE control_idempotency
                      SET state = 'complete', response_json = ?1
                      WHERE scope = 'queue.create' AND queue_id = ?2 AND state = 'running'",
-                    params![response, queue.id.to_string()],
+                    params![response, queue.id],
                 )
                 .map_err(|_| db_error())?;
             if changed > 1 {
@@ -499,7 +483,7 @@ impl<'a> QueueRepository<'a> {
                             availability_code = NULL, updated_at_ms = ?1
                      WHERE id = ?2 AND (SELECT instance_id FROM instance_identity) = ?3 AND state = 'creating'
                        AND lifecycle_generation = 1 AND config_generation = 1",
-                    params![now_ms, queue_id.to_string(), instance_id.to_string()],
+                    params![now_ms, queue_id, instance_id],
                 )
                 .map_err(|_| db_error())?;
             if changed != 1 {
@@ -525,7 +509,7 @@ impl<'a> QueueRepository<'a> {
                     "UPDATE queues SET name = ?1, updated_at_ms = ?2
                      WHERE id = ?3 AND (SELECT instance_id FROM instance_identity) = ?4 AND state = 'ready'
                        AND availability = 'healthy'",
-                    params![name, now_ms, queue_id.to_string(), instance_id.to_string()],
+                    params![name, now_ms, queue_id, instance_id],
                 )
                 .map_err(|error| {
                     if error.to_string().contains("UNIQUE") {
@@ -575,8 +559,8 @@ impl<'a> QueueRepository<'a> {
                         i64::try_from(config.max_batch_bytes).map_err(|_| invariant())?,
                         i64::try_from(config.max_backlog_bytes).map_err(|_| invariant())?,
                         now_ms,
-                        queue_id.to_string(),
-                        instance_id.to_string(),
+                        queue_id,
+                        instance_id,
                         i64::try_from(expected_generation).map_err(|_| invariant())?,
                     ],
                 )
@@ -611,8 +595,8 @@ impl<'a> QueueRepository<'a> {
                        AND config_generation = ?4",
                     params![
                         now_ms,
-                        queue_id.to_string(),
-                        instance_id.to_string(),
+                        queue_id,
+                        instance_id,
                         i64::try_from(config_generation).map_err(|_| invariant())?,
                     ],
                 )
@@ -640,7 +624,7 @@ impl<'a> QueueRepository<'a> {
             let referenced: bool = tx
                 .query_row(
                     "SELECT EXISTS(SELECT 1 FROM queue_referrers WHERE queue_id = ?1)",
-                    [queue_id.to_string()],
+                    [queue_id],
                     |row| row.get(0),
                 )
                 .map_err(|_| db_error())?;
@@ -658,8 +642,8 @@ impl<'a> QueueRepository<'a> {
                        AND availability = 'healthy' AND lifecycle_generation = ?4",
                     params![
                         now_ms,
-                        queue_id.to_string(),
-                        instance_id.to_string(),
+                        queue_id,
+                        instance_id,
                         i64::try_from(expected_generation).map_err(|_| invariant())?,
                     ],
                 )
@@ -692,7 +676,7 @@ impl<'a> QueueRepository<'a> {
                             availability_code = 'QUEUE_DELETED', deleted_at_ms = ?1,
                             updated_at_ms = ?1
                      WHERE id = ?2 AND (SELECT instance_id FROM instance_identity) = ?3 AND state = 'deleting'",
-                    params![now_ms, queue_id.to_string(), instance_id.to_string()],
+                    params![now_ms, queue_id, instance_id],
                 )
                 .map_err(|_| db_error())?;
             if changed != 1 {
@@ -740,7 +724,7 @@ impl<'a> QueueRepository<'a> {
                      JOIN workers w ON w.id = d.worker_id
                      JOIN queues q ON q.id = b.queue_id
                      WHERE b.id = ?1 AND b.version_id = ?2",
-                    params![binding_id.to_string(), version_id.to_string()],
+                    params![binding_id, version_id],
                     |row| {
                         let binding = map_binding_offset(row, 0)?;
                         let queue = map_queue_offset(row, 8)?;

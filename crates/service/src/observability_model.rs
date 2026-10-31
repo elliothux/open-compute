@@ -168,10 +168,6 @@ pub(super) fn canonical_invocation(
     })
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "transport boundary inputs mirror the wire contract"
-)]
 fn public_event(
     invocation_id: &str,
     sequence: usize,

@@ -237,10 +237,6 @@ pub(super) async fn write_object_status(
     stream.flush().await
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "transport boundary inputs mirror the wire contract"
-)]
 pub(super) async fn write_get(
     stream: &mut tokio::net::TcpStream,
     code: u16,

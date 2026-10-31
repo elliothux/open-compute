@@ -26,15 +26,11 @@
 
 ### R4.0 规则与配置收尾
 
-已完成：AGENTS.md 重写、威胁模型、测试文档压缩、行数上限放宽到 1500/600。
-
-剩余：
-
-- `Cargo.toml` 删除 `missing_docs` 和 `missing_debug_implementations`，同时删除各 crate 的 `#![deny(missing_docs)]`。
-- 风格类 clippy lint（`too_many_arguments`、`type_complexity`、`needless_pass_by_value`、`unnecessary_wraps`、
-  `allow_attributes_without_reason`）从 `deny` 降为 `warn`。`too_many_lines` 保持 `deny`。
+状态：**已完成**（2026-10-31）。删除 `missing_docs`、`missing_debug_implementations` 和只为安抚 lint 的 121 个属性；`too_many_arguments`、`type_complexity` 改为 `allow`。
 
 ### R4.1 机械清理
+
+状态：typed ID 的 `ToSql`/`FromSql` 已完成（core、storage、workers）；service 侧的调用点和阶段号改名随 R4.2 完成。
 
 - ID newtype 实现一次 `ToSql`/`FromSql`；代数计数改用 `i64`；字符串状态改为 enum。删掉逐行的 `to_string()`、`parse()` 和
   `map_err(|_| rusqlite::Error::InvalidQuery)`。

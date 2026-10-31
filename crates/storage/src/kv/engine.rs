@@ -313,10 +313,6 @@ fn prefix_successor(prefix: &[u8]) -> Option<Vec<u8>> {
     None
 }
 
-#[allow(
-    clippy::needless_pass_by_value,
-    reason = "the callback contract transfers ownership of this value"
-)]
 fn map_sql(error: SqlError) -> PlatformError {
     match error {
         SqlError::SqliteFailure(inner, _) => match inner.code {

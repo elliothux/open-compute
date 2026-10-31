@@ -34,18 +34,18 @@ impl ContainerAuthority<'_> {
                   JOIN resources r ON r.id=n.resource_id JOIN workers w ON w.id=n.owner_worker_id
                   WHERE n.resource_id=?1 AND n.lifecycle_state='active'
                     AND r.state='ready' AND w.deleted_at_ms IS NULL)",
-                [namespace.to_string()], |row| row.get(0),
+                [namespace], |row| row.get(0),
             ).map_err(|_| invariant())?;
             if !live { return Err(not_found()); }
             tx.execute(
                 "INSERT INTO container_applications(id,namespace_resource_id,name,max_instances,created_at_ms,scheduling_policy)
                  VALUES (?1,?2,?3,?4,?5,'default') ON CONFLICT(id) DO NOTHING",
-                params![id.to_string(),namespace.to_string(),name,max_instances,now_ms],
+                params![id,namespace,name,max_instances,now_ms],
             ).map_err(|_| invariant())?;
             let same: bool = tx.query_row(
                 "SELECT namespace_resource_id=?2 AND name=?3 AND max_instances=?4 AND scheduling_policy='default'
                  FROM container_applications WHERE id=?1",
-                params![id.to_string(),namespace.to_string(),name,max_instances], |row| row.get(0),
+                params![id,namespace,name,max_instances], |row| row.get(0),
             ).map_err(|_| invariant())?;
             if !same { return Err(invariant()); }
             Ok(())
@@ -73,12 +73,12 @@ impl ContainerAuthority<'_> {
             tx.execute(
                 "INSERT INTO version_containers(version_id,namespace_resource_id,application_name,descriptor_sha256)
                  VALUES (?1,?2,?3,?4) ON CONFLICT(version_id,namespace_resource_id) DO NOTHING",
-                params![version.to_string(),namespace.to_string(),application_name,descriptor],
+                params![version,namespace,application_name,descriptor],
             ).map_err(|_| invariant())?;
             let same: bool = tx.query_row(
                 "SELECT application_name=?3 AND descriptor_sha256=?4 FROM version_containers
                  WHERE version_id=?1 AND namespace_resource_id=?2",
-                params![version.to_string(),namespace.to_string(),application_name,descriptor], |row| row.get(0),
+                params![version,namespace,application_name,descriptor], |row| row.get(0),
             ).map_err(|_| invariant())?;
             if !same { return Err(invariant()); }
             Ok(())
@@ -98,7 +98,7 @@ impl ContainerAuthority<'_> {
                 .execute(
                     "UPDATE container_applications SET admission_paused=?2
                  WHERE id=?1 AND (?2=1 OR target_generation IS NOT NULL)",
-                    params![application.to_string(), paused],
+                    params![application, paused],
                 )
                 .map_err(|_| invariant())?;
             if changed != 1 {
@@ -130,9 +130,8 @@ pub(super) fn read_target(
     conn.query_row(
         "SELECT t.worker_version_id,t.image_sha256,t.provider_contract_sha256,t.resources_json,t.enable_internet,t.created_at_ms,a.scheduling_policy
          FROM container_application_targets t JOIN container_applications a ON a.id=t.application_id WHERE t.application_id=?1 AND t.generation=?2",
-        params![application.to_string(),generation],
+        params![application,generation],
         |row| {
-            let version: String = row.get(0)?;
             let image: Option<Vec<u8>> = row.get(1)?;
             match (row.get::<_,String>(6)?.as_str(), image.is_some()) {
                 ("default",true) | ("durable_object",false) => (),
@@ -145,7 +144,7 @@ pub(super) fn read_target(
             Ok(ContainerTarget {
                 application_id: application, generation,
                 spec: ContainerTargetSpec {
-                    worker_version_id: version.parse().map_err(|_| rusqlite::Error::InvalidQuery)?,
+                    worker_version_id: row.get(0)?,
                     image_sha256: image.map(|value| value.try_into().map_err(|_| rusqlite::Error::InvalidQuery)).transpose()?,
                     provider_contract_sha256: contract.try_into().map_err(|_| rusqlite::Error::InvalidQuery)?,
                     resources, enable_internet: row.get(4)?,
@@ -183,7 +182,7 @@ pub(super) fn publish_target_conn(
                   JOIN worker_versions v ON v.id=c.version_id AND v.worker_id=n.owner_worker_id
                   WHERE a.id=?1 AND a.deletion_requested_at_ms IS NULL AND a.deleted_at_ms IS NULL AND c.version_id=?2
                     AND n.lifecycle_state='active' AND v.state IN ('validating','ready') AND v.deleted_at_ms IS NULL)",
-                    params![application.to_string(), spec.worker_version_id.to_string()],
+                    params![application, spec.worker_version_id],
                     |row| row.get(0),
                 )
                 .map_err(|_| invariant())?;
@@ -193,7 +192,7 @@ pub(super) fn publish_target_conn(
     let prior: Option<Option<u64>> = tx
         .query_row(
             "SELECT target_generation FROM container_applications WHERE id=?1",
-            [application.to_string()],
+            [application],
             |row| row.get(0),
         )
         .optional()
@@ -203,7 +202,7 @@ pub(super) fn publish_target_conn(
         let target = read_target(tx, application, generation)?;
         let prior_json: Vec<u8> = tx.query_row(
             "SELECT configuration_json FROM container_target_configuration WHERE application_id=?1 AND target_generation=?2",
-            params![application.to_string(), generation], |row| row.get(0),
+            params![application, generation], |row| row.get(0),
         ).map_err(|_| invariant())?;
         let prior_configuration: serde_json::Value =
             serde_json::from_slice(&prior_json).map_err(|_| invariant())?;
@@ -221,7 +220,7 @@ pub(super) fn publish_target_conn(
     }
     let active: bool = tx.query_row(
         "SELECT EXISTS(SELECT 1 FROM container_rollouts WHERE application_id=?1 AND state='running')",
-        [application.to_string()], |row| row.get(0),
+        [application], |row| row.get(0),
     ).map_err(|_| invariant())?;
     if active {
         return Err(PlatformError::new(
@@ -240,9 +239,9 @@ pub(super) fn publish_target_conn(
                  (application_id,generation,worker_version_id,image_sha256,provider_contract_sha256,
                   resources_json,enable_internet,created_at_ms) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
         params![
-            application.to_string(),
+            application,
             generation,
-            spec.worker_version_id.to_string(),
+            spec.worker_version_id,
             spec.image_sha256,
             spec.provider_contract_sha256,
             resources,
@@ -253,11 +252,11 @@ pub(super) fn publish_target_conn(
     .map_err(|_| invariant())?;
     tx.execute(
         "INSERT INTO container_target_configuration(application_id,target_generation,configuration_json) VALUES(?1,?2,?3)",
-        params![application.to_string(),generation,configuration_json],
+        params![application,generation,configuration_json],
     ).map_err(|_| invariant())?;
     tx.execute(
         "UPDATE container_applications SET target_generation=?2 WHERE id=?1",
-        params![application.to_string(), generation],
+        params![application, generation],
     )
     .map_err(|_| invariant())?;
     read_target(tx, application, generation)

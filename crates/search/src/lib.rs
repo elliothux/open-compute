@@ -2,7 +2,6 @@
 //!
 //! This crate owns no database, filesystem, network, process, or tenant authority.
 
-#![deny(missing_docs)]
 #![forbid(unsafe_code)]
 
 pub mod ai_search;

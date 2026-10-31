@@ -42,10 +42,10 @@ pub(crate) fn insert_staging_bindings(
               capability_version, descriptor_sha256, created_at_ms)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
-                binding.id.to_string(),
-                version_id.to_string(),
+                binding.id,
+                version_id,
                 binding.name,
-                binding.queue_id.to_string(),
+                binding.queue_id,
                 i64::try_from(binding.queue_lifecycle_generation).map_err(|_| invariant())?,
                 i64::from(binding.capability_version),
                 binding.descriptor_sha256.as_slice(),
@@ -75,7 +75,7 @@ fn insert_creating_tx(
          VALUES (?1, ?2, 'creating', 'degraded', 'QUEUE_PROJECTION_PENDING',
                  1, 1, 0, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9, NULL)",
         params![
-            queue_id.to_string(),
+            queue_id,
             name,
             i64::from(config.delivery_delay_seconds),
             i64::from(config.retention_seconds),
@@ -119,14 +119,13 @@ pub(crate) fn read_version_bindings_conn(
         )
         .map_err(|_| db_error())?;
     let rows = statement
-        .query_map([version_id.to_string()], |row| {
+        .query_map([version_id], |row| {
             let binding = map_binding_offset(row, 0)?;
             let state: String = row.get(8)?;
             let availability: String = row.get(9)?;
             let availability_code: Option<String> = row.get(10)?;
             let generation: i64 = row.get(11)?;
-            let queue_account: String = row.get(12)?;
-            InstanceId::from_str(&queue_account).map_err(|_| rusqlite::Error::InvalidQuery)?;
+            row.get::<_, InstanceId>(12)?;
             let referrer: bool = row.get(13)?;
             if state != "ready"
                 || !((availability == "healthy" && availability_code.is_none())
@@ -154,7 +153,7 @@ fn read_queue_conn(
                 retention_seconds, max_message_bytes, max_batch_messages, max_batch_bytes,
                 max_backlog_bytes, created_at_ms, updated_at_ms, deleted_at_ms
          FROM queues WHERE id = ?1 AND (SELECT instance_id FROM instance_identity) = ?2",
-        params![queue_id.to_string(), instance_id.to_string()],
+        params![queue_id, instance_id],
         map_queue,
     )
     .optional()
@@ -172,7 +171,7 @@ fn read_queue_tx(
                 retention_seconds, max_message_bytes, max_batch_messages, max_batch_bytes,
                 max_backlog_bytes, created_at_ms, updated_at_ms, deleted_at_ms
          FROM queues WHERE id = ?1 AND (SELECT instance_id FROM instance_identity) = ?2",
-        params![queue_id.to_string(), instance_id.to_string()],
+        params![queue_id, instance_id],
         map_queue,
     )
     .map_err(|_| invariant())
@@ -183,8 +182,6 @@ fn map_queue(row: &rusqlite::Row<'_>) -> rusqlite::Result<QueueRecord> {
 }
 
 fn map_queue_offset(row: &rusqlite::Row<'_>, offset: usize) -> rusqlite::Result<QueueRecord> {
-    let id: String = row.get(offset)?;
-    let instance: String = row.get(offset + 1)?;
     let state: String = row.get(offset + 3)?;
     let availability: String = row.get(offset + 4)?;
     let lifecycle: i64 = row.get(offset + 6)?;
@@ -196,8 +193,8 @@ fn map_queue_offset(row: &rusqlite::Row<'_>, offset: usize) -> rusqlite::Result<
     let batch_bytes: i64 = row.get(offset + 13)?;
     let backlog_bytes: i64 = row.get(offset + 14)?;
     Ok(QueueRecord {
-        id: QueueId::from_str(&id).map_err(|_| rusqlite::Error::InvalidQuery)?,
-        instance_id: InstanceId::from_str(&instance).map_err(|_| rusqlite::Error::InvalidQuery)?,
+        id: row.get(offset)?,
+        instance_id: row.get(offset + 1)?,
         name: row.get(offset + 2)?,
         state: QueueState::from_str(&state).map_err(|_| rusqlite::Error::InvalidQuery)?,
         availability: QueueAvailability::from_str(&availability)
@@ -233,17 +230,14 @@ fn map_binding_offset(
     row: &rusqlite::Row<'_>,
     offset: usize,
 ) -> rusqlite::Result<QueueProducerBindingRecord> {
-    let id: String = row.get(offset)?;
-    let version: String = row.get(offset + 1)?;
-    let queue: String = row.get(offset + 3)?;
     let generation: i64 = row.get(offset + 4)?;
     let capability: i64 = row.get(offset + 5)?;
     let digest: Vec<u8> = row.get(offset + 6)?;
     Ok(QueueProducerBindingRecord {
-        id: BindingId::from_str(&id).map_err(|_| rusqlite::Error::InvalidQuery)?,
-        version_id: VersionId::from_str(&version).map_err(|_| rusqlite::Error::InvalidQuery)?,
+        id: row.get(offset)?,
+        version_id: row.get(offset + 1)?,
         name: row.get(offset + 2)?,
-        queue_id: QueueId::from_str(&queue).map_err(|_| rusqlite::Error::InvalidQuery)?,
+        queue_id: row.get(offset + 3)?,
         queue_lifecycle_generation: u64::try_from(generation)
             .map_err(|_| rusqlite::Error::InvalidQuery)?,
         capability_version: u32::try_from(capability).map_err(|_| rusqlite::Error::InvalidQuery)?,

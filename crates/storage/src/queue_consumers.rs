@@ -227,13 +227,7 @@ fn audit_operator_action(
              (action, target_type, target_id, request_id, details_json, created_at_ms)
              SELECT ?1, 'queue_consumer', id, ?2, X'7B7D', ?3
              FROM queue_consumers WHERE id = ?4 AND consumer_generation = ?5",
-            params![
-                action,
-                request_id.to_string(),
-                now_ms,
-                id.to_string(),
-                as_i64(generation)?,
-            ],
+            params![action, request_id, now_ms, id, as_i64(generation)?,],
         )
         .map_err(|_| invariant())?;
     if changed != 1 {
@@ -270,7 +264,7 @@ fn insert_declaration(
     let (dlq, dlq_generation) = declaration
         .dead_letter_queue
         .map_or((None, None), |(id, generation)| {
-            (Some(id.to_string()), Some(generation))
+            (Some(id), Some(generation))
         });
     tx.execute(
         "INSERT INTO version_queue_consumers
@@ -280,10 +274,10 @@ fn insert_declaration(
               descriptor_sha256, created_at_ms)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
         params![
-            declaration.id.to_string(),
-            version_id.to_string(),
+            declaration.id,
+            version_id,
             origin.as_str(),
-            declaration.queue_id.to_string(),
+            declaration.queue_id,
             as_i64(declaration.queue_lifecycle_generation)?,
             declaration.entrypoint,
             i64::from(declaration.config.max_batch_size),
@@ -312,7 +306,7 @@ fn read_record_tx(
                 state, availability, availability_code,
                 created_at_ms, updated_at_ms, deleted_at_ms
          FROM queue_consumers WHERE id = ?1",
-        [id.to_string()],
+        [id],
         map_record,
     )
     .map_err(|_| invariant())
@@ -335,9 +329,9 @@ impl DeclarationOrigin {
 
 fn map_declaration(row: &rusqlite::Row<'_>) -> rusqlite::Result<QueueConsumerDeclaration> {
     Ok(QueueConsumerDeclaration {
-        id: parse(&row.get::<_, String>(0)?)?,
-        version_id: parse(&row.get::<_, String>(1)?)?,
-        queue_id: parse(&row.get::<_, String>(2)?)?,
+        id: row.get(0)?,
+        version_id: row.get(1)?,
+        queue_id: row.get(2)?,
         queue_lifecycle_generation: unsigned(row.get(3)?)?,
         entrypoint: row.get(4)?,
         config: QueueConsumerConfig {
@@ -347,11 +341,7 @@ fn map_declaration(row: &rusqlite::Row<'_>) -> rusqlite::Result<QueueConsumerDec
             retry_delay_seconds: unsigned(row.get(8)?)?,
             max_concurrency: unsigned(row.get(9)?)?,
         },
-        dlq_queue_id: row
-            .get::<_, Option<String>>(10)?
-            .as_deref()
-            .map(parse)
-            .transpose()?,
+        dlq_queue_id: row.get(10)?,
         dlq_lifecycle_generation: row.get::<_, Option<i64>>(11)?.map(unsigned).transpose()?,
         capability_version: unsigned(row.get(12)?)?,
         descriptor_sha256: digest(row.get(13)?)?,
@@ -361,27 +351,15 @@ fn map_declaration(row: &rusqlite::Row<'_>) -> rusqlite::Result<QueueConsumerDec
 
 fn map_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<QueueConsumerRecord> {
     Ok(QueueConsumerRecord {
-        id: parse(&row.get::<_, String>(0)?)?,
-        instance_id: parse(&row.get::<_, String>(1)?)?,
-        queue_id: parse(&row.get::<_, String>(2)?)?,
-        worker_id: parse(&row.get::<_, String>(3)?)?,
-        declaration_id: parse(&row.get::<_, String>(4)?)?,
-        version_id: parse(&row.get::<_, String>(5)?)?,
-        pending_declaration_id: row
-            .get::<_, Option<String>>(6)?
-            .as_deref()
-            .map(parse)
-            .transpose()?,
-        pending_version_id: row
-            .get::<_, Option<String>>(7)?
-            .as_deref()
-            .map(parse)
-            .transpose()?,
-        pending_worker_id: row
-            .get::<_, Option<String>>(8)?
-            .as_deref()
-            .map(parse)
-            .transpose()?,
+        id: row.get(0)?,
+        instance_id: row.get(1)?,
+        queue_id: row.get(2)?,
+        worker_id: row.get(3)?,
+        declaration_id: row.get(4)?,
+        version_id: row.get(5)?,
+        pending_declaration_id: row.get(6)?,
+        pending_version_id: row.get(7)?,
+        pending_worker_id: row.get(8)?,
         consumer_generation: unsigned(row.get(9)?)?,
         state: row
             .get::<_, String>(10)?
@@ -393,10 +371,6 @@ fn map_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<QueueConsumerRecord> 
         updated_at_ms: row.get(14)?,
         deleted_at_ms: row.get(15)?,
     })
-}
-
-fn parse<T: FromStr>(value: &str) -> rusqlite::Result<T> {
-    value.parse().map_err(|_| rusqlite::Error::InvalidQuery)
 }
 
 fn unsigned<T: TryFrom<i64>>(value: i64) -> rusqlite::Result<T> {

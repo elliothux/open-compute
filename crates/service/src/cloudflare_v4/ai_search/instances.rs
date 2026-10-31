@@ -246,10 +246,6 @@ async fn read(
     }
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "transport boundary inputs mirror the wire contract"
-)]
 async fn mutation(
     state: HttpState,
     public_account: String,

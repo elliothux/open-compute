@@ -598,10 +598,6 @@ fn insert_reconcile_job(
     append_job_log(transaction, job_id, "queued", 0, now_ms)
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "generation/job fields are one atomic SQLite persistence boundary"
-)]
 fn insert_r2_generation(
     transaction: &rusqlite::Transaction<'_>,
     job_id: &str,

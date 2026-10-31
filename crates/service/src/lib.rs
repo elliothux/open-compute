@@ -1,7 +1,5 @@
 //! Production `ocd` service library: config load, health, metrics, doctor, and run.
 
-#![deny(missing_docs)]
-
 pub mod ai_provider;
 pub mod ai_search_backend;
 pub mod ai_search_config;

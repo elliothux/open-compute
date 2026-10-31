@@ -1,7 +1,5 @@
 //! Local or S3-compatible object authority, preflight, and verified cache.
 
-#![deny(missing_docs)]
-
 mod ai_search;
 mod artifact;
 mod backend;

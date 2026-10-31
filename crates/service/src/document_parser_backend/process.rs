@@ -14,10 +14,6 @@ use std::path::Path;
 use std::process::ExitStatus;
 use std::time::Duration;
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "parser execution limits stay explicit"
-)]
 pub(super) async fn run_parser_child(
     executable: &VerifiedLaunchImage,
     executable_sha256: &str,
@@ -181,10 +177,6 @@ struct CapturedOutput {
     stderr: Vec<u8>,
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "parser execution limits stay explicit"
-)]
 async fn run_parser_image(
     executable: &VerifiedLaunchImage,
     executable_sha256: &str,

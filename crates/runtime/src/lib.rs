@@ -2,8 +2,6 @@
 //!
 //! The executable always contains the verified runtime payload; startup never downloads.
 
-#![deny(missing_docs)]
-
 pub mod browser;
 pub mod compile;
 mod container_provider;

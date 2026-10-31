@@ -21,13 +21,11 @@ impl ContainerAuthority<'_> {
                 .prepare("SELECT id FROM container_registry_uploads ORDER BY id")
                 .map_err(|_| invariant())?;
             let ids = stmt
-                .query_map([], |r| r.get::<_, String>(0))
+                .query_map([], |r| r.get::<_, ResourceId>(0))
                 .map_err(|_| invariant())?
                 .collect::<rusqlite::Result<Vec<_>>>()
                 .map_err(|_| invariant())?;
-            ids.into_iter()
-                .map(|id| id.parse().map_err(|_| invariant()))
-                .collect()
+            Ok(ids)
         })
     }
     /// Atomically expire abandoned uploads, credentials and uncommitted blob staging references.
@@ -42,7 +40,7 @@ impl ContainerAuthority<'_> {
                 let mut stmt = tx
                     .prepare("SELECT id FROM container_registry_uploads WHERE expires_at_ms<=?1")
                     .map_err(|_| invariant())?;
-                stmt.query_map([now], |r| r.get::<_, String>(0))
+                stmt.query_map([now], |r| r.get::<_, ResourceId>(0))
                     .map_err(|_| invariant())?
                     .collect::<rusqlite::Result<Vec<_>>>()
                     .map_err(|_| invariant())?
@@ -62,9 +60,7 @@ impl ContainerAuthority<'_> {
                 [now],
             )
             .map_err(|_| invariant())?;
-            ids.into_iter()
-                .map(|id| id.parse().map_err(|_| invariant()))
-                .collect()
+            Ok(ids)
         })
     }
     /// Mount an already verified blob only between repositories owned by this instance.
@@ -147,7 +143,7 @@ impl ContainerAuthority<'_> {
         }
         self.db.with_immediate(|tx| {
             require_instance(tx,instance)?;
-            tx.execute("INSERT INTO container_registry_tokens(token_sha256,repository_scope,can_push,can_pull,expires_at_ms) VALUES(?1,?2,?3,?4,?5)",params![hash,instance.to_string(),push,pull,expires]).map_err(|_|invariant())?;
+            tx.execute("INSERT INTO container_registry_tokens(token_sha256,repository_scope,can_push,can_pull,expires_at_ms) VALUES(?1,?2,?3,?4,?5)",params![hash,instance,push,pull,expires]).map_err(|_|invariant())?;
             Ok(())
         })
     }
@@ -180,7 +176,7 @@ impl ContainerAuthority<'_> {
         validate_repository(instance, repository)?;
         self.db.with_immediate(|tx| {
             require_instance(tx,instance)?;
-            tx.execute("INSERT INTO container_registry_uploads(id,repository,size,busy,expires_at_ms) VALUES(?1,?2,0,0,?3)",params![id.to_string(),repository,expires]).map_err(|_|invariant())?;
+            tx.execute("INSERT INTO container_registry_uploads(id,repository,size,busy,expires_at_ms) VALUES(?1,?2,0,0,?3)",params![id,repository,expires]).map_err(|_|invariant())?;
             Ok(())
         })
     }
@@ -196,9 +192,9 @@ impl ContainerAuthority<'_> {
         validate_repository(instance, repository)?;
         self.db.with_immediate(|tx| {
             require_instance(tx,instance)?;
-            let changed = tx.execute("UPDATE container_registry_uploads SET busy=1 WHERE id=?1 AND repository=?2 AND expires_at_ms>?3 AND busy=0",params![id.to_string(),repository,now]).map_err(|_|invariant())?;
+            let changed = tx.execute("UPDATE container_registry_uploads SET busy=1 WHERE id=?1 AND repository=?2 AND expires_at_ms>?3 AND busy=0",params![id,repository,now]).map_err(|_|invariant())?;
             if changed!=1 { return Err(not_found()); }
-            tx.query_row("SELECT size FROM container_registry_uploads WHERE id=?1",[id.to_string()],|row|row.get(0)).map_err(|_|invariant())
+            tx.query_row("SELECT size FROM container_registry_uploads WHERE id=?1",[id],|row|row.get(0)).map_err(|_|invariant())
         })
     }
 
@@ -215,7 +211,7 @@ impl ContainerAuthority<'_> {
         }
         self.db.with_immediate(|tx| {
             require_instance(tx,instance)?;
-            let changed=tx.execute("UPDATE container_registry_uploads SET size=?3,busy=0 WHERE id=?1 AND busy=1 AND size=?2",params![id.to_string(),prior,size]).map_err(|_|invariant())?;
+            let changed=tx.execute("UPDATE container_registry_uploads SET size=?3,busy=0 WHERE id=?1 AND busy=1 AND size=?2",params![id,prior,size]).map_err(|_|invariant())?;
             if changed!=1 {return Err(invariant());} Ok(())
         })
     }
@@ -235,7 +231,7 @@ impl ContainerAuthority<'_> {
         }
         self.db.with_immediate(|tx| {
             require_instance(tx,instance)?;
-            let changed=tx.execute("DELETE FROM container_registry_uploads WHERE id=?1 AND repository=?2 AND size=?3 AND busy=1",params![id.to_string(),repository,blob.size]).map_err(|_|invariant())?;
+            let changed=tx.execute("DELETE FROM container_registry_uploads WHERE id=?1 AND repository=?2 AND size=?3 AND busy=1",params![id,repository,blob.size]).map_err(|_|invariant())?;
             if changed!=1 {return Err(invariant());}
             tx.execute("INSERT INTO container_registry_blobs(repository,artifact_sha256,artifact_size,created_at_ms,expires_at_ms) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(repository,artifact_sha256) DO NOTHING",params![repository,blob.sha256,blob.size,now,now.checked_add(900_000).ok_or_else(invariant)?]).map_err(|_|invariant())?;
             let same:bool=tx.query_row("SELECT artifact_size=?3 FROM container_registry_blobs WHERE repository=?1 AND artifact_sha256=?2",params![repository,blob.sha256,blob.size],|row|row.get(0)).map_err(|_|invariant())?;

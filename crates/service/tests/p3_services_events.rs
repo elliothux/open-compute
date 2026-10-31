@@ -358,10 +358,6 @@ fn create_namespace(
     }
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "scenario helpers keep distinct fixture identities explicit"
-)]
 fn version_request(
     account_id: open_compute_core::InstanceId,
     worker_id: open_compute_core::WorkerId,

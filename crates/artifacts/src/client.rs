@@ -619,10 +619,6 @@ fn content_md5_at(file: &std::fs::File, length: u64) -> Result<String, BackendEr
     Ok(base64::engine::general_purpose::STANDARD.encode(digest.finalize()))
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "transport boundary inputs mirror the wire contract"
-)]
 fn metadata_from_s3(
     size: Option<i64>,
     etag: Option<&str>,

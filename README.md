@@ -148,7 +148,7 @@ Tenants get exactly what their deployment declares — and nothing else. No SQLi
 The host is a single async Rust process — no GC pauses, no interpreter, no sidecar hops between the socket and your Worker.
 
 - **Async all the way down.** `tokio` multi-threaded runtime with `axum` + `hyper` serving both planes. Request bodies stream through as `bytes` without buffering whole payloads.
-- **`unsafe_code = "forbid"`.** Workspace-wide — the entire platform is safe Rust. Plus `missing_docs = "deny"`, `unused_must_use = "deny"`, and Clippy `-D warnings` across all targets and features.
+- **`unsafe_code = "forbid"`.** Workspace-wide — the entire platform is safe Rust. Plus `unused_must_use = "deny"` and Clippy `-D warnings` across all targets and features.
 - **Release built for speed.** Thin LTO, `codegen-units = 1`, `panic = "abort"`, symbols stripped — one dense, statically-linked artifact.
 - **In-process state.** `rusqlite` embeds SQLite in `ocd`; transactions are function calls, not network round-trips. Foreign keys stay enabled and WAL remains locally owned.
 - **Content-addressed runtime payloads.** Verified runtime payloads are content-addressed and materialized once, then reused across restarts.

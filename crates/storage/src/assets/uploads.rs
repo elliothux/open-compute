@@ -7,7 +7,6 @@ use open_compute_core::{
     ErrorCode, InstanceId, PlatformError, StartupId, VersionId, VersionUploadId, WorkerId,
 };
 use rusqlite::{OptionalExtension, Transaction, params};
-use std::str::FromStr;
 
 /// Durable version-upload session state.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -254,20 +253,16 @@ fn read_by_key(
     worker_id: WorkerId,
     key: &str,
 ) -> Result<Option<VersionUploadRecord>, PlatformError> {
-    let id: Option<String> = tx
+    let id: Option<VersionUploadId> = tx
         .query_row(
             "SELECT id FROM version_uploads
              WHERE worker_id = ?1 AND idempotency_key = ?2",
-            params![worker_id.to_string(), key],
+            params![worker_id, key],
             |row| row.get(0),
         )
         .optional()
         .map_err(|_| db_error())?;
-    id.map(|value| {
-        let upload_id = VersionUploadId::from_str(&value).map_err(|_| invariant())?;
-        read_tx(tx, upload_id)
-    })
-    .transpose()
+    id.map(|upload_id| read_tx(tx, upload_id)).transpose()
 }
 
 fn read_tx(
@@ -283,7 +278,7 @@ fn read_tx(
                     finalize_response_json, finalize_error_code,
                     created_at_ms, expires_at_ms, updated_at_ms
              FROM version_uploads WHERE id = ?1",
-            [upload_id.to_string()],
+            [upload_id],
             map_upload,
         )
         .optional()
@@ -297,7 +292,7 @@ fn read_tx(
         )
         .map_err(|_| db_error())?;
     let rows = stmt
-        .query_map([upload_id.to_string()], map_object)
+        .query_map([upload_id], map_object)
         .map_err(|_| db_error())?;
     record.objects = rows
         .collect::<Result<Vec<_>, _>>()
@@ -306,9 +301,6 @@ fn read_tx(
 }
 
 fn map_upload(row: &rusqlite::Row<'_>) -> rusqlite::Result<VersionUploadRecord> {
-    let id: String = row.get(0)?;
-    let instance: String = row.get(1)?;
-    let worker: String = row.get(2)?;
     let fingerprint: Vec<u8> = row.get(4)?;
     let kind: String = row.get(5)?;
     let bundle_digest: Option<Vec<u8>> = row.get(6)?;
@@ -316,15 +308,11 @@ fn map_upload(row: &rusqlite::Row<'_>) -> rusqlite::Result<VersionUploadRecord> 
     let manifest_digest: Vec<u8> = row.get(8)?;
     let manifest_size: i64 = row.get(9)?;
     let status: String = row.get(12)?;
-    let version: Option<String> = row.get(13)?;
     let finalize_fingerprint: Option<Vec<u8>> = row.get(14)?;
-    let finalize_owner: Option<String> = row.get(15)?;
     Ok(VersionUploadRecord {
-        id: id.parse().map_err(|_| rusqlite::Error::InvalidQuery)?,
-        instance_id: instance
-            .parse()
-            .map_err(|_| rusqlite::Error::InvalidQuery)?,
-        worker_id: worker.parse().map_err(|_| rusqlite::Error::InvalidQuery)?,
+        id: row.get(0)?,
+        instance_id: row.get(1)?,
+        worker_id: row.get(2)?,
         idempotency_key: row.get(3)?,
         input_fingerprint: fingerprint
             .try_into()
@@ -345,15 +333,11 @@ fn map_upload(row: &rusqlite::Row<'_>) -> rusqlite::Result<VersionUploadRecord> 
         manifest_json: row.get(10)?,
         routing_config_json: row.get(11)?,
         status: VersionUploadStatus::parse(&status).map_err(|_| rusqlite::Error::InvalidQuery)?,
-        version_id: version
-            .map(|value| value.parse().map_err(|_| rusqlite::Error::InvalidQuery))
-            .transpose()?,
+        version_id: row.get(13)?,
         finalize_fingerprint: finalize_fingerprint
             .map(|value| value.try_into().map_err(|_| rusqlite::Error::InvalidQuery))
             .transpose()?,
-        finalize_owner_startup_id: finalize_owner
-            .map(|value| value.parse().map_err(|_| rusqlite::Error::InvalidQuery))
-            .transpose()?,
+        finalize_owner_startup_id: row.get(15)?,
         finalize_response_json: row.get(16)?,
         finalize_error_code: row.get(17)?,
         created_at_ms: row.get(18)?,
@@ -408,7 +392,7 @@ fn require_live_worker(
         .query_row(
             "SELECT 1 FROM workers
              WHERE id = ?1 AND deleted_at_ms IS NULL",
-            [worker_id.to_string()],
+            [worker_id],
             |row| row.get(0),
         )
         .optional()

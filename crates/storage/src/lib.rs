@@ -1,7 +1,5 @@
 //! Secure data-directory ownership, control database, identity, and secret crypto.
 
-#![deny(missing_docs)]
-
 pub mod ai_search;
 pub mod assets;
 pub mod bindings;

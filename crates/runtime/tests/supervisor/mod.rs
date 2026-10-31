@@ -143,10 +143,6 @@ fn small_cfg() -> RuntimeConfig {
     }
 }
 
-#[allow(
-    clippy::type_complexity,
-    reason = "the callable signature directly models the runtime protocol"
-)]
 fn compiler(
     data: PathBuf,
     mode: &'static str,

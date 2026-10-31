@@ -2,10 +2,6 @@ use super::*;
 
 impl<'a> WorkerRepository<'a> {
     /// Reserve or replay a secret-safe control idempotency key.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "SQLite boundary inputs mirror authoritative persisted fields"
-    )]
     pub fn reserve_idempotency(
         &self,
         instance_id: InstanceId,
@@ -112,13 +108,7 @@ impl<'a> WorkerRepository<'a> {
                      WHERE scope = ?2 AND idempotency_key = ?3
                        AND state = 'running' AND request_fingerprint = ?4
                        AND (queue_id IS NULL OR queue_id = ?5)",
-                    params![
-                        response,
-                        scope,
-                        key,
-                        fingerprint.as_slice(),
-                        queue_id.to_string(),
-                    ],
+                    params![response, scope, key, fingerprint.as_slice(), queue_id,],
                 )
                 .map_err(|_| db_error())?;
             if changed != 1 {
@@ -132,10 +122,6 @@ impl<'a> WorkerRepository<'a> {
     }
 
     /// Complete an idempotent response and register its version readback ref atomically.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "SQLite boundary inputs mirror authoritative persisted fields"
-    )]
     pub fn complete_idempotency_with_version_ref(
         &self,
         instance_id: InstanceId,
@@ -159,13 +145,7 @@ impl<'a> WorkerRepository<'a> {
                             version_id = ?5
                      WHERE scope = ?2 AND idempotency_key = ?3
                        AND state = 'running' AND request_fingerprint = ?4",
-                    params![
-                        response,
-                        scope,
-                        key,
-                        fingerprint.as_slice(),
-                        version_id.to_string()
-                    ],
+                    params![response, scope, key, fingerprint.as_slice(), version_id],
                 )
                 .map_err(|_| db_error())?;
             if changed != 1 {
@@ -178,7 +158,7 @@ impl<'a> WorkerRepository<'a> {
                 "INSERT OR IGNORE INTO version_referrers
                  (version_id, kind, ref_id, created_at_ms)
                  VALUES (?1, 'control_idempotency', ?2, ?3)",
-                params![version_id.to_string(), ref_id, now_ms],
+                params![version_id, ref_id, now_ms],
             )
             .map_err(|_| db_error())?;
             Ok(())

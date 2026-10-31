@@ -23,7 +23,7 @@ impl<'a> DurableObjectRepository<'a> {
                    AND state = 'creating'",
                 params![
                     now_ms,
-                    namespace_id.to_string(),
+                    namespace_id,
                     object_id.to_string(),
                     i64::try_from(generation).map_err(|_| invariant())?,
                 ],
@@ -50,7 +50,7 @@ impl<'a> DurableObjectRepository<'a> {
                 )
                 .map_err(|_| db_error())?;
             let rows = statement
-                .query_map([namespace_id.to_string()], map_object)
+                .query_map([namespace_id], map_object)
                 .map_err(|_| db_error())?;
             collect_rows(rows)
         })
@@ -85,7 +85,7 @@ impl<'a> DurableObjectRepository<'a> {
                 let rows = statement
                     .query_map(
                         params![
-                            namespace_id.to_string(),
+                            namespace_id,
                             after_id.to_string(),
                             i64::try_from(after_generation).map_err(|_| invariant())?,
                             fetch,
@@ -106,7 +106,7 @@ impl<'a> DurableObjectRepository<'a> {
                     )
                     .map_err(|_| db_error())?;
                 let rows = statement
-                    .query_map(params![namespace_id.to_string(), fetch], map_object)
+                    .query_map(params![namespace_id, fetch], map_object)
                     .map_err(|_| db_error())?;
                 collect_rows(rows)?
             };
@@ -145,7 +145,7 @@ impl<'a> DurableObjectRepository<'a> {
                  WHERE namespace_resource_id = ?1 AND object_id = ?2
                  ORDER BY generation DESC
                  LIMIT 1",
-                params![namespace_id.to_string(), object_id.to_string()],
+                params![namespace_id, object_id.to_string()],
                 map_object,
             )
             .optional()
@@ -194,7 +194,7 @@ impl<'a> DurableObjectRepository<'a> {
                    AND state IN ('creating', 'ready')",
                 params![
                     now_ms,
-                    namespace_id.to_string(),
+                    namespace_id,
                     object_id.to_string(),
                     i64::try_from(current.generation).map_err(|_| invariant())?,
                 ],
@@ -257,7 +257,7 @@ impl<'a> DurableObjectRepository<'a> {
                    AND state = 'deleting'",
                 params![
                     now_ms,
-                    namespace_id.to_string(),
+                    namespace_id,
                     object_id.to_string(),
                     i64::try_from(generation).map_err(|_| invariant())?,
                 ],
@@ -273,7 +273,7 @@ impl<'a> DurableObjectRepository<'a> {
             conn.query_row(
                 "SELECT EXISTS(SELECT 1 FROM do_objects
                   WHERE namespace_resource_id = ?1 AND state != 'tombstoned')",
-                [namespace_id.to_string()],
+                [namespace_id],
                 |row| row.get(0),
             )
             .map_err(|_| db_error())

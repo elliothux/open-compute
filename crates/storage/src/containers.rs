@@ -49,7 +49,7 @@ fn require_instance(conn: &Connection, instance: InstanceId) -> Result<(), Platf
     let found: bool = conn
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM instance_identity WHERE instance_id=?1)",
-            [instance.to_string()],
+            [instance],
             |row| row.get(0),
         )
         .map_err(|_| invariant())?;

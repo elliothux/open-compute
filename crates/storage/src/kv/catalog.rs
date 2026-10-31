@@ -181,7 +181,7 @@ impl<'a> KvNamespaceRepository<'a> {
                  VALUES (?1, ?2, ?3, ?4, ?5, NULL, NULL, NULL, ?6)
                  ON CONFLICT(resource_id) DO NOTHING",
                 params![
-                    resource.id.to_string(),
+                    resource.id,
                     storage_key,
                     i64::from(schema_version),
                     i64::try_from(quota_bytes).map_err(|_| invariant())?,
@@ -230,7 +230,7 @@ impl<'a> KvNamespaceRepository<'a> {
                 )
                 .map_err(|_| invariant())?;
             let rows = statement
-                .query_map([instance_id.to_string()], map_namespace)
+                .query_map([instance_id], map_namespace)
                 .map_err(|_| invariant())?;
             let mut records = Vec::new();
             for row in rows {
@@ -241,10 +241,6 @@ impl<'a> KvNamespaceRepository<'a> {
     }
 
     /// List one bounded, filtered, and sorted page of live namespaces.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "SQLite boundary inputs mirror authoritative persisted fields"
-    )]
     pub fn list_page(
         &self,
         instance_id: InstanceId,
@@ -356,7 +352,7 @@ impl<'a> KvNamespaceRepository<'a> {
         };
         self.db.with_immediate(|tx| {
             if tx
-                .execute(sql, params![now_ms, resource_id.to_string()])
+                .execute(sql, params![now_ms, resource_id])
                 .map_err(|_| invariant())?
                 != 1
             {
@@ -390,7 +386,7 @@ impl<'a> KvNamespaceRepository<'a> {
                 .query_row(
                     "SELECT id, request_fingerprint FROM kv_backups
                      WHERE source_resource_id = ?1 AND idempotency_key = ?2",
-                    params![source.to_string(), idempotency_key],
+                    params![source, idempotency_key],
                     |row| Ok((row.get(0)?, row.get(1)?)),
                 )
                 .optional()
@@ -412,7 +408,7 @@ impl<'a> KvNamespaceRepository<'a> {
                  VALUES (?1, ?2, 'creating', NULL, NULL, NULL, ?3, ?4, NULL, NULL, ?5, ?6)",
                 params![
                     backup_id,
-                    source.to_string(),
+                    source,
                     i64::from(schema_version),
                     now_ms,
                     idempotency_key,
@@ -459,7 +455,7 @@ impl<'a> KvNamespaceRepository<'a> {
             if tx
                 .execute(
                     "UPDATE kv_namespaces SET last_backup_at_ms = ?1 WHERE resource_id = ?2",
-                    params![now_ms, backup.source_resource_id.to_string()],
+                    params![now_ms, backup.source_resource_id],
                 )
                 .map_err(|_| invariant())?
                 != 1
@@ -504,7 +500,7 @@ impl<'a> KvNamespaceRepository<'a> {
                 .query_row(
                     "SELECT EXISTS(SELECT 1 FROM kv_backups b JOIN resources r
                    ON r.id = b.source_resource_id WHERE b.id = ?1 AND (SELECT instance_id FROM instance_identity) = ?2)",
-                    params![backup_id, instance_id.to_string()],
+                    params![backup_id, instance_id],
                     |row| row.get(0),
                 )
                 .map_err(|_| invariant())?;
@@ -531,7 +527,7 @@ impl<'a> KvNamespaceRepository<'a> {
                 )
                 .map_err(|_| invariant())?;
             let rows = statement
-                .query_map([instance_id.to_string()], map_backup)
+                .query_map([instance_id], map_backup)
                 .map_err(|_| invariant())?;
             let mut records = Vec::new();
             for row in rows {
@@ -553,7 +549,7 @@ impl<'a> KvNamespaceRepository<'a> {
                 .query_row(
                     "SELECT EXISTS(SELECT 1 FROM kv_backups b JOIN resources r
                    ON r.id = b.source_resource_id WHERE b.id = ?1 AND (SELECT instance_id FROM instance_identity) = ?2)",
-                    params![backup_id, instance_id.to_string()],
+                    params![backup_id, instance_id],
                     |row| row.get(0),
                 )
                 .map_err(|_| invariant())?;
@@ -590,7 +586,7 @@ fn read_namespace_conn(
                 k.restore_backup_id
          FROM resources r JOIN kv_namespaces k ON k.resource_id = r.id
          WHERE (SELECT instance_id FROM instance_identity) = ?1 AND r.id = ?2 AND r.kind = 'kv_namespace'",
-        params![instance_id.to_string(), resource_id.to_string()],
+        params![instance_id, resource_id],
         map_namespace,
     )
     .optional()
@@ -631,15 +627,13 @@ fn read_backup_conn(
 }
 
 fn map_backup(row: &rusqlite::Row<'_>) -> rusqlite::Result<KvBackupRecord> {
-    let resource: String = row.get(1)?;
     let state: String = row.get(2)?;
     let digest: Option<Vec<u8>> = row.get(4)?;
     let size: Option<i64> = row.get(5)?;
     let schema: i64 = row.get(6)?;
     Ok(KvBackupRecord {
         id: row.get(0)?,
-        source_resource_id: ResourceId::from_str(&resource)
-            .map_err(|_| rusqlite::Error::InvalidQuery)?,
+        source_resource_id: row.get(1)?,
         state: KvBackupState::from_str(&state).map_err(|_| rusqlite::Error::InvalidQuery)?,
         object_key: row.get(3)?,
         sha256: digest

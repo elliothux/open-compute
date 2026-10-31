@@ -140,7 +140,7 @@ fn p0_2_repository_enforces_lifecycle_immutability_and_idempotency() {
                   updated_at_ms, deleted_at_ms)
                  VALUES (?1, ?1, ?2, 'worker', 'public', '/', NULL,
                          'active', 1, 2201, 2201, NULL)",
-                rusqlite::params![public_claim, worker.id.to_string()],
+                rusqlite::params![public_claim, worker.id],
             )
             .unwrap();
             Ok(())
@@ -197,7 +197,7 @@ fn p0_2_repository_enforces_lifecycle_immutability_and_idempotency() {
     assert!(
         conn.execute(
             "UPDATE worker_versions SET main_module = 'changed.js' WHERE id = ?1",
-            [version.to_string()],
+            [version],
         )
         .is_err()
     );

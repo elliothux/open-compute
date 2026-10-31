@@ -4,8 +4,6 @@
 //! behavior. Later crates consume these contracts without resolving secrets at
 //! parse time.
 
-#![deny(missing_docs)]
-
 pub mod admission;
 pub mod capability;
 pub mod clock;

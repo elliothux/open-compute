@@ -290,17 +290,14 @@ fn workflow_creation_identity_quota_grace_and_referrer_guards() {
             assert!(
                 tx.execute(
                     "DELETE FROM version_referrers WHERE kind='workflow_instance' AND ref_id=?1",
-                    [id.instance_id.to_string()]
+                    [id.instance_id]
                 )
                 .is_err()
             );
             assert!(
                 tx.execute(
                     "UPDATE workflow_instance_referrers SET version_id=?2 WHERE instance_id=?1",
-                    params![
-                        id.instance_id.to_string(),
-                        WorkflowVersionId::generate().to_string()
-                    ]
+                    params![id.instance_id, WorkflowVersionId::generate()]
                 )
                 .is_err()
             );
@@ -461,14 +458,14 @@ fn workflow_binding_namespace_hash_and_catalog_reachability() {
             assert!(
                 tx.execute(
                     "INSERT INTO version_vars VALUES(?1,'ORDERS',X'6E756C6C')",
-                    [caller.to_string()]
+                    [caller]
                 )
                 .is_err()
             );
             assert!(
                 tx.execute(
                     "UPDATE workflow_bindings SET name='OTHER' WHERE id=?1",
-                    [binding.descriptor.binding_id.to_string()]
+                    [binding.descriptor.binding_id]
                 )
                 .is_err()
             );

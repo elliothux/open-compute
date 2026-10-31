@@ -14,7 +14,7 @@ pub(super) fn audit(
         "INSERT INTO control_audit_events
          (action, target_type, target_id, request_id, details_json, created_at_ms)
          VALUES (?1, 'queue', ?2, ?3, X'7B7D', ?4)",
-        params![action, queue_id.to_string(), request_id.to_string(), now_ms],
+        params![action, queue_id, request_id, now_ms],
     )
     .map_err(|_| db_error())?;
     Ok(())

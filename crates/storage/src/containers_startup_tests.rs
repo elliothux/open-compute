@@ -212,7 +212,7 @@ fn startup_envelope_is_required_by_sqlite_and_cannot_be_empty() {
               target_generation,opaque_engine_key,state,created_at_ms,updated_at_ms,
               effective_image_sha256,effective_resources_json,enable_internet,startup_json,startup_envelope_json)
              VALUES (?1,?2,?3,?4,1,1,?5,'admitting',30,30,?6,?7,?8,?9,NULL)",
-            params![authority.application_id.to_string(),authority.namespace_resource_id.to_string(),
+            params![authority.application_id,authority.namespace_resource_id,
                 authority.object_id.to_string(),authority.object_generation,key,spec.image_sha256.as_slice(),
                 serde_json::to_vec(&spec.resources).unwrap(),spec.enable_internet,
                 serde_json::to_vec(&spec.startup).unwrap()],
@@ -295,7 +295,7 @@ fn persisted_public_image_reference_is_validated_before_exposing_a_lease() {
                 target_generation,opaque_engine_key,state,created_at_ms,updated_at_ms,
                 effective_image_sha256,effective_resources_json,enable_internet,startup_json,startup_envelope_json)
                 VALUES (?1,?2,?3,?4,1,1,?5,'admitting',30,30,?6,?7,?8,?9,?10)",
-                params![authority.application_id.to_string(),authority.namespace_resource_id.to_string(),
+                params![authority.application_id,authority.namespace_resource_id,
                 authority.object_id.to_string(),authority.object_generation,&key,spec.image_sha256.as_slice(),
                 serde_json::to_vec(&spec.resources).unwrap(),spec.enable_internet,
                 serde_json::to_vec(&startup).unwrap(),spec.startup_envelope]).unwrap();

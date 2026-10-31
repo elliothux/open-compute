@@ -381,10 +381,6 @@ async fn dispatch(
     }
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "scenario helpers keep distinct fixture identities explicit"
-)]
 async fn backend_call(
     address: std::net::SocketAddr,
     token: &str,

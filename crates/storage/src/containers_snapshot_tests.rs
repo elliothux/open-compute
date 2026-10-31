@@ -172,7 +172,7 @@ fn directory_snapshot_authority_is_durable_application_scoped_and_not_a_boot_ima
                 assert!(
                     tx.execute(
                         "UPDATE container_snapshots SET directory_path=?2 WHERE id=?1",
-                        params![snapshot.id.to_string(), value]
+                        params![snapshot.id, value]
                     )
                     .is_err()
                 );
@@ -395,8 +395,8 @@ fn snapshot_acl_is_application_scoped_and_cannot_be_bypassed_by_image_digest() {
     )
     .unwrap();
     fixture.storage.db().with_immediate(|tx| {
-        tx.execute("UPDATE do_objects SET state='deleting' WHERE namespace_resource_id=?1 AND object_id=?2",params![source.identity.namespace_resource_id.to_string(),source.identity.object_id.to_string()]).unwrap();
-        tx.execute("UPDATE do_objects SET state='tombstoned',deleted_at_ms=44 WHERE namespace_resource_id=?1 AND object_id=?2",params![source.identity.namespace_resource_id.to_string(),source.identity.object_id.to_string()]).unwrap();
+        tx.execute("UPDATE do_objects SET state='deleting' WHERE namespace_resource_id=?1 AND object_id=?2",params![source.identity.namespace_resource_id,source.identity.object_id.to_string()]).unwrap();
+        tx.execute("UPDATE do_objects SET state='tombstoned',deleted_at_ms=44 WHERE namespace_resource_id=?1 AND object_id=?2",params![source.identity.namespace_resource_id,source.identity.object_id.to_string()]).unwrap();
         Ok(())
     }).unwrap();
     assert!(repo.snapshot_for_restore(&other, snapshot.id, 45).is_ok());
@@ -841,7 +841,7 @@ fn snapshot_artifact_identity_and_restore_metadata_are_immutable() {
     assert!(repo.reserve(&other, &key, &changed, 10, 43).is_err());
     fixture.storage.db().with_immediate(|tx| {
         assert!(tx.execute("UPDATE container_instance_leases SET snapshot_id=NULL WHERE opaque_engine_key=?1",[&key]).is_err());
-        assert!(tx.execute("UPDATE container_snapshots SET artifact_size=1024 WHERE id=?1",[snapshot.id.to_string()]).is_err());
+        assert!(tx.execute("UPDATE container_snapshots SET artifact_size=1024 WHERE id=?1",[snapshot.id]).is_err());
         assert!(tx.execute("UPDATE container_images SET snapshot_only=0 WHERE manifest_sha256=?1",[image(21).manifest_sha256]).is_err());
         Ok(())
     }).unwrap();
@@ -1110,7 +1110,7 @@ fn unknown_put_is_fenced_before_io_and_never_releases_its_charge_after_restart()
             assert!(
                 tx.execute(
                     "UPDATE container_snapshots SET put_attempted=0 WHERE id=?1",
-                    [snapshot.id.to_string()]
+                    [snapshot.id]
                 )
                 .is_err()
             );
@@ -1371,7 +1371,7 @@ fn snapshot_image_size_completion_rejects_stale_authority_overflow_and_tampering
             "UPDATE container_snapshots SET state='ready',captured_at_ms=41,image_size=-1 WHERE id=?1",
             "UPDATE container_snapshots SET state='ready',captured_at_ms=41,image_size=9223372036854775808 WHERE id=?1",
         ] {
-            assert!(tx.execute(sql, [snapshot.id.to_string()]).is_err());
+            assert!(tx.execute(sql, [snapshot.id]).is_err());
         }
         Ok(())
     }).unwrap();
@@ -1392,7 +1392,7 @@ fn snapshot_image_size_completion_rejects_stale_authority_overflow_and_tampering
                 "UPDATE container_snapshots SET image_size=-1 WHERE id=?1",
                 "UPDATE container_snapshots SET state='retiring',image_size=2850 WHERE id=?1",
             ] {
-                assert!(tx.execute(sql, [snapshot.id.to_string()]).is_err());
+                assert!(tx.execute(sql, [snapshot.id]).is_err());
             }
             Ok(())
         })
@@ -1423,7 +1423,7 @@ fn snapshot_ready_without_image_size_fails_closed_on_read_and_restart() {
                 .unwrap();
             tx.execute(
                 "UPDATE container_snapshots SET state='ready',captured_at_ms=41 WHERE id=?1",
-                [snapshot.id.to_string()],
+                [snapshot.id],
             )
             .unwrap();
             tx.pragma_update(None, "ignore_check_constraints", "OFF")
@@ -1444,7 +1444,7 @@ fn snapshot_ready_without_image_size_fails_closed_on_read_and_restart() {
             assert_eq!(
                 conn.query_row(
                     "SELECT image_size FROM container_snapshots WHERE id=?1",
-                    [snapshot.id.to_string()],
+                    [snapshot.id],
                     |row| row.get::<_, Option<i64>>(0)
                 )
                 .unwrap(),

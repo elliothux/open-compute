@@ -16,10 +16,6 @@ use open_compute_workers::{
 
 use super::{d1_config, kv_config, r2_config};
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the gate helper exposes each product setup input at the call site"
-)]
 pub(crate) async fn create_product_resource(
     storage: &PlatformStorage,
     objects: &R2ObjectStore,
@@ -60,10 +56,6 @@ pub(crate) async fn create_product_resource(
     }
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "scenario helpers keep distinct fixture identities explicit"
-)]
 fn create_local_resource<D: ResourceDriver>(
     storage: &PlatformStorage,
     pins: &ResourcePins,

@@ -44,7 +44,7 @@ impl ContainerAuthority<'_> {
                 read_snapshot(tx,id)?.source_image_sha256
             } else { lease.effective_image_sha256 };
             let identity = input.source.identity;
-            tx.execute("INSERT INTO container_snapshots (id,instance_id,application_id,namespace_resource_id,object_id,object_generation,lease_generation,opaque_engine_key,start_identity,source_image_sha256,name,state,reserved_bytes,created_at_ms,expires_at_ms,directory_path) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,'pending',?12,?13,?14,?15)",params![input.id.to_string(),authority.instance_id.to_string(),authority.application_id.to_string(),identity.namespace_resource_id.to_string(),identity.object_id.to_string(),identity.object_generation,identity.lease_generation,input.source.opaque_engine_key,input.source.start_identity,source_image,input.name,input.reserved_bytes,now_ms,expires,input.directory.as_ref().map(open_compute_core::containers::ContainerDirectoryPath::as_str)]).map_err(|_|invariant())?;
+            tx.execute("INSERT INTO container_snapshots (id,instance_id,application_id,namespace_resource_id,object_id,object_generation,lease_generation,opaque_engine_key,start_identity,source_image_sha256,name,state,reserved_bytes,created_at_ms,expires_at_ms,directory_path) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,'pending',?12,?13,?14,?15)",params![input.id,authority.instance_id,authority.application_id,identity.namespace_resource_id,identity.object_id.to_string(),identity.object_generation,identity.lease_generation,input.source.opaque_engine_key,input.source.start_identity,source_image,input.name,input.reserved_bytes,now_ms,expires,input.directory.as_ref().map(open_compute_core::containers::ContainerDirectoryPath::as_str)]).map_err(|_|invariant())?;
             read_snapshot(tx,input.id)
         })
     }
@@ -66,7 +66,7 @@ impl ContainerAuthority<'_> {
             let original=read_image(tx,&snapshot.source_image_sha256)?;
             if original.architecture!=image.architecture {return Err(invariant());}
             insert_image(tx,image,true)?;
-            tx.execute("UPDATE container_snapshots SET image_sha256=?2,artifact_sha256=?3,artifact_size=?4 WHERE id=?1",params![id.to_string(),image.manifest_sha256,image.artifact_sha256,image.artifact_size]).map_err(|_|invariant())?;
+            tx.execute("UPDATE container_snapshots SET image_sha256=?2,artifact_sha256=?3,artifact_size=?4 WHERE id=?1",params![id,image.manifest_sha256,image.artifact_sha256,image.artifact_size]).map_err(|_|invariant())?;
             Ok(())
         })
     }
@@ -98,7 +98,7 @@ impl ContainerAuthority<'_> {
             )?;
             tx.execute(
                 "UPDATE container_snapshots SET put_attempted=1 WHERE id=?1",
-                [id.to_string()],
+                [id],
             )
             .map_err(|_| invariant())?;
             Ok(())
@@ -126,7 +126,7 @@ impl ContainerAuthority<'_> {
                 || source.identity.object_id!=authority.object_id
                 || source.identity.object_generation!=authority.object_generation {return Err(invariant());}
             require_source(tx,snapshot.application_id,source,snapshot.directory.is_some())?;
-            tx.execute("UPDATE container_snapshots SET state='ready',captured_at_ms=?2,expires_at_ms=?3,image_size=?4 WHERE id=?1",params![id.to_string(),now_ms,expires,image_size]).map_err(|_|invariant())?;
+            tx.execute("UPDATE container_snapshots SET state='ready',captured_at_ms=?2,expires_at_ms=?3,image_size=?4 WHERE id=?1",params![id,now_ms,expires,image_size]).map_err(|_|invariant())?;
             read_snapshot(tx,id)
         })
     }
@@ -191,7 +191,7 @@ impl ContainerAuthority<'_> {
         self.db.with_immediate(|tx| {
             require_instance(tx, instance)?;
             read_snapshot(tx,id)?;
-            let changed=tx.execute("UPDATE container_snapshots SET state='retiring' WHERE id=?1 AND state='pending'",[id.to_string()]).map_err(|_|invariant())?;
+            let changed=tx.execute("UPDATE container_snapshots SET state='retiring' WHERE id=?1 AND state='pending'",[id]).map_err(|_|invariant())?;
             Ok(changed==1)
         })
     }
@@ -210,12 +210,12 @@ impl ContainerAuthority<'_> {
         self.db.with_immediate(|tx| {
             require_instance(tx,instance)?;
             let snapshot=read_snapshot(tx,id)?;
-            let live:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM container_instance_leases l WHERE l.state!='stopped' AND (l.snapshot_id=?1 OR EXISTS(SELECT 1 FROM json_each(l.directory_restores_json) d WHERE json_extract(d.value,'$.snapshotId')=?1)))",[id.to_string()],|row|row.get(0)).map_err(|_|invariant())?;
+            let live:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM container_instance_leases l WHERE l.state!='stopped' AND (l.snapshot_id=?1 OR EXISTS(SELECT 1 FROM json_each(l.directory_restores_json) d WHERE json_extract(d.value,'$.snapshotId')=?1)))",[id],|row|row.get(0)).map_err(|_|invariant())?;
             // A source that may still finish an unknown capture cannot release its reservation.
             if snapshot.state!=ContainerSnapshotState::Retiring || live {return Err(invariant());}
             if snapshot.captured_at_ms.is_none() && (snapshot.put_attempted
                 || read_lease(tx,snapshot.source.identity)?.state!=ContainerLeaseState::Stopped) {return Err(invariant());}
-            tx.execute("DELETE FROM container_snapshots WHERE id=?1",[id.to_string()]).map_err(|_|invariant())?;
+            tx.execute("DELETE FROM container_snapshots WHERE id=?1",[id]).map_err(|_|invariant())?;
             Ok(())
         })
     }
@@ -232,7 +232,7 @@ fn require_snapshot_policy(
     application: ResourceId,
     directory: bool,
 ) -> Result<(), PlatformError> {
-    let allowed: bool = conn.query_row("SELECT (?2 OR scheduling_policy='durable_object') FROM container_applications WHERE id=?1 AND deletion_requested_at_ms IS NULL AND deleted_at_ms IS NULL", params![application.to_string(), directory], |row| row.get(0)).optional().map_err(|_| invariant())?.unwrap_or(false);
+    let allowed: bool = conn.query_row("SELECT (?2 OR scheduling_policy='durable_object') FROM container_applications WHERE id=?1 AND deletion_requested_at_ms IS NULL AND deleted_at_ms IS NULL", params![application, directory], |row| row.get(0)).optional().map_err(|_| invariant())?.unwrap_or(false);
     if !allowed {
         return Err(not_found());
     }
@@ -386,7 +386,7 @@ pub(super) fn renew_restore(
         .collect();
     for id in ids {
         let until = expiry(now_ms)?;
-        let changed=conn.execute("UPDATE container_snapshots SET last_restored_at_ms=MAX(COALESCE(last_restored_at_ms,?2),?2),expires_at_ms=MAX(expires_at_ms,?3) WHERE id=?1 AND application_id=?4",params![id.to_string(),now_ms,until,lease.application_id.to_string()]).map_err(|_|invariant())?;
+        let changed=conn.execute("UPDATE container_snapshots SET last_restored_at_ms=MAX(COALESCE(last_restored_at_ms,?2),?2),expires_at_ms=MAX(expires_at_ms,?3) WHERE id=?1 AND application_id=?4",params![id,now_ms,until,lease.application_id]).map_err(|_|invariant())?;
         if changed != 1 {
             return Err(invariant());
         }

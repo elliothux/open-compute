@@ -117,13 +117,13 @@ impl<'a> VersionAssetsRepository<'a> {
         expected_descriptor_sha256: &[u8; 32],
     ) -> Result<(InstanceId, WorkerId, VersionAssetsRecord), PlatformError> {
         self.db.with_read(|conn| {
-            let state: Option<(String, Vec<u8>, String, String)> = conn
+            let state: Option<(String, Vec<u8>, WorkerId, InstanceId)> = conn
                 .query_row(
                     "SELECT d.state, d.worker_code_sha256, d.worker_id, (SELECT instance_id FROM instance_identity)
                      FROM worker_versions d
                      JOIN workers w ON w.id = d.worker_id
                      WHERE d.id = ?1 AND w.deleted_at_ms IS NULL",
-                    [version_id.to_string()],
+                    [version_id],
                     |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
                 )
                 .optional()
@@ -137,8 +137,8 @@ impl<'a> VersionAssetsRepository<'a> {
                 return Err(invariant());
             }
             Ok((
-                instance.parse().map_err(|_| invariant())?,
-                worker.parse().map_err(|_| invariant())?,
+                instance,
+                worker,
                 read_assets_conn(conn, version_id)?.ok_or_else(not_found)?,
             ))
         })
@@ -165,7 +165,7 @@ impl<'a> VersionAssetsRepository<'a> {
                        AND d.state = 'ready' AND d.worker_code_sha256 = ?2
                        AND r.object_kind = 'asset_blob' AND r.sha256 = ?3 AND r.size = ?4",
                     params![
-                        version_id.to_string(),
+                        version_id,
                         expected_descriptor_sha256.as_slice(),
                         sha256.as_slice(),
                         size,
@@ -192,7 +192,7 @@ impl<'a> VersionAssetsRepository<'a> {
                 )
                 .map_err(|_| db_error())?;
             let rows = stmt
-                .query_map([version_id.to_string()], |row| {
+                .query_map([version_id], |row| {
                     let digest: Vec<u8> = row.get(0)?;
                     let size: i64 = row.get(1)?;
                     Ok((digest, size))
@@ -226,7 +226,7 @@ pub(crate) fn insert_version_assets(
           logical_total_bytes, created_at_ms)
          VALUES (?1, ?2, ?3, 1, ?4, ?5, ?6, ?7, ?8, ?9)",
         params![
-            version_id.to_string(),
+            version_id,
             assets.manifest_sha256.as_slice(),
             manifest_size,
             assets.manifest_json,
@@ -244,7 +244,7 @@ pub(crate) fn insert_version_assets(
              (version_id, object_kind, sha256, size, created_at_ms)
              VALUES (?1, ?2, ?3, ?4, ?5)",
             params![
-                version_id.to_string(),
+                version_id,
                 object.kind.as_str(),
                 object.sha256.as_slice(),
                 i64::try_from(object.size).map_err(|_| invariant())?,
@@ -268,7 +268,7 @@ pub(crate) fn insert_bundle_object_ref(
          (version_id, object_kind, sha256, size, created_at_ms)
          VALUES (?1, 'bundle', ?2, ?3, ?4)",
         params![
-            version_id.to_string(),
+            version_id,
             sha256.as_slice(),
             i64::try_from(size).map_err(|_| invariant())?,
             now_ms,
@@ -284,12 +284,12 @@ pub(crate) fn delete_version_assets(
 ) -> Result<(), PlatformError> {
     tx.execute(
         "DELETE FROM version_object_refs WHERE version_id = ?1",
-        [version_id.to_string()],
+        [version_id],
     )
     .map_err(|_| db_error())?;
     tx.execute(
         "DELETE FROM version_assets WHERE version_id = ?1",
-        [version_id.to_string()],
+        [version_id],
     )
     .map_err(|_| db_error())?;
     Ok(())
@@ -304,16 +304,15 @@ pub(crate) fn read_assets_conn(
                 manifest_json, routing_config_json, binding_name, logical_file_count,
                 logical_total_bytes, created_at_ms
          FROM version_assets WHERE version_id = ?1",
-        [version_id.to_string()],
+        [version_id],
         |row| {
-            let id: String = row.get(0)?;
             let digest: Vec<u8> = row.get(1)?;
             let manifest_size: i64 = row.get(2)?;
             let schema: i64 = row.get(3)?;
             let file_count: i64 = row.get(7)?;
             let total_bytes: i64 = row.get(8)?;
             Ok(VersionAssetsRecord {
-                version_id: id.parse().map_err(|_| rusqlite::Error::InvalidQuery)?,
+                version_id: row.get(0)?,
                 manifest_sha256: digest
                     .try_into()
                     .map_err(|_| rusqlite::Error::InvalidQuery)?,

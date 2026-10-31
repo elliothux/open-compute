@@ -439,7 +439,7 @@ async fn version_pipeline_uploads_validates_promotes_and_replays() {
         "UPDATE version_services SET props_json = ?1 WHERE version_id = ?2 AND binding_name = 'CATALOG'",
         rusqlite::params![
             br#"{"z":[1,{"__proto__":"ordinary JSON data"}],"constructor":{"enabled":true}}"#,
-            version_id.to_string()
+            version_id
         ],
     )
     .unwrap();
@@ -459,7 +459,7 @@ async fn version_pipeline_uploads_validates_promotes_and_replays() {
         "UPDATE version_services SET props_json = ?1 WHERE version_id = ?2 AND binding_name = 'CATALOG'",
         rusqlite::params![
             canonical_service_props,
-            version_id.to_string()
+            version_id
         ],
     )
     .unwrap();
@@ -467,7 +467,7 @@ async fn version_pipeline_uploads_validates_promotes_and_replays() {
         .unwrap();
     conn.execute(
         "UPDATE worker_versions SET worker_code_sha256 = zeroblob(32) WHERE id = ?1",
-        [version_id.to_string()],
+        [version_id],
     )
     .unwrap();
     drop(conn);

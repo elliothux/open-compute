@@ -1,7 +1,5 @@
 //! Explicit live S3-provider qualification using the production client and preflights.
 
-#![deny(missing_docs)]
-
 use open_compute_artifacts::{
     BackendError, ObjectBackend, ObjectKey, R2_MIN_MULTIPART_PART_BYTES, preflight_object_storage,
     preflight_r2, resolve_s3_credentials,

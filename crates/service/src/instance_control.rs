@@ -481,10 +481,6 @@ fn control_round_trip(
 }
 
 /// Build a descriptor from known startup identity fields.
-#[allow(
-    clippy::too_many_arguments,
-    reason = "transport boundary inputs mirror the wire contract"
-)]
 pub fn build_descriptor(
     instance_id: &InstanceId,
     config_path: &Path,

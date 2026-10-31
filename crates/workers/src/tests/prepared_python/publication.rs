@@ -103,7 +103,7 @@ async fn retained_restore_rechecks_version_authority_at_the_commit_fence() {
         let digest: Vec<u8> = connection
             .query_row(
                 "SELECT artifact_sha256 FROM version_python_prepared WHERE version_id=?1",
-                [identity.version_id.to_string()],
+                [identity.version_id],
                 |row| row.get(0),
             )
             .unwrap();
@@ -273,7 +273,7 @@ async fn retained_restore_does_not_accept_or_repair_changed_prepared_authority()
                 .unwrap();
             let update = "UPDATE version_python_prepared SET prepared_identity_sha256=?1 WHERE version_id=?2";
             assert!(connection.execute(update, rusqlite::params![
-                corrupted_identity.as_slice(), identity.version_id.to_string(),
+                corrupted_identity.as_slice(), identity.version_id,
             ]).is_err(), "the production immutability guard remains enabled");
             let guard: String = connection.query_row(
                 "SELECT sql FROM sqlite_master WHERE name='version_python_prepared_update_guard'",
@@ -285,7 +285,7 @@ async fn retained_restore_does_not_accept_or_repair_changed_prepared_authority()
             transaction.execute_batch("DROP TRIGGER version_python_prepared_update_guard")
                 .unwrap();
             assert_eq!(transaction.execute(update, rusqlite::params![
-                corrupted_identity.as_slice(), identity.version_id.to_string(),
+                corrupted_identity.as_slice(), identity.version_id,
             ]).unwrap(), 1);
             transaction.execute_batch(&guard).unwrap();
             transaction.commit().unwrap();

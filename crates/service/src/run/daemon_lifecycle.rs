@@ -252,10 +252,6 @@ pub(super) fn spawn_runtime(
     Ok(())
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "daemon command coordinates distinct owners"
-)]
 pub(super) fn handle_daemon_command(
     command: &daemon_control::DaemonCommand,
     plan: Option<&mut DaemonPlan>,
@@ -482,10 +478,6 @@ fn refresh_stopped_instance(
     Ok(loaded)
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "single daemon lifecycle boundary"
-)]
 fn attach_instance(
     plan: &mut DaemonPlan,
     config_path: &std::path::Path,

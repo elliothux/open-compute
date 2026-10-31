@@ -35,7 +35,7 @@ impl<'a> VersionUploadRepository<'a> {
                 .query_row(
                     "SELECT COUNT(*) FROM version_uploads
                      WHERE worker_id = ?1 AND status IN ('open', 'finalizing')",
-                    [input.worker_id.to_string()],
+                    [input.worker_id],
                     |row| row.get(0),
                 )
                 .map_err(|_| db_error())?;
@@ -68,8 +68,8 @@ impl<'a> VersionUploadRepository<'a> {
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
                          ?11, 'open', NULL, ?12, ?13, ?12)",
                 params![
-                    input.id.to_string(),
-                    input.worker_id.to_string(),
+                    input.id,
+                    input.worker_id,
                     input.idempotency_key,
                     input.input_fingerprint.as_slice(),
                     input.content_kind.as_str(),
@@ -94,7 +94,7 @@ impl<'a> VersionUploadRepository<'a> {
                      (session_id, sha256, object_kind, size, verified, verified_at_ms)
                      VALUES (?1, ?2, ?3, ?4, 0, NULL)",
                     params![
-                        input.id.to_string(),
+                        input.id,
                         object.sha256.as_slice(),
                         object.kind.as_str(),
                         i64::try_from(object.size).map_err(|_| invariant())?,
@@ -171,12 +171,12 @@ impl<'a> VersionUploadRepository<'a> {
                 "UPDATE version_upload_objects
                  SET verified = 1, verified_at_ms = COALESCE(verified_at_ms, ?3)
                  WHERE session_id = ?1 AND sha256 = ?2",
-                params![upload_id.to_string(), sha256.as_slice(), now_ms],
+                params![upload_id, sha256.as_slice(), now_ms],
             )
             .map_err(|_| db_error())?;
             tx.execute(
                 "UPDATE version_uploads SET updated_at_ms = ?2 WHERE id = ?1",
-                params![upload_id.to_string(), now_ms],
+                params![upload_id, now_ms],
             )
             .map_err(|_| db_error())?;
             read_tx(tx, upload_id)
@@ -213,10 +213,10 @@ impl<'a> VersionUploadRepository<'a> {
                              updated_at_ms = ?5
                          WHERE id = ?1",
                         params![
-                            upload_id.to_string(),
-                            version_id.to_string(),
+                            upload_id,
+                            version_id,
                             finalize_fingerprint.as_slice(),
-                            owner_startup_id.to_string(),
+                            owner_startup_id,
                             now_ms,
                         ],
                     )
@@ -231,7 +231,7 @@ impl<'a> VersionUploadRepository<'a> {
                         "UPDATE version_uploads
                          SET finalize_owner_startup_id = ?2, updated_at_ms = ?3
                          WHERE id = ?1",
-                        params![upload_id.to_string(), owner_startup_id.to_string(), now_ms,],
+                        params![upload_id, owner_startup_id, now_ms,],
                     )
                     .map_err(|_| db_error())?;
                     VersionUploadFinalizeDisposition::Recover
@@ -279,7 +279,7 @@ impl<'a> VersionUploadRepository<'a> {
                 "UPDATE version_uploads
                  SET status = 'committed', finalize_response_json = ?2, updated_at_ms = ?3
                  WHERE id = ?1",
-                params![upload_id.to_string(), response_json, now_ms],
+                params![upload_id, response_json, now_ms],
             )
             .map_err(|_| db_error())?;
             read_tx(tx, upload_id)
@@ -308,7 +308,7 @@ impl<'a> VersionUploadRepository<'a> {
                 "UPDATE version_uploads
                  SET status = 'committed', finalize_error_code = ?2, updated_at_ms = ?3
                  WHERE id = ?1",
-                params![upload_id.to_string(), code.as_str(), now_ms],
+                params![upload_id, code.as_str(), now_ms],
             )
             .map_err(|_| db_error())?;
             read_tx(tx, upload_id)
@@ -332,7 +332,7 @@ impl<'a> VersionUploadRepository<'a> {
                     tx.execute(
                         "UPDATE version_uploads
                          SET status = 'aborted', updated_at_ms = ?2 WHERE id = ?1",
-                        params![upload_id.to_string(), now_ms],
+                        params![upload_id, now_ms],
                     )
                     .map_err(|_| db_error())?;
                 }

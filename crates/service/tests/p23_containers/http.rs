@@ -7,10 +7,6 @@ use tokio::time::{Instant, timeout_at};
 
 pub(super) type Client = super::platform_process::Client;
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "raw protocol probes keep HTTP authority, media type, and bytes explicit"
-)]
 pub(super) async fn request(
     client: &Client,
     address: &str,

@@ -144,7 +144,7 @@ fn public_worker_origin_lifecycle_preserves_local_and_survives_restart() {
             Ok(connection
                 .query_row(
                     "SELECT COUNT(*) FROM worker_host_routes WHERE worker_id = ?1 AND state = 'active'",
-                    [worker.id.to_string()],
+                    [worker.id],
                     |row| row.get(0),
                 )
                 .unwrap())

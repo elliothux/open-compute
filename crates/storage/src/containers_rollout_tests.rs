@@ -224,7 +224,7 @@ fn container_target_configuration_is_immutable_identity_and_code_only_reuses_it(
     fixture.storage.db().with_read(|conn| {
         conn.execute_batch("DROP TRIGGER container_target_configuration_immutable").unwrap();
         conn.execute("UPDATE container_target_configuration SET configuration_json=?2 WHERE application_id=?1 AND target_generation=?3",
-            params![app.id.to_string(),b"{".as_slice(),current.generation]).unwrap(); Ok(())
+            params![app.id,b"{".as_slice(),current.generation]).unwrap(); Ok(())
     }).unwrap();
     assert_eq!(
         repo.create_rollout(

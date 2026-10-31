@@ -472,10 +472,6 @@ async fn page_call(
     )
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "transport boundary inputs mirror the wire contract"
-)]
 async fn id_call(
     state: HttpState,
     public_account: String,
@@ -525,10 +521,6 @@ async fn id_call(
     }
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "transport boundary inputs mirror the wire contract"
-)]
 async fn item_mutation(
     state: HttpState,
     public_account: String,

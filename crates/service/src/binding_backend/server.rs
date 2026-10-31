@@ -13,10 +13,6 @@ pub async fn bind_binding_backend() -> Result<TcpListener, PlatformError> {
 }
 
 /// Serve every composed product plane on the private binding listener.
-#[allow(
-    clippy::too_many_arguments,
-    reason = "transport boundary inputs mirror the wire contract"
-)]
 pub async fn serve_binding_backend(
     listener: TcpListener,
     storage: Arc<PlatformStorage>,
@@ -60,10 +56,6 @@ pub async fn serve_binding_backend(
 }
 
 /// Serve every product plane plus the version-scoped static-assets binding backend.
-#[allow(
-    clippy::too_many_arguments,
-    reason = "transport boundary inputs mirror the wire contract"
-)]
 pub async fn serve_binding_backend_with_assets(
     listener: TcpListener,
     storage: Arc<PlatformStorage>,
@@ -110,10 +102,6 @@ pub async fn serve_binding_backend_with_assets(
     .await
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "transport boundary inputs mirror the wire contract"
-)]
 pub(super) async fn serve_binding_backend_inner(
     listener: TcpListener,
     storage: Arc<PlatformStorage>,

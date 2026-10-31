@@ -28,7 +28,7 @@ impl WorkerRepository<'_> {
                     "SELECT EXISTS(SELECT 1 FROM workers
                      WHERE id = ?1 AND (SELECT instance_id FROM instance_identity) = ?2 AND ownership = 'tenant'
                        AND deleted_at_ms IS NULL)",
-                    params![worker_id.to_string(), instance_id.to_string()],
+                    params![worker_id, instance_id],
                     |row| row.get(0),
                 )
                 .map_err(|_| db_error())?;
@@ -45,7 +45,7 @@ impl WorkerRepository<'_> {
                      WHERE r.worker_id = ?1 AND (SELECT instance_id FROM instance_identity) = ?2
                        AND r.exposure = 'public' AND r.state = 'active'
                        AND c.state = 'active'",
-                    params![worker_id.to_string(), instance_id.to_string()],
+                    params![worker_id, instance_id],
                     map_route,
                 )
                 .optional()
@@ -143,7 +143,7 @@ impl WorkerRepository<'_> {
                       updated_at_ms, deleted_at_ms)
                      VALUES(?1, ?1, ?2, 'worker', 'public', '/', NULL,
                             'active', 1, ?3, ?3, NULL)",
-                    params![id, worker_id.to_string(), now_ms],
+                    params![id, worker_id, now_ms],
                 )
                 .map_err(|_| db_error())?;
                 Some(RouteRecord {

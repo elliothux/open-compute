@@ -114,7 +114,7 @@ fn driver_covers_reconcile_health_and_live_delete_fence() {
         .execute(
             "INSERT INTO do_objects(namespace_resource_id, object_id, generation, state, \
              created_at_ms, updated_at_ms, deleted_at_ms) VALUES (?1, ?2, 1, 'ready', 4, 4, NULL)",
-            rusqlite::params![ready.id.to_string(), hex::encode(object)],
+            rusqlite::params![ready.id, hex::encode(object)],
         )
         .unwrap();
     assert_eq!(

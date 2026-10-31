@@ -1,10 +1,5 @@
 //! In-process HTTP S3-compatible test server.
 
-#![allow(
-    missing_docs,
-    reason = "test-only mock fields are intentionally direct fixture controls"
-)]
-
 use bytes::Bytes;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;

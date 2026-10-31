@@ -169,7 +169,7 @@ impl WorkflowRepository<'_> {
                 return Ok(operation);
             }
             let reservation = tx.query_row(&format!("{} WHERE r.instance_id=?1", instances::RESERVATION_SELECT),
-                [identity.instance_id.to_string()], instances::reservation_row).map_err(sql_error)?;
+                [identity.instance_id], instances::reservation_row).map_err(sql_error)?;
             if !matches!(reservation.state, WorkflowRefState::Live | WorkflowRefState::Retained)
                 || (kind == WorkflowOperationKind::Purge && reservation.state != WorkflowRefState::Retained)
             { return Err(error(ErrorCode::WorkflowInstanceStateConflict)); }
@@ -179,12 +179,12 @@ impl WorkflowRepository<'_> {
                     JOIN workflow_definitions f ON f.id=v.definition_id JOIN worker_versions d ON d.id=v.worker_version_id
                     JOIN workers w ON w.id=d.worker_id WHERE v.id=?1 AND v.state='ready' AND f.state='ready'
                       AND f.availability='healthy' AND d.state='ready' AND w.deleted_at_ms IS NULL)",
-                    [identity.target.workflow_version_id.to_string()], |row|row.get(0)).map_err(sql_error)?;
+                    [identity.target.workflow_version_id], |row|row.get(0)).map_err(sql_error)?;
                 if !ready { return Err(error(ErrorCode::WorkflowVersionNotReady)); }
                 if reservation.state == WorkflowRefState::Retained {
                     let active: u64 = tx.query_row("SELECT COUNT(*) FROM workflow_instance_referrers r
                         JOIN workflow_definitions f ON f.id=r.definition_id WHERE (SELECT instance_id FROM instance_identity)=?1
-                          AND r.state IN ('creating','live','restarting')", [identity.target.instance_id.to_string()],
+                          AND r.state IN ('creating','live','restarting')", [identity.target.instance_id],
                         |row|row.get(0)).map_err(sql_error)?;
                     if active >= u64::from(limits.max_active) { return Err(error(ErrorCode::WorkflowStateQuotaExceeded)); }
                 }
@@ -193,16 +193,16 @@ impl WorkflowRepository<'_> {
                 identity.instance_generation.checked_add(1).ok_or_else(||error(ErrorCode::WorkflowInstanceStateConflict))?
             } else { identity.instance_generation };
             let sequence: i64=tx.query_row("SELECT operation_sequence FROM workflow_instance_referrers WHERE instance_id=?1",
-                [identity.instance_id.to_string()],|row|row.get(0)).map_err(sql_error)?;
+                [identity.instance_id],|row|row.get(0)).map_err(sql_error)?;
             let sequence=sequence.checked_add(1).ok_or_else(||error(ErrorCode::WorkflowInstanceStateConflict))?;
             tx.execute("UPDATE workflow_instance_referrers SET operation_sequence=?2 WHERE instance_id=?1",
-                params![identity.instance_id.to_string(),sequence]).map_err(sql_error)?;
+                params![identity.instance_id,sequence]).map_err(sql_error)?;
             let operation = WorkflowOperation {id: operation_id, identity: identity.clone(), kind, restart_from,
                 target_generation, prior_state: reservation.state, created_at_ms: now_ms, sequence};
             tx.execute("INSERT INTO workflow_instance_operations(operation_id,instance_id,creation_nonce,expected_generation,
                 target_generation,kind,restart_from_name,restart_from_count,restart_from_kind,prior_ref_state,created_at_ms,operation_sequence)
                 VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)", params![
-                operation.id.to_string(),identity.instance_id.to_string(),identity.creation_nonce.as_bytes().as_slice(),
+                operation.id,identity.instance_id,identity.creation_nonce.as_bytes().as_slice(),
                 identity.instance_generation,target_generation,kind.as_str(),
                 operation.restart_from.as_ref().map(|selector| selector.name.as_str()),
                 operation.restart_from.as_ref().map(|selector| selector.count),
@@ -210,7 +210,7 @@ impl WorkflowRepository<'_> {
                 if reservation.state==WorkflowRefState::Live {"live"} else {"retained"},now_ms,sequence]).map_err(sql_error)?;
             if kind == WorkflowOperationKind::Restart {
                 tx.execute("UPDATE workflow_instance_referrers SET state='restarting',updated_at_ms=?2 WHERE instance_id=?1",
-                    params![identity.instance_id.to_string(),now_ms]).map_err(sql_error)?;
+                    params![identity.instance_id,now_ms]).map_err(sql_error)?;
             }
             Ok(operation)
         })
@@ -243,7 +243,7 @@ impl WorkflowRepository<'_> {
             let ids = statement
                 .query_map(
                     params![after.map_or_else(String::new, |id| id.to_string()), limit],
-                    |row| parse(row, 0),
+                    |row| row.get(0),
                 )
                 .map_err(sql_error)?
                 .collect::<Result<Vec<WorkflowInstanceId>, _>>()
@@ -265,24 +265,24 @@ impl WorkflowRepository<'_> {
             let current=read_operation(tx,operation.identity.instance_id)?;
             if let Some(current)=current {
                 if current != *operation { return Err(error(ErrorCode::WorkflowInstanceBusy)); }
-                tx.execute("UPDATE workflow_instance_operations SET applied=1 WHERE operation_id=?1",[operation.id.to_string()]).map_err(sql_error)?;
+                tx.execute("UPDATE workflow_instance_operations SET applied=1 WHERE operation_id=?1",[operation.id]).map_err(sql_error)?;
                 match operation.kind {
                     WorkflowOperationKind::Restart => {
                         tx.execute("UPDATE workflow_instance_referrers SET state='live',instance_generation=?2,updated_at_ms=?3
-                            WHERE instance_id=?1 AND state='restarting'",params![operation.identity.instance_id.to_string(),operation.target_generation,now_ms]).map_err(sql_error)?;
-                        tx.execute("DELETE FROM workflow_instance_operations WHERE operation_id=?1",[operation.id.to_string()]).map_err(sql_error)?;
+                            WHERE instance_id=?1 AND state='restarting'",params![operation.identity.instance_id,operation.target_generation,now_ms]).map_err(sql_error)?;
+                        tx.execute("DELETE FROM workflow_instance_operations WHERE operation_id=?1",[operation.id]).map_err(sql_error)?;
                     }
                     WorkflowOperationKind::Purge => {
                         tx.execute("UPDATE workflow_instance_referrers SET state='releasing',updated_at_ms=?2 WHERE instance_id=?1 AND state='retained'",
-                            params![operation.identity.instance_id.to_string(),now_ms]).map_err(sql_error)?;
+                            params![operation.identity.instance_id,now_ms]).map_err(sql_error)?;
                         tx.execute("UPDATE workflow_instance_referrers SET state='released',released_at_ms=?2,updated_at_ms=?2
-                            WHERE instance_id=?1 AND state='releasing'",params![operation.identity.instance_id.to_string(),now_ms]).map_err(sql_error)?;
-                        tx.execute("DELETE FROM workflow_instance_referrers WHERE instance_id=?1",[operation.identity.instance_id.to_string()]).map_err(sql_error)?;
+                            WHERE instance_id=?1 AND state='releasing'",params![operation.identity.instance_id,now_ms]).map_err(sql_error)?;
+                        tx.execute("DELETE FROM workflow_instance_referrers WHERE instance_id=?1",[operation.identity.instance_id]).map_err(sql_error)?;
                     }
                 }
             }
             let reservation = tx.query_row(&format!("{} WHERE r.instance_id=?1", instances::RESERVATION_SELECT),
-                [operation.identity.instance_id.to_string()], instances::reservation_row).optional().map_err(sql_error)?;
+                [operation.identity.instance_id], instances::reservation_row).optional().map_err(sql_error)?;
             match (operation.kind,reservation) {
                 (WorkflowOperationKind::Restart,Some(row)) => {
                     let mut expected=operation.identity.clone(); expected.instance_generation=operation.target_generation;
@@ -293,7 +293,7 @@ impl WorkflowRepository<'_> {
                 (WorkflowOperationKind::Purge,None) => {
                     let dangling: bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM version_referrers WHERE kind='workflow_instance' AND ref_id=?1)
                         OR EXISTS(SELECT 1 FROM workflow_referrers WHERE referrer_kind='instance' AND referrer_id=?1)",
-                        [operation.identity.instance_id.to_string()],|row|row.get(0)).map_err(sql_error)?;
+                        [operation.identity.instance_id],|row|row.get(0)).map_err(sql_error)?;
                     if dangling { return Err(invariant()); }
                 }
                 _ => return Err(invariant()),
@@ -309,8 +309,8 @@ fn read_operation(
 ) -> Result<Option<WorkflowOperation>, PlatformError> {
     let raw=conn.query_row("SELECT operation_id,creation_nonce,expected_generation,target_generation,kind,
         restart_from_name,restart_from_count,restart_from_kind,prior_ref_state,applied,created_at_ms,operation_sequence
-        FROM workflow_instance_operations WHERE instance_id=?1",[id.to_string()],|row|Ok((
-            parse::<WorkflowOperationId>(row,0)?,digest(row,1)?,row.get::<_,i64>(2)?,row.get::<_,i64>(3)?,row.get::<_,String>(4)?,
+        FROM workflow_instance_operations WHERE instance_id=?1",[id],|row|Ok((
+            row.get::<_, WorkflowOperationId>(0)?,digest(row,1)?,row.get::<_,i64>(2)?,row.get::<_,i64>(3)?,row.get::<_,String>(4)?,
             row.get::<_,Option<String>>(5)?,row.get::<_,Option<u32>>(6)?,row.get::<_,Option<String>>(7)?,
             row.get::<_,String>(8)?,row.get::<_,bool>(9)?,row.get::<_,i64>(10)?,row.get::<_,i64>(11)?))).optional().map_err(sql_error)?;
     let Some((
@@ -331,7 +331,7 @@ fn read_operation(
         return Ok(None);
     };
     let row=conn.query_row(&format!("{} WHERE r.instance_id=(SELECT instance_id FROM workflow_instance_operations WHERE operation_id=?1)",instances::RESERVATION_SELECT),
-        [id.to_string()],instances::reservation_row).map_err(sql_error)?;
+        [id],instances::reservation_row).map_err(sql_error)?;
     let kind = match kind.as_str() {
         "restart" => WorkflowOperationKind::Restart,
         "purge" => WorkflowOperationKind::Purge,
@@ -365,7 +365,7 @@ fn read_operation(
     let reserved_sequence: i64 = conn
         .query_row(
             "SELECT operation_sequence FROM workflow_instance_referrers WHERE instance_id=?1",
-            [row.identity.instance_id.to_string()],
+            [row.identity.instance_id],
             |row| row.get(0),
         )
         .map_err(sql_error)?;
@@ -417,7 +417,7 @@ pub(crate) fn verify_operations(conn: &rusqlite::Connection) -> Result<(), Platf
         .prepare("SELECT instance_id FROM workflow_instance_operations")
         .map_err(sql_error)?;
     for id in statement
-        .query_map([], |row| parse(row, 0))
+        .query_map([], |row| row.get(0))
         .map_err(sql_error)?
     {
         read_operation(conn, id.map_err(sql_error)?)?.ok_or_else(invariant)?;

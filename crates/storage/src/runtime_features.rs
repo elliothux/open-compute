@@ -96,7 +96,7 @@ pub(crate) fn insert_runtime_features(
              (version_id, entrypoint_name, enabled, cross_version_cache)
              VALUES (?1, ?2, ?3, ?4)",
             params![
-                version_id.to_string(),
+                version_id,
                 policy.entrypoint.as_deref().unwrap_or(""),
                 policy.enabled,
                 policy.cross_version_cache,
@@ -110,7 +110,7 @@ pub(crate) fn insert_runtime_features(
              (version_id, binding_name, kind, tag, descriptor_sha256)
              VALUES (?1, ?2, ?3, ?4, ?5)",
             params![
-                version_id.to_string(),
+                version_id,
                 binding.name,
                 binding.kind.as_str(),
                 binding.tag,
@@ -134,7 +134,7 @@ pub(crate) fn read_cache_policies_conn(
         )
         .map_err(|_| invariant())?;
     let rows = statement
-        .query_map([version_id.to_string()], |row| {
+        .query_map([version_id], |row| {
             let entrypoint: String = row.get(0)?;
             Ok(VersionCachePolicyRecord {
                 entrypoint: (!entrypoint.is_empty()).then_some(entrypoint),
@@ -158,7 +158,7 @@ pub(crate) fn read_builtin_bindings_conn(
         )
         .map_err(|_| invariant())?;
     let rows = statement
-        .query_map([version_id.to_string()], |row| {
+        .query_map([version_id], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,

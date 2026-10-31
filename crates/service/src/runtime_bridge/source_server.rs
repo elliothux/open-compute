@@ -377,10 +377,6 @@ async fn resolve_python(State(state): State<SourceState>, request: Request) -> R
         .unwrap_or_else(|| StatusCode::NOT_FOUND.into_response())
 }
 
-#[allow(
-    clippy::needless_pass_by_value,
-    reason = "the callback contract transfers ownership of this value"
-)]
 pub(super) fn source_platform_error(error: PlatformError) -> Response {
     let status = match error.code() {
         ErrorCode::VersionNotReady => StatusCode::CONFLICT,

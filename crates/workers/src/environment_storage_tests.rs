@@ -95,7 +95,7 @@ async fn variable_admission_and_restart_preserve_the_complete_immutable_environm
     let noncanonical = format!(" \"{}\" ", "x".repeat(MAX_VARIABLE_BYTES)).into_bytes();
     conn.execute(
         "UPDATE version_vars SET value_json=?1 WHERE version_id=?2 AND name='VAR_0'",
-        rusqlite::params![noncanonical, result.version.id.to_string()],
+        rusqlite::params![noncanonical, result.version.id],
     )
     .unwrap();
     assert_eq!(

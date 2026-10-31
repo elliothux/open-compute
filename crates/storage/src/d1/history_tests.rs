@@ -699,7 +699,7 @@ fn sql_guards_reject_snapshot_transfer_and_restore_corruption() {
                 tx.execute(
                     "UPDATE d1_snapshots SET size_bytes = 101
                      WHERE resource_id = ?1 AND session_version = 0",
-                    [resource.to_string()],
+                    [resource],
                 )
                 .is_err()
             );
@@ -749,7 +749,7 @@ fn sql_guards_reject_snapshot_transfer_and_restore_corruption() {
                 tx.execute(
                     "UPDATE d1_restore_intents SET result_session_version = 2
                      WHERE resource_id = ?1",
-                    [resource.to_string()],
+                    [resource],
                 )
                 .is_err()
             );

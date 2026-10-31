@@ -252,10 +252,6 @@ fn assets_digest(assets: &BTreeMap<String, Vec<u8>>) -> String {
     hex::encode(assets_digest.finalize())
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "build output fields mirror the embedded payload contract"
-)]
 fn write_payload(
     archive: Vec<u8>,
     pyodide_archive: Vec<u8>,

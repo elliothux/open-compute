@@ -224,10 +224,6 @@ fn pixel_base64() -> String {
     base64::engine::general_purpose::STANDARD.encode(bytes)
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "scenario helpers keep distinct fixture identities explicit"
-)]
 fn request(
     account_id: open_compute_core::InstanceId,
     worker_id: open_compute_core::WorkerId,

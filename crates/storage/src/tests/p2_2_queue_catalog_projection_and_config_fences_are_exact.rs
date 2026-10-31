@@ -64,14 +64,14 @@ fn p2_2_queue_catalog_projection_and_config_fences_are_exact() {
     assert!(
         raw.execute(
             "UPDATE queues SET delivery_delay_seconds = 4 WHERE id = ?1",
-            [queue_id.to_string()],
+            [queue_id],
         )
         .is_err()
     );
     assert!(
         raw.execute(
             "UPDATE queues SET config_generation = config_generation + 1 WHERE id = ?1",
-            [queue_id.to_string()],
+            [queue_id],
         )
         .is_err()
     );
@@ -81,7 +81,7 @@ fn p2_2_queue_catalog_projection_and_config_fences_are_exact() {
                     config_generation = config_generation + 1,
                     availability = 'degraded', availability_code = 'QUEUE_CONFIG_PENDING'
              WHERE id = ?1",
-            [queue_id.to_string()],
+            [queue_id],
         )
         .is_err()
     );

@@ -47,7 +47,7 @@ impl CloudflareArtifactsRepository<'_> {
                     "UPDATE artifact_repositories SET state = ?2, updated_at_ms = ?3
                      WHERE id = ?1 AND state = ?4",
                     params![
-                        id.to_string(),
+                        id,
                         if success { "ready" } else { "failed" },
                         now_ms,
                         expected.as_str()

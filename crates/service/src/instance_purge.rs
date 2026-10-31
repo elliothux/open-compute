@@ -23,10 +23,6 @@ struct PurgePlan {
 }
 
 /// Select and purge exactly one registered instance.
-#[allow(
-    clippy::too_many_arguments,
-    reason = "CLI boundary mirrors explicit purge inputs"
-)]
 pub(crate) fn run_selected_purge(
     config: Option<&Path>,
     instance: Option<&InstanceSelector>,

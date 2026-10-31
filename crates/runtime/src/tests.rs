@@ -223,10 +223,6 @@ async fn verify_ok(lock_path: &Path, bin: &Path) -> crate::VerifiedRuntime {
         .expect("verify")
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "scenario helpers keep distinct fixture identities explicit"
-)]
 fn compile_req<'a>(
     runtime: &'a crate::VerifiedRuntime,
     lock_path: &'a Path,

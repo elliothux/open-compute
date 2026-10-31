@@ -136,7 +136,7 @@ impl<'a> BrowserSessions<'a> {
                 "INSERT INTO browser_sessions
                  (id, instance_id, runtime_generation, runtime_contract_sha256, state, keep_alive_ms,
                   created_at_ms, last_activity_at_ms) VALUES (?1,?2,?3,?4,'ready',?5,?6,?7)",
-                params![record.id, record.instance_id.to_string(), record.generation,
+                params![record.id, record.instance_id, record.generation,
                     record.contract_sha256.as_slice(), record.keep_alive_ms, record.created_at_ms, record.last_activity_at_ms],
             ).map_err(|_| invariant())?;
             Ok(())
@@ -155,7 +155,7 @@ impl<'a> BrowserSessions<'a> {
                 "SELECT id, instance_id, runtime_generation, runtime_contract_sha256, state, keep_alive_ms,
                  connections, created_at_ms, last_activity_at_ms, connected_at_ms, closed_at_ms, close_reason
                  FROM browser_sessions WHERE instance_id=?1 AND id=?2 AND runtime_generation=?3",
-                params![instance.to_string(), id, generation], decode,
+                params![instance, id, generation], decode,
             ).optional().map_err(|_| invariant())?.map(validate).transpose()
         })
     }
@@ -180,7 +180,7 @@ impl<'a> BrowserSessions<'a> {
                    OR (NOT ?2 AND state NOT IN ('closed','lost')))
                  ORDER BY created_at_ms,id LIMIT ?3 OFFSET ?4",
             ).map_err(|_| invariant())?;
-            statement.query_map(params![instance.to_string(), history, limit, offset], decode)
+            statement.query_map(params![instance, history, limit, offset], decode)
                 .map_err(|_| invariant())?.map(|row| validate(row.map_err(|_| invariant())?)).collect()
         })
     }
@@ -203,7 +203,7 @@ impl<'a> BrowserSessions<'a> {
                  connected_at_ms=CASE WHEN ?4=1 THEN ?5 ELSE connected_at_ms END
                  WHERE instance_id=?1 AND id=?2 AND runtime_generation=?3
                    AND state IN ('ready','connected') AND connections+?4>=0",
-                    params![instance.to_string(), id, generation, delta, now_ms],
+                    params![instance, id, generation, delta, now_ms],
                 )
                 .map_err(|_| invariant())?;
             if changed != 1 {
@@ -225,7 +225,7 @@ impl<'a> BrowserSessions<'a> {
             let changed = tx.execute(
                 "UPDATE browser_sessions SET last_activity_at_ms=?4
                  WHERE instance_id=?1 AND id=?2 AND runtime_generation=?3 AND state IN ('ready','connected')",
-                params![instance.to_string(), id, generation, now_ms],
+                params![instance, id, generation, now_ms],
             ).map_err(|_| invariant())?;
             if changed != 1 { return Err(not_found()); }
             Ok(())
@@ -243,7 +243,7 @@ impl<'a> BrowserSessions<'a> {
             tx.execute(
                 "UPDATE browser_sessions SET state='closing' WHERE instance_id=?1 AND id=?2
              AND runtime_generation=?3 AND state IN ('ready','connected')",
-                params![instance.to_string(), id, generation],
+                params![instance, id, generation],
             )
             .map(|changed| changed == 1)
             .map_err(|_| invariant())
@@ -265,7 +265,7 @@ impl<'a> BrowserSessions<'a> {
                  WHERE instance_id=?1 AND id=?2 AND runtime_generation=?3
                    AND state NOT IN ('closed','lost') AND (?4='lost' OR state='closing')",
                 params![
-                    instance.to_string(),
+                    instance,
                     id,
                     generation,
                     if reason == BrowserSessionCloseReason::Lost { "lost" } else { "closed" },
@@ -284,7 +284,7 @@ impl<'a> BrowserSessions<'a> {
             tx.execute(
                 "UPDATE browser_sessions SET state='lost', connections=0, closed_at_ms=?2, close_reason='lost'
              WHERE instance_id=?1 AND state NOT IN ('closed','lost')",
-                params![instance.to_string(), now_ms],
+                params![instance, now_ms],
             )
             .map_err(|_| invariant())
         })
@@ -311,7 +311,7 @@ impl<'a> BrowserSessions<'a> {
                      WHERE instance_id=?1 AND state IN ('closed','lost')
                      ORDER BY closed_at_ms DESC,id DESC LIMIT ?3
                    ))",
-                params![instance.to_string(), cutoff_ms, max_entries],
+                params![instance, cutoff_ms, max_entries],
             )
             .map_err(|_| invariant())
         })
@@ -320,7 +320,7 @@ impl<'a> BrowserSessions<'a> {
 
 type Stored = (
     String,
-    String,
+    InstanceId,
     String,
     Vec<u8>,
     String,
@@ -351,7 +351,7 @@ fn decode(row: &rusqlite::Row<'_>) -> rusqlite::Result<Stored> {
 fn validate(row: Stored) -> Result<BrowserSessionRecord, PlatformError> {
     Ok(BrowserSessionRecord {
         id: row.0,
-        instance_id: row.1.parse().map_err(|_| invariant())?,
+        instance_id: row.1,
         generation: row.2,
         contract_sha256: row.3.try_into().map_err(|_| invariant())?,
         state: BrowserSessionState::parse(&row.4)?,

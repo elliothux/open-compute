@@ -148,7 +148,7 @@ ocd cf deploy --prebuilt --mode production
 宿主是一个异步 Rust 进程。请求从 socket 到 Worker 之间不经过解释器，也不需要额外的 sidecar 转发。
 
 - **全链路异步。** `tokio` 多线程 runtime，`axum` + `hyper` 同时承载两个平面。请求体以 `bytes` 流式穿过，不缓冲整个 payload。
-- **`unsafe_code = "forbid"`。** 全 workspace 生效——整个平台是 safe Rust。外加 `missing_docs = "deny"`、`unused_must_use = "deny"`，以及全 target/全 feature 的 Clippy `-D warnings`。
+- **`unsafe_code = "forbid"`。** 全 workspace 生效——整个平台是 safe Rust。外加 `unused_must_use = "deny"`，以及全 target/全 feature 的 Clippy `-D warnings`。
 - **release 为速度而编。** thin LTO、`codegen-units = 1`、`panic = "abort"`、strip 符号表——一个致密的静态链接产物。
 - **进程内状态。** `rusqlite` 将 SQLite 内嵌到 `ocd`；事务是函数调用，不是网络往返。外键保持开启，WAL 由本机持有。
 - **按内容寻址的运行时 payload。** 校验过的运行时 payload 按内容寻址、只物化一次，跨重启复用。

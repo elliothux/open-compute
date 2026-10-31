@@ -70,11 +70,7 @@ fn published_account_rows_become_one_instance_or_fail_atomically() {
                  (id, account_id, name, active_deployment_id, do_storage_id,
                   route_generation, created_at_ms, updated_at_ms, deleted_at_ms, ownership)
                  VALUES(?1, ?2, 'app', NULL, ?3, 0, 7, 7, NULL, 'system')",
-                rusqlite::params![
-                    worker,
-                    id,
-                    open_compute_core::WorkerId::generate().to_string()
-                ],
+                rusqlite::params![worker, id, open_compute_core::WorkerId::generate()],
             )
             .unwrap();
         connection
@@ -388,10 +384,7 @@ fn published_account_rows_become_one_instance_or_fail_atomically() {
                 "INSERT INTO deployment_runtime_assessments
                  (deployment_id, state, startup_id, updated_at_ms)
                  VALUES(?1, 'dispatchable', ?2, 7)",
-                rusqlite::params![
-                    deployment,
-                    open_compute_core::StartupId::generate().to_string()
-                ],
+                rusqlite::params![deployment, open_compute_core::StartupId::generate()],
             )
             .unwrap();
         connection
@@ -791,7 +784,7 @@ fn r2_size_migration_preserves_existing_objects_as_unknown() {
     connection
         .execute(
             "INSERT INTO instance_identity(instance_id, created_at_ms) VALUES (?1, 1)",
-            [instance.to_string()],
+            [instance],
         )
         .unwrap();
     connection
@@ -799,7 +792,7 @@ fn r2_size_migration_preserves_existing_objects_as_unknown() {
             "INSERT INTO resources(id, kind, name, state,
                                    driver_schema_version, created_at_ms, updated_at_ms)
              VALUES (?1, 'r2_bucket', 'bucket-one', 'creating', 1, 1, 1)",
-            [bucket.to_string()],
+            [bucket],
         )
         .unwrap();
     connection
@@ -807,24 +800,17 @@ fn r2_size_migration_preserves_existing_objects_as_unknown() {
             "INSERT INTO r2_buckets(resource_id, physical_prefix, schema_version,
                                     max_object_bytes, object_authority_sha256, created_at_ms)
              VALUES (?1, ?2, 1, 1024, ?3, 1)",
-            params![
-                bucket.to_string(),
-                format!("tenant/r2/v1/{bucket}/"),
-                vec![1_u8; 32]
-            ],
+            params![bucket, format!("tenant/r2/v1/{bucket}/"), vec![1_u8; 32]],
         )
         .unwrap();
     connection
-        .execute(
-            "UPDATE resources SET state='ready' WHERE id=?1",
-            [bucket.to_string()],
-        )
+        .execute("UPDATE resources SET state='ready' WHERE id=?1", [bucket])
         .unwrap();
     connection
         .execute(
             "INSERT INTO r2_objects(resource_id, object_key, object_version, updated_at_ms)
              VALUES (?1, 'old.txt', 'version-1', 1)",
-            [bucket.to_string()],
+            [bucket],
         )
         .unwrap();
     drop(connection);
@@ -841,7 +827,7 @@ fn r2_size_migration_preserves_existing_objects_as_unknown() {
         assert!(
             tx.execute(
                 "UPDATE r2_objects SET size_bytes=-1 WHERE resource_id=?1",
-                [bucket.to_string()],
+                [bucket],
             )
             .is_err()
         );

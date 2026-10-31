@@ -48,7 +48,7 @@ impl WorkerRepository<'_> {
                     "SELECT EXISTS(SELECT 1 FROM worker_versions
                      WHERE id=?1 AND worker_id=?2 AND state='validating'
                        AND content_kind='worker' AND substr(main_module,-3)='.py')",
-                    params![artifact.version_id.to_string(), worker.to_string()],
+                    params![artifact.version_id, worker],
                     |row| row.get(0),
                 )
                 .map_err(|_| db_error())?;
@@ -61,7 +61,7 @@ impl WorkerRepository<'_> {
                   artifact_sha256, artifact_size, created_at_ms)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 params![
-                    artifact.version_id.to_string(),
+                    artifact.version_id,
                     artifact.prepared_identity_sha256.as_slice(),
                     artifact.identity_json,
                     artifact.artifact_sha256.as_slice(),
@@ -84,7 +84,7 @@ pub(super) fn read_python_prepared_conn(
             "SELECT prepared_identity_sha256, identity_json, artifact_sha256,
                     artifact_size, created_at_ms
              FROM version_python_prepared WHERE version_id=?1",
-            [version.to_string()],
+            [version],
             |row| {
                 let identity: Vec<u8> = row.get(0)?;
                 let digest: Vec<u8> = row.get(2)?;

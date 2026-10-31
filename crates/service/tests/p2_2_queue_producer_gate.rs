@@ -539,10 +539,6 @@ pub(crate) async fn deploy(
     }
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "scenario helpers keep distinct fixture identities explicit"
-)]
 fn version_request(
     account_id: InstanceId,
     worker_id: open_compute_core::WorkerId,
@@ -611,10 +607,6 @@ pub(crate) struct DispatchResponse {
     loader_outcome: Option<LoaderOutcome>,
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "scenario helpers keep distinct fixture identities explicit"
-)]
 pub(crate) async fn dispatch(
     transport: &WorkerdTransport,
     account_id: InstanceId,
