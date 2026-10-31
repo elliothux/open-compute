@@ -57,17 +57,37 @@ pub fn inspect_workflow_databases(
     busy_timeout_ms: u64,
     limit: u32,
 ) -> Result<WorkflowDatabaseInspection, PlatformError> {
+    inspect_with_mode(control_path, scheduler_path, busy_timeout_ms, limit, false)
+}
+
+/// Inspect checkpointed Workflow state without creating or updating SQLite sidecars.
+pub fn inspect_workflow_databases_readonly(
+    control_path: &std::path::Path,
+    scheduler_path: &std::path::Path,
+    busy_timeout_ms: u64,
+    limit: u32,
+) -> Result<WorkflowDatabaseInspection, PlatformError> {
+    inspect_with_mode(control_path, scheduler_path, busy_timeout_ms, limit, true)
+}
+
+fn inspect_with_mode(
+    control_path: &std::path::Path,
+    scheduler_path: &std::path::Path,
+    busy_timeout_ms: u64,
+    limit: u32,
+    immutable: bool,
+) -> Result<WorkflowDatabaseInspection, PlatformError> {
     bounded(limit)?;
-    let control = ControlDb::open_readonly_wal_aware(control_path, busy_timeout_ms)?;
-    let path = crate::control_db::leaf_nofollow_path(scheduler_path)?;
-    let connection = Connection::open_with_flags(
-        path,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NOFOLLOW,
-    )
-    .map_err(sql_error)?;
-    connection
-        .busy_timeout(std::time::Duration::from_millis(busy_timeout_ms))
-        .map_err(sql_error)?;
+    let control = if immutable {
+        ControlDb::open_readonly(control_path, busy_timeout_ms)?
+    } else {
+        ControlDb::open_readonly_wal_aware(control_path, busy_timeout_ms)?
+    };
+    let connection = crate::scheduler::inspection::open_inspection_connection(
+        scheduler_path,
+        busy_timeout_ms,
+        immutable,
+    )?;
     connection
         .pragma_update(None, "query_only", "ON")
         .map_err(sql_error)?;

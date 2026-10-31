@@ -88,7 +88,7 @@ fn rollback_replays_completed_handlers_recovers_inflight_work_and_terminates() {
 
     drop(store);
     let store = SchedulerStore::open(
-        &temp.path().join("scheduler.sqlite"),
+        &temp.path().join("control.sqlite"),
         5000,
         3,
         "019c0000000070008000000000000001".parse().unwrap(),

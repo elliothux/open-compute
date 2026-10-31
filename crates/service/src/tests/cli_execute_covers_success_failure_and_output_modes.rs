@@ -50,7 +50,7 @@ async fn cli_execute_covers_success_failure_and_output_modes() {
     .await
     .unwrap();
     let scheduler_path = storage.data_dir().ensure_scheduler_db().unwrap();
-    fs::write(&scheduler_path, b"corrupt scheduler").unwrap();
+    drop(SchedulerStore::open(&scheduler_path, 100, 10, storage.identity().instance_id).unwrap());
     drop(storage);
     let recovery = parse_from([
         "ocd",
@@ -65,28 +65,17 @@ async fn cli_execute_covers_success_failure_and_output_modes() {
     .unwrap();
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
-    assert_eq!(
+    assert_ne!(
         execute(recovery, &mut stdout, &mut stderr).await,
         std::process::ExitCode::SUCCESS
     );
-    assert!(stderr.is_empty());
+    assert!(stdout.is_empty());
     assert!(
-        String::from_utf8(stdout)
+        String::from_utf8(stderr)
             .unwrap()
-            .contains("SCHEDULER_RECOVERED")
+            .contains("full snapshot restore")
     );
     assert!(inspect_scheduler_db(&scheduler_path, 100, 10).is_ok());
-    assert_eq!(
-        fs::read(
-            loaded
-                .config
-                .data
-                .path
-                .join("diagnostics/scheduler-recovery/scheduler-corrupt-cli-test/scheduler.sqlite")
-        )
-        .unwrap(),
-        b"corrupt scheduler"
-    );
 
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();

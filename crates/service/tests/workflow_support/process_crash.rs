@@ -87,7 +87,7 @@ async fn workflow_ocd_sigkill_after_step_commit_replays_without_callback() {
     let create = tenant_json(&client, public, &host, "/create/crash-instance").await;
     assert_eq!(create["id"], "crash-instance", "{create}");
     let connection = rusqlite::Connection::open_with_flags(
-        data.join("scheduler.sqlite"),
+        data.join("control.sqlite"),
         rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
     )
     .unwrap();
@@ -153,7 +153,7 @@ async fn workflow_ocd_sigkill_after_step_commit_replays_without_callback() {
     }
     drop(connection);
     let reopened =
-        SchedulerStore::open(&data.join("scheduler.sqlite"), 5000, now(), account).unwrap();
+        SchedulerStore::open(&data.join("control.sqlite"), 5000, now(), account).unwrap();
     assert_eq!(reopened.inspect_workflows(now()).unwrap().complete, 1);
     assert_eq!(reopened.inspect_workflows(now()).unwrap().running, 0);
     drop(reopened);

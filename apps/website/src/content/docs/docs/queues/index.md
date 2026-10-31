@@ -2,7 +2,7 @@
 title: "Queues"
 ---
 
-Queues deliver messages from a producer Worker to a consumer Worker. Delivery is at-least-once. Durability comes from `scheduler.sqlite` on the node running ocd.
+Queues deliver messages from a producer Worker to a consumer Worker. Delivery is at-least-once. Durability comes from `control.sqlite` on the node running ocd.
 
 For example, you can use Queues for:
 
@@ -64,7 +64,7 @@ These calls commit to the same durable queue authority as Worker `send()` / `sen
 | Topic                   | Cloudflare                                                                                        | open-compute                                                                                                                               |
 | ----------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | JavaScript API          | [Queues JavaScript APIs](https://developers.cloudflare.com/queues/configuration/javascript-apis/) | Same: `send` / `sendBatch`, `contentType` (json / text / bytes / v8), `delaySeconds`, `metrics`, consumer `MessageBatch` / `ack` / `retry` |
-| Durability              | Global replication                                                                                | Local `scheduler.sqlite` on the node running ocd                                                                                           |
+| Durability              | Global replication                                                                                | Local `control.sqlite` on the node running ocd                                                                                             |
 | Delivery                | At-least-once                                                                                     | At-least-once                                                                                                                              |
 | Global FIFO             | Available                                                                                         | Not provided                                                                                                                               |
 | Unknown native dispatch | —                                                                                                 | May retain the lease; duplicate attempt numbers possible                                                                                   |

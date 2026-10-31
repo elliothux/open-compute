@@ -42,8 +42,7 @@ pub fn inspect_current_schema(
 ) -> Result<SchemaInspection, PlatformError> {
     control_db.quick_check()?;
     let control = migrations::inspect_schema(control_db)?;
-    let scheduler =
-        inspect_scheduler_schema_version(&data_dir.scheduler_db_path(), busy_timeout_ms)?;
+    let scheduler = inspect_scheduler_schema_version(&data_dir.control_db_path(), busy_timeout_ms)?;
     if control != migrations::current_schema_version()
         || scheduler != current_scheduler_schema_version()
     {

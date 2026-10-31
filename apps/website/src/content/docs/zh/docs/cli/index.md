@@ -45,7 +45,7 @@ target 清单位于所选 user／显式 system 作用域的 `<OCD_DIR>/targets.t
 
 - `backup create|list|inspect|delete|retention-plan|restore`
 - `backup cleanup-incomplete|cleanup-restore|attest-restore-smoke`
-- `scheduler recover-corrupt`
+- `scheduler recover-corrupt` （拒绝替换共用的 `control.sqlite`；请恢复整机 snapshot）
 - `cache clean [--instance <ID 或名称>|--all] [--dry-run]`
 - `upgrade`、`uninstall [--purge --yes]`、`purge --instance <id>|--config <path>`
 

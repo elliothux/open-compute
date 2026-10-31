@@ -3,9 +3,9 @@
 use super::*;
 
 pub(super) fn inspect(loaded: &LoadedConfig, root: &std::path::Path) -> DoctorCheck {
-    match open_compute_storage::scheduler::inspect_workflow_databases(
+    match open_compute_storage::scheduler::inspect_workflow_databases_readonly(
         &root.join("control.sqlite"),
-        &root.join("scheduler.sqlite"),
+        &root.join("control.sqlite"),
         loaded.config.data.sqlite_busy_timeout_ms,
         32,
     ) {

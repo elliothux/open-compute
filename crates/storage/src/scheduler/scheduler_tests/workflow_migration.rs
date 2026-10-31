@@ -7,7 +7,7 @@ fn current_workflow_scheduler_domain_initialization_is_atomic() {
         SchedulerMigrationFault::AfterCommit,
     ] {
         let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join("scheduler.sqlite");
+        let path = temp.path().join("control.sqlite");
         let connection = Connection::open(&path).unwrap();
         connection
             .pragma_update(None, "foreign_keys", "ON")

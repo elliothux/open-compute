@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn reopening_current_schema_preserves_definition_identity_and_alarm_rows() {
     let temp = tempfile::tempdir().unwrap();
-    let path = temp.path().join("scheduler.sqlite");
+    let path = temp.path().join("control.sqlite");
     let store = open_store(&temp, 10);
     let namespace = ResourceId::generate();
     let alarm = projection(namespace, object(namespace, 9), "preserve-token-01", 50);

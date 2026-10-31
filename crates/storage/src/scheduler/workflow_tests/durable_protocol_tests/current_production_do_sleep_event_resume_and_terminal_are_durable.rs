@@ -36,7 +36,7 @@ fn current_production_do_sleep_event_resume_and_terminal_are_durable() {
     assert_eq!(store.maintain_workflow_due(13, &limits, 10).unwrap(), 1);
     drop(store);
     let store = SchedulerStore::open(
-        &temp.path().join("scheduler.sqlite"),
+        &temp.path().join("control.sqlite"),
         5000,
         13,
         "019c0000000070008000000000000001".parse().unwrap(),

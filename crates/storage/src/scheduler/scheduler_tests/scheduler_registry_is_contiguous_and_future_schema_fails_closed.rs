@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn refinery_history_is_current_and_future_schema_fails_closed() {
     let temp = tempfile::tempdir().unwrap();
-    let path = temp.path().join("scheduler.sqlite");
+    let path = temp.path().join("control.sqlite");
     let store = open_store(&temp, 10);
     drop(store);
     let connection = Connection::open(&path).unwrap();
@@ -18,7 +18,7 @@ fn refinery_history_is_current_and_future_schema_fails_closed() {
         history,
         (
             current_scheduler_schema_version(),
-            "instance_identity".to_owned()
+            "scheduler_tables".to_owned()
         )
     );
     connection

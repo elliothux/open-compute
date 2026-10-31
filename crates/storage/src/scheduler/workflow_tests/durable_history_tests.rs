@@ -46,7 +46,7 @@ fn admission_freezes_retention_and_preserves_the_current_run_fence() {
     assert_eq!(workflow_invalid_rows(&store.lock().unwrap()).unwrap(), 0);
     drop(store);
     let reopened = SchedulerStore::open(
-        &temp.path().join("scheduler.sqlite"),
+        &temp.path().join("control.sqlite"),
         5000,
         3,
         "019c0000000070008000000000000001".parse().unwrap(),
@@ -171,7 +171,7 @@ fn history_accepts_failed_siblings_dependency_barriers_and_wait_kinds_after_rest
     assert_eq!(workflow_invalid_rows(&store.lock().unwrap()).unwrap(), 0);
     drop(store);
     let reopened = SchedulerStore::open(
-        &temp.path().join("scheduler.sqlite"),
+        &temp.path().join("control.sqlite"),
         5000,
         20,
         "019c0000000070008000000000000001".parse().unwrap(),
@@ -303,7 +303,7 @@ fn durable_yield_keeps_the_lease_until_drain_and_rechecks_the_settled_frontier()
         store.verify_workflow_history(id).unwrap();
         drop(store);
         let reopened = SchedulerStore::open(
-            &temp.path().join("scheduler.sqlite"),
+            &temp.path().join("control.sqlite"),
             5000,
             5,
             "019c0000000070008000000000000001".parse().unwrap(),
@@ -377,7 +377,7 @@ fn expired_current_recovery_preserves_business_attempt_and_deadline_and_honors_p
         store.verify_workflow_history(id).unwrap();
         drop(store);
         let reopened = SchedulerStore::open(
-            &temp.path().join("scheduler.sqlite"),
+            &temp.path().join("control.sqlite"),
             5000,
             1001,
             "019c0000000070008000000000000001".parse().unwrap(),

@@ -112,3 +112,15 @@ fn manifest_paths_caps_and_uniqueness_are_strict() {
     traversal.files[0].restore_path = "do/../control.sqlite".to_owned();
     assert!(traversal.validate(10, 100, 100).is_err());
 }
+
+#[test]
+fn manifest_accepts_shared_control_and_legacy_split_scheduler_snapshots() {
+    let mut value = manifest();
+    value.validate(10, 100, 100).unwrap();
+    value
+        .files
+        .retain(|file| file.role != SnapshotFileRole::SchedulerSqlite);
+    value.totals.files = 1;
+    value.totals.bytes = 10;
+    value.validate(10, 100, 100).unwrap();
+}

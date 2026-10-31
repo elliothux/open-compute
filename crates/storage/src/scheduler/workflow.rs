@@ -42,7 +42,9 @@ pub use durable_model::{
 mod durable_runs;
 #[path = "workflow/helpers.rs"]
 mod helpers;
-pub use doctor::{WorkflowDatabaseInspection, inspect_workflow_databases};
+pub use doctor::{
+    WorkflowDatabaseInspection, inspect_workflow_databases, inspect_workflow_databases_readonly,
+};
 #[path = "workflow/inspection.rs"]
 mod inspection;
 pub(super) use inspection::{workflow_inspection_connection, workflow_invalid_rows};

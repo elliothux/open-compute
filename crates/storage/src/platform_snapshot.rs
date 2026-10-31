@@ -327,13 +327,6 @@ fn snapshot_sources(
         path: data_dir.control_db_path(),
         sqlite: true,
     }];
-    sources.push(SnapshotSource {
-        role: SnapshotFileRole::SchedulerSqlite,
-        logical_id: "scheduler".to_owned(),
-        restore_path: "scheduler.sqlite".to_owned(),
-        path: data_dir.scheduler_db_path(),
-        sqlite: true,
-    });
     sources.extend(
         resource_sources(
             &data_dir.control_db_path(),

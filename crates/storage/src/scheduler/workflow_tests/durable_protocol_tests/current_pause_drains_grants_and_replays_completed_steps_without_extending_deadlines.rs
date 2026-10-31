@@ -88,7 +88,7 @@ fn current_pause_drains_grants_and_replays_completed_steps_without_extending_dea
     );
     drop(store);
     let store = SchedulerStore::open(
-        &temp.path().join("scheduler.sqlite"),
+        &temp.path().join("control.sqlite"),
         5000,
         6,
         "019c0000000070008000000000000001".parse().unwrap(),

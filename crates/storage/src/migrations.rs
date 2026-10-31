@@ -161,7 +161,10 @@ fn run_invariants(tx: &Transaction<'_>) -> Result<(), PlatformError> {
         "version_cache_policies",
         "version_builtin_bindings",
         "ai_search_r2_sources",
-    ] {
+    ]
+    .into_iter()
+    .chain(crate::scheduler_import::TABLES.iter().copied())
+    {
         let sql: Option<String> = tx
             .query_row(
                 "SELECT sql FROM sqlite_master WHERE type='table' AND name=?1",

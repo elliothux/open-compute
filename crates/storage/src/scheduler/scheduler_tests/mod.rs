@@ -30,7 +30,7 @@ fn projection(
 }
 
 fn open_store(temp: &tempfile::TempDir, now_ms: i64) -> SchedulerStore {
-    let path = temp.path().join("scheduler.sqlite");
+    let path = temp.path().join("control.sqlite");
     if !path.exists() {
         std::fs::OpenOptions::new()
             .write(true)

@@ -18,7 +18,10 @@ use open_compute_storage::data_dir::{inspect_durable_object_storage, read_operat
 use open_compute_storage::inspect::{
     inspect_control_db, inspect_data_root, inspect_master_key, inspect_resources,
 };
-use open_compute_storage::scheduler::{inspect_p23_cross_database, inspect_scheduler_db};
+use open_compute_storage::scheduler::{
+    inspect_p23_cross_database_readonly as inspect_p23_cross_database,
+    inspect_scheduler_db_readonly as inspect_scheduler_db,
+};
 use serde::Serialize;
 use std::io::Write;
 

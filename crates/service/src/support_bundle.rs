@@ -17,7 +17,7 @@ use open_compute_storage::data_dir::read_operation_receipt;
 use open_compute_storage::inspect::{
     inspect_control_db, inspect_master_key, inspect_operator_event_count, inspect_resources,
 };
-use open_compute_storage::scheduler::inspect_scheduler_db;
+use open_compute_storage::scheduler::inspect_scheduler_db_readonly as inspect_scheduler_db;
 use open_compute_storage::vectorize::VECTORIZE_SCHEMA_VERSION;
 use rustix::fs::{Mode, OFlags};
 use serde::Serialize;
@@ -259,7 +259,7 @@ fn schema_summary(loaded: &LoadedConfig) -> serde_json::Value {
         })
     });
     let scheduler = inspect_scheduler_db(
-        &loaded.config.data.path.join("scheduler.sqlite"),
+        &loaded.config.data.path.join("control.sqlite"),
         loaded.config.data.sqlite_busy_timeout_ms,
         open_compute_core::wall_time_ms(),
     )

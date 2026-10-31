@@ -191,7 +191,7 @@ async fn workflow_snapshot_fresh_host_replays_committed_steps_with_fresh_generat
     );
     let restored_store = Arc::new(
         SchedulerStore::open(
-            &data.join("scheduler.sqlite"),
+            &data.join("control.sqlite"),
             5000,
             now(),
             restored_storage.identity().instance_id,

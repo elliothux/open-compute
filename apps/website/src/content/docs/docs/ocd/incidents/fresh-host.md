@@ -20,7 +20,7 @@ Allowed mutation:
 /opt/open-compute/ocd --system --config /var/lib/open-compute/instances/default/compute.toml doctor --full --json
 ```
 
-A snapshot that includes Workflow must keep control/scheduler authority, restart/purge intent, operation progress, and GC receipts together. Original waiting/paused deadlines, inbox, and frozen retention are not recomputed. After restore, let the exact-release reconciler finish legal intermediate states, then verify original-version replay, paused state, events, and due work. Do not copy one database without the other, and do not delete operation rows to make diagnostics green.
+A snapshot that includes Workflow must keep control/scheduler authority, restart/purge intent, operation progress, and GC receipts together. Original waiting/paused deadlines, inbox, and frozen retention are not recomputed. After restore, let the exact-release reconciler finish legal intermediate states, then verify original-version replay, paused state, events, and due work. Control and scheduler tables share `control.sqlite`. New snapshots contain one database for these tables. Restore older snapshots with the source release before upgrading; startup imports the separate scheduler file. Do not delete operation rows to bypass diagnostics.
 
 Expect sibling staging, full verification, then one atomic install. Non-empty target, wrong key/release/object authority, path, hash, schema, or marker errors are stop conditions. Do not force or overwrite an old directory. On failure the target stays empty; the parent keeps a bounded `restore-failure` receipt and object staging under the same UUIDv7. After the diagnostic bytes are no longer needed, clean only the ID reported by that receipt:
 

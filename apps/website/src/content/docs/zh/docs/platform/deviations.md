@@ -51,7 +51,7 @@ title: "行为差异"
 | --------------------------------------- | ----------------------------------------------------- | -------------------------------------------- |
 | Durable Objects 位置                    | 所属实例的本机 workerd 进程                           | [Durable Objects](/zh/docs/durable-objects/) |
 | location hint / jurisdiction / 全球迁移 | 不产生地理调度效果                                    |                                              |
-| Queues 存储                             | 本机 `scheduler.sqlite`；投递语义为 at-least-once     | [Queues](/zh/docs/queues/)                   |
+| Queues 存储                             | 本机 `control.sqlite`；投递语义为 at-least-once       | [Queues](/zh/docs/queues/)                   |
 | Queues 全局 FIFO                        | 不提供                                                |                                              |
 | 无法识别的 native dispatch              | 可能保留消息 lease；后续投递可能使用同一 attempt 编号 |                                              |
 | Workflows                               | 步骤状态位于本机 SQLite                               | [Workflows](/zh/docs/workflows/)             |

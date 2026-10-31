@@ -628,7 +628,7 @@ pub(super) async fn snapshot_restore_gate() {
             .instance_id,
         instance_id
     );
-    let restored_scheduler = inspect_scheduler_db(&target_data.join("scheduler.sqlite"), 5_000, 1)
+    let restored_scheduler = inspect_scheduler_db(&target_data.join("control.sqlite"), 5_000, 1)
         .expect("restored scheduler");
     assert!(restored_scheduler.journal_mode.eq_ignore_ascii_case("wal"));
     assert_eq!(restored_scheduler.synchronous, 2);

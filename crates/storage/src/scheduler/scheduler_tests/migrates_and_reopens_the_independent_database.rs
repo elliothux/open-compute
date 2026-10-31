@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn migrates_and_reopens_the_independent_database() {
     let temp = tempfile::tempdir().unwrap();
-    let path = temp.path().join("scheduler.sqlite");
+    let path = temp.path().join("control.sqlite");
     std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -51,7 +51,7 @@ fn migrates_and_reopens_the_independent_database() {
 #[test]
 fn v1_schema_without_history_is_rejected_without_mutation() {
     let temp = tempfile::tempdir().unwrap();
-    let path = temp.path().join("scheduler.sqlite");
+    let path = temp.path().join("control.sqlite");
     let connection = Connection::open(&path).unwrap();
     connection
         .execute_batch(include_str!(
@@ -84,7 +84,7 @@ fn v1_schema_without_history_is_rejected_without_mutation() {
 #[test]
 fn old_scheduler_history_is_rejected_without_rewriting_it() {
     let temp = tempfile::tempdir().unwrap();
-    let path = temp.path().join("scheduler.sqlite");
+    let path = temp.path().join("control.sqlite");
     // Rebuild exactly the pre-Refinery head: the five published legacy migrations with
     // their frozen identities, applied in order to a fresh database.
     let connection = Connection::open(&path).unwrap();
@@ -155,7 +155,7 @@ fn old_scheduler_history_is_rejected_without_rewriting_it() {
 #[test]
 fn legacy_head_with_drifted_identity_fails_closed_on_reopen() {
     let temp = tempfile::tempdir().unwrap();
-    let path = temp.path().join("scheduler.sqlite");
+    let path = temp.path().join("control.sqlite");
     let connection = Connection::open(&path).unwrap();
     for sql in [
         include_str!("../../../scheduler-migrations/001_scheduler.sql"),
@@ -237,7 +237,7 @@ fn legacy_head_with_drifted_identity_fails_closed_on_reopen() {
 fn migrated_scheduler_owner_is_unique_and_mixed_projections_roll_back() {
     for mixed in [false, true] {
         let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join("scheduler.sqlite");
+        let path = temp.path().join("control.sqlite");
         let mut connection = Connection::open(&path).unwrap();
         crate::schema_migrations::migrate_to_for_test(
             &mut connection,
@@ -263,18 +263,15 @@ fn migrated_scheduler_owner_is_unique_and_mixed_projections_roll_back() {
                 )
                 .unwrap();
         }
-        drop(connection);
         if mixed {
             assert_eq!(
-                SchedulerStore::open(
-                    &path,
-                    100,
-                    10,
-                    "019c0000000070008000000000000001".parse().unwrap()
+                crate::schema_migrations::migrate(
+                    &mut connection,
+                    crate::schema_migrations::DatabaseKind::Scheduler
                 )
                 .unwrap_err()
                 .code(),
-                ErrorCode::SchedulerCorrupt
+                ErrorCode::MigrationFailed
             );
             let connection = Connection::open(&path).unwrap();
             let identity_table: i64 = connection
@@ -287,7 +284,11 @@ fn migrated_scheduler_owner_is_unique_and_mixed_projections_roll_back() {
             assert_eq!(identity_table, 0);
             continue;
         }
-        drop(SchedulerStore::open(&path, 100, 10, owner).unwrap());
+        crate::schema_migrations::migrate(
+            &mut connection,
+            crate::schema_migrations::DatabaseKind::Scheduler,
+        )
+        .unwrap();
         let connection = Connection::open(&path).unwrap();
         let actual: String = connection
             .query_row(
@@ -313,7 +314,7 @@ fn migrated_scheduler_owner_is_unique_and_mixed_projections_roll_back() {
 #[test]
 fn scheduler_owner_is_bound_before_recovery_and_cannot_be_reassigned() {
     let temp = tempfile::tempdir().unwrap();
-    let path = temp.path().join("scheduler.sqlite");
+    let path = temp.path().join("control.sqlite");
     let owner = InstanceId::generate();
     let other = InstanceId::generate();
     let store = SchedulerStore::open(&path, 100, 10, owner).unwrap();

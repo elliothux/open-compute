@@ -60,7 +60,7 @@ impl FromStr for QueueContentType {
     }
 }
 
-/// Exact control-plane Queue projection copied into `scheduler.sqlite`.
+/// Exact control-plane Queue projection copied into `control.sqlite`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct QueueProjection {
     /// Queue identity.

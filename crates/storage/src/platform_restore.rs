@@ -132,15 +132,18 @@ impl RestoreTarget {
             sqlite_busy_timeout_ms,
         )?;
         restore_artifact_directories(&self.staging, manifest)?;
-        normalize_restored_scheduler(
-            &self.staging.join("scheduler.sqlite"),
-            sqlite_busy_timeout_ms,
-            manifest.created_at_ms,
-            manifest
-                .instance_id
-                .parse()
-                .map_err(|_| restore_invalid())?,
-        )?;
+        // Legacy scheduler files remain untouched for the startup import.
+        if !self.staging.join("scheduler.sqlite").exists() {
+            normalize_restored_scheduler(
+                &self.staging.join("control.sqlite"),
+                sqlite_busy_timeout_ms,
+                manifest.created_at_ms,
+                manifest
+                    .instance_id
+                    .parse()
+                    .map_err(|_| restore_invalid())?,
+            )?;
+        }
         crate::data_dir::initialize_restored_layout(&self.staging).map_err(|error| {
             restore_stage(
                 &error,
@@ -232,11 +235,24 @@ fn validate_staging(
             "restore control identity does not match the authenticated manifest",
         ));
     }
-    crate::scheduler::inspect_scheduler_schema_version(
-        &root.join("scheduler.sqlite"),
-        busy_timeout_ms,
-    )
-    .map_err(|error| restore_stage(&error, "restore scheduler authority is invalid"))?;
+    if root.join("scheduler.sqlite").exists() {
+        let mut legacy = Connection::open_with_flags(
+            root.join("scheduler.sqlite"),
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+        )
+        .map_err(|_| restore_invalid())?;
+        crate::schema_migrations::inspect(
+            &mut legacy,
+            crate::schema_migrations::DatabaseKind::Scheduler,
+        )
+        .map_err(|error| restore_stage(&error, "restore scheduler authority is invalid"))?;
+    } else {
+        crate::scheduler::inspect_scheduler_schema_version(
+            &root.join("control.sqlite"),
+            busy_timeout_ms,
+        )
+        .map_err(|error| restore_stage(&error, "restore scheduler authority is invalid"))?;
+    }
     validate_resource_catalog(root, busy_timeout_ms, manifest)
         .map_err(|error| restore_stage(&error, "restore resource catalog is invalid"))?;
     validate_artifact_catalog(root, busy_timeout_ms, manifest)

@@ -14,7 +14,7 @@ use std::str::FromStr as _;
 pub enum SnapshotFileRole {
     /// `control.sqlite` online backup.
     ControlSqlite,
-    /// `scheduler.sqlite` online backup.
+    /// Legacy `scheduler.sqlite` backup, imported into control at startup.
     SchedulerSqlite,
     /// One Workers KV namespace database.
     KvSqlite,
@@ -226,7 +226,7 @@ impl PlatformSnapshotManifestV1 {
             }
         }
         if control_files != 1
-            || scheduler_files != 1
+            || scheduler_files > 1
             || self.totals.files != self.files.len() as u32
             || self.totals.bytes != total
         {

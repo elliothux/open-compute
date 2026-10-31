@@ -18,7 +18,7 @@
 - **原生扩展保留 Cap'n Proto 通道。** HostExtension 补丁、fd 4 session broker 和 session Cap'n Proto client 作为长期维护的 fork 补丁。
 - **验证方式**：每一步在本地跑受影响的 Gate 目标、单元测试和 clippy。完整测试只在发版前跑一次，不做每日 CI。
 - **先核实再改。** 评审依据的部分源码来自旧提交 `8694cba`，每一步动手前先对照当前代码确认问题仍然存在。
-  例如 `ProductPromotionCoordinator` trait 已经不存在，#1、#45、#59、#61、#62、#110 已关闭。
+  例如 #1、#45、#59、#61、#62、#110 已关闭。
 
 ## 步骤
 
@@ -49,6 +49,8 @@
 - 核实已关闭的 #1（请求体上限两处定义）和 #110（AI Search 实例名两处定义）是否已收敛到一个来源；没有的话收敛。
 
 ### R4.3 调度库并入 `control.sqlite`
+
+状态：R4.3a **已完成**（2026-10-31）：调度表随 control 迁移 V21 并入 `control.sqlite`，启动时一次性导入旧 `scheduler.sqlite` 并改名保留。R4.3b（单事务 promotion，删除 projection、drain、多余 generation、`claim_token` 和 `ProductPromotionCoordinator` trait）待做。
 
 `scheduler.sqlite`（Cron、Queue consumer、Workflow 调度，约 1.4 万行 Rust）并入 `control.sqlite`：
 

@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn queue_projection_enqueue_retention_and_repair_boundaries_are_complete() {
     let temp = tempfile::tempdir().unwrap();
-    let path = temp.path().join("scheduler.sqlite");
+    let path = temp.path().join("control.sqlite");
     let store = open_store(&temp, 1);
     let queue_id = QueueId::generate();
     let account_id = store.instance_id();

@@ -25,7 +25,6 @@ const BACKUP_STAGING: &str = "backup-staging";
 const DIAGNOSTICS: &str = "diagnostics";
 const OPERATIONS: &str = "operations";
 const FAILED_STARTS: &str = "failed-starts";
-const SCHEDULER_RECOVERY: &str = "scheduler-recovery";
 const LOCK_NAME: &str = "platform.lock";
 const CONTROL_DB_NAME: &str = "control.sqlite";
 const SCHEDULER_DB_NAME: &str = "scheduler.sqlite";
@@ -150,10 +149,10 @@ impl DataDir {
         self.root.join(CONTROL_DB_NAME)
     }
 
-    /// Scheduler database path: `<data_dir>/scheduler.sqlite`.
+    /// Scheduler database path: `<data_dir>/control.sqlite`.
     #[must_use]
     pub fn scheduler_db_path(&self) -> PathBuf {
-        self.root.join(SCHEDULER_DB_NAME)
+        self.control_db_path()
     }
 
     /// Workers Logs database path: `<data_dir>/observability.sqlite`.
@@ -374,7 +373,7 @@ impl DataDir {
         Ok(db_path)
     }
 
-    /// Create `scheduler.sqlite` as a 0600 regular file under the owned data directory.
+    /// Ensure the shared `control.sqlite` file for scheduler access.
     pub fn ensure_scheduler_db(&self) -> Result<PathBuf, PlatformError> {
         if self.filesystem_durability() != FilesystemDurability::ApparentlyLocal {
             return Err(PlatformError::new(
@@ -404,167 +403,17 @@ impl DataDir {
         Ok(db_path)
     }
 
-    /// Explicitly quarantine an uninspectable scheduler database and create an empty replacement.
-    ///
-    /// The exclusive data-directory lock must be held by this [`DataDir`], so a running
-    /// `ocd` cannot race the recovery. Only a verified alarm-only control authority
-    /// permits rebuilding: Queue, Cron, and Workflow history require a full snapshot restore.
-    /// The caller must subsequently run bounded alarm repair from live Durable Objects.
+    /// Refuse file-level scheduler recovery because control and scheduler share one file.
     pub fn recover_corrupt_scheduler_db(
         &self,
-        backup_name: &str,
-        busy_timeout_ms: u64,
-        now_ms: i64,
+        _backup_name: &str,
+        _busy_timeout_ms: u64,
+        _now_ms: i64,
     ) -> Result<PathBuf, PlatformError> {
-        if !valid_scheduler_backup_name(backup_name) {
-            return Err(PlatformError::new(
-                open_compute_core::ErrorCode::PathInvalid,
-                "scheduler recovery backup name is invalid",
-            ));
-        }
-        let source = self.scheduler_db_path();
-        fs::validate_contained(&self.root, &source)?;
-        fs::validate_owned_file(&source, true)?;
-        if crate::scheduler::inspect_scheduler_db(&source, busy_timeout_ms, now_ms).is_ok() {
-            return Err(PlatformError::new(
-                open_compute_core::ErrorCode::ConfigInvalid,
-                "scheduler recovery refuses an intact database",
-            ));
-        }
-        self.ensure_scheduler_rebuild_safe(busy_timeout_ms)?;
-        let control = crate::control_db::ControlDb::open_readonly_wal_aware(
-            &self.control_db_path(),
-            busy_timeout_ms,
-        )?;
-        control.quick_check()?;
-        crate::migrations::inspect_schema(&control)?;
-        let identity = crate::identity::inspect_stored(&control)?;
-
-        let mut sources = Vec::new();
-        for suffix in ["", "-wal", "-shm"] {
-            let path = append_suffix(&source, suffix);
-            if path.exists() || std::fs::symlink_metadata(&path).is_ok() {
-                fs::validate_owned_file(&path, true)?;
-                sources.push(path);
-            }
-        }
-
-        let parent = self.root.join(DIAGNOSTICS).join(SCHEDULER_RECOVERY);
-        fs::validate_contained(&self.root, &parent)?;
-        fs::create_dir_secure(&parent)?;
-        let backup = parent.join(backup_name);
-        fs::validate_contained(&self.root, &backup)?;
-        if backup.exists() || std::fs::symlink_metadata(&backup).is_ok() {
-            return Err(PlatformError::new(
-                open_compute_core::ErrorCode::PathInvalid,
-                "scheduler recovery backup already exists",
-            ));
-        }
-        fs::create_dir_secure(&backup)?;
-
-        let mut moved = Vec::new();
-        for from in sources {
-            let file_name = from.file_name().ok_or_else(recovery_failed)?;
-            let to = backup.join(file_name);
-            if std::fs::rename(&from, &to).is_err() {
-                for (restore_from, restore_to) in moved.into_iter().rev() {
-                    let _ = std::fs::rename(restore_to, restore_from);
-                }
-                let _ = std::fs::remove_dir(&backup);
-                return Err(recovery_failed());
-            }
-            moved.push((from, to));
-        }
-        fs::fsync_dir(&self.root)?;
-        fs::fsync_dir(&backup)?;
-
-        let replacement = self.ensure_scheduler_db()?;
-        match crate::scheduler::SchedulerStore::open(
-            &replacement,
-            busy_timeout_ms,
-            now_ms,
-            identity.instance_id,
-        ) {
-            Ok(store) => {
-                drop(store);
-                fs::fsync_dir(&self.root)?;
-                Ok(backup)
-            }
-            Err(error) => {
-                for suffix in ["-shm", "-wal", ""] {
-                    let path = append_suffix(&replacement, suffix);
-                    if path.exists() || std::fs::symlink_metadata(&path).is_ok() {
-                        let _ = std::fs::remove_file(path);
-                    }
-                }
-                let mut restored = true;
-                for (from, to) in moved.into_iter().rev() {
-                    if std::fs::rename(to, from).is_err() {
-                        restored = false;
-                    }
-                }
-                let _ = std::fs::remove_dir(&backup);
-                let _ = fs::fsync_dir(&self.root);
-                if restored {
-                    Err(error)
-                } else {
-                    Err(recovery_failed())
-                }
-            }
-        }
-    }
-
-    fn ensure_scheduler_rebuild_safe(&self, busy_timeout_ms: u64) -> Result<(), PlatformError> {
-        let path = self.control_db_path();
-        fs::validate_contained(&self.root, &path)?;
-        fs::validate_owned_file(&path, true)?;
-        let control =
-            crate::control_db::ControlDb::open_readonly_wal_aware(&path, busy_timeout_ms)?;
-        control.quick_check()?;
-        crate::migrations::inspect_schema(&control)?;
-        // These are checked schema-owned tables, never operator-supplied SQL identifiers.
-        for table in [
-            "queues",
-            "cron_activations",
-            "workflow_instance_referrers",
-            "workflow_instance_operations",
-        ] {
-            let retained: bool = control.with_read(|connection| {
-                connection
-                    .query_row(
-                        &format!("SELECT EXISTS(SELECT 1 FROM {table})"),
-                        [],
-                        |row| row.get(0),
-                    )
-                    .map_err(|_| recovery_failed())
-            })?;
-            if retained {
-                return Err(PlatformError::new(
-                    open_compute_core::ErrorCode::SchedulerUnavailable,
-                    "scheduler retains product authority; full snapshot restore is required",
-                ));
-            }
-        }
-        // A purge can already have released its control reservation while its scheduler
-        // receipt still awaits acknowledgement. Immutable Workflow versions are never deleted,
-        // so this catalog evidence also fences recovery when the corrupt file cannot
-        // reliably prove whether such receipts or operation watermarks remain.
-        let durable_workflow: bool = control.with_read(|connection| {
-            connection
-                .query_row(
-                    "SELECT EXISTS(SELECT 1 FROM workflow_versions)",
-                    [],
-                    |row| row.get(0),
-                )
-                .map_err(|_| recovery_failed())
-        })?;
-        if durable_workflow {
-            return Err(PlatformError::new(
-                open_compute_core::ErrorCode::SchedulerUnavailable,
-                "scheduler may retain durable Workflow authority; full snapshot restore is required",
-            ));
-        }
-        Ok(())
+        Err(PlatformError::new(
+            open_compute_core::ErrorCode::SchedulerUnavailable,
+            "scheduler state shares control.sqlite; full snapshot restore is required",
+        ))
     }
 
     fn validate_children(&self) -> Result<(), PlatformError> {
@@ -721,27 +570,6 @@ fn read_durable_object_marker(path: &Path) -> Result<Vec<u8>, PlatformError> {
         return Err(do_storage_unavailable());
     }
     Ok(bytes)
-}
-
-fn valid_scheduler_backup_name(name: &str) -> bool {
-    (1..=80).contains(&name.len())
-        && name.starts_with("scheduler-corrupt-")
-        && name
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
-}
-
-fn append_suffix(path: &Path, suffix: &str) -> PathBuf {
-    let mut value = path.as_os_str().to_os_string();
-    value.push(suffix);
-    PathBuf::from(value)
-}
-
-fn recovery_failed() -> PlatformError {
-    PlatformError::new(
-        open_compute_core::ErrorCode::PathInvalid,
-        "scheduler corrupt-file recovery failed",
-    )
 }
 
 fn extension_path_invalid() -> PlatformError {

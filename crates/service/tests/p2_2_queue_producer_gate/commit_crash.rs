@@ -70,7 +70,7 @@ impl Drop for CommitChild {
 #[test]
 fn p2_2_sigkill_after_commit_preserves_message_and_counters() {
     let temp = tempfile::tempdir().unwrap();
-    let database = temp.path().join("scheduler.sqlite");
+    let database = temp.path().join("control.sqlite");
     let marker = temp.path().join("committed");
     let queue = QueueId::generate();
     let account = InstanceId::generate();

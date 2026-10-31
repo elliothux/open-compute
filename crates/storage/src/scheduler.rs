@@ -1,4 +1,4 @@
-//! Independent SQLite authority for the bounded P0.8 scheduler projection.
+//! Scheduler state in the shared control SQLite database.
 
 use open_compute_core::{
     DurableObjectId, ErrorCode, InstanceId, PlatformError, ResourceId, VersionId, WorkloadSummary,
@@ -38,7 +38,7 @@ pub use workflow::{
     WorkflowDelayResolution, WorkflowFailure, WorkflowInspection, WorkflowInstanceAction,
     WorkflowInstanceInspection, WorkflowInstanceRecord, WorkflowState, WorkflowStepAttempt,
     WorkflowStepGrant, WorkflowStepInspection, WorkflowStepOutcome, WorkflowStepResult,
-    inspect_workflow_databases,
+    inspect_workflow_databases, inspect_workflow_databases_readonly,
 };
 
 pub use cron::{
@@ -48,7 +48,8 @@ pub use cron::{
 pub(crate) use inspection::inspect_scheduler_schema_version;
 pub use inspection::{
     CronInspectionSummary, P23CrossDatabaseInspection, QueueConsumerInspectionSummary,
-    QueueInspectionSummary, SchedulerInspection, inspect_p23_cross_database, inspect_scheduler_db,
+    QueueInspectionSummary, SchedulerInspection, inspect_p23_cross_database,
+    inspect_p23_cross_database_readonly, inspect_scheduler_db, inspect_scheduler_db_readonly,
 };
 
 /// Ordered legacy scheduler migration identities shipped by this binary.
@@ -76,7 +77,7 @@ pub(crate) const DATA_FORMAT: &str = "open-compute-scheduler-v1";
 /// Current scheduler database schema implemented by this binary.
 #[must_use]
 pub fn current_scheduler_schema_version() -> i64 {
-    crate::schema_migrations::current_version(crate::schema_migrations::DatabaseKind::Scheduler)
+    crate::schema_migrations::current_version(crate::schema_migrations::DatabaseKind::Control)
 }
 
 #[cfg(test)]
@@ -172,7 +173,7 @@ pub struct SchedulerSummary {
     pub expired_claims: u64,
 }
 
-/// Single-process owner of `scheduler.sqlite` and its bounded writer lane.
+/// Single-process scheduler connection to `control.sqlite` and its bounded writer lane.
 #[derive(Debug)]
 pub struct SchedulerStore {
     connection: Mutex<Connection>,
@@ -224,7 +225,7 @@ impl SchedulerStore {
         Ok(store)
     }
 
-    /// Instance that owns this independent scheduler database.
+    /// Instance that owns this scheduler state.
     #[must_use]
     pub const fn instance_id(&self) -> InstanceId {
         self.instance_id
@@ -290,7 +291,7 @@ impl SchedulerStore {
         }
         crate::schema_migrations::migrate(
             &mut connection,
-            crate::schema_migrations::DatabaseKind::Scheduler,
+            crate::schema_migrations::DatabaseKind::Control,
         )
         .map_err(|error| {
             if error.code() == ErrorCode::SchemaTooNew {

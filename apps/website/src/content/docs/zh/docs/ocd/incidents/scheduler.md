@@ -16,16 +16,14 @@ Cron claim 在 dispatch 前先消耗 one-based delivery attempt。transport-unkn
 
 Queue consumer 和 Cron activation 的 dispatch epoch 冻结在 scheduler projection 中。添加或编辑 HTTP route 不会替换它；重试 promotion 或启动 reconcile 复用该 epoch，并继续严格校验 target、descriptor 与产品 generation。不要把当前 Worker route revision 写回已创建的 projection 或 claim。
 
-只要 control 中存在 Queue、Cron activation、Workflow instance（包括 released/terminal/retained）、Workflow operation 或 Workflow version，就不能通过空库重建恢复调度历史。Workflow purge 在释放 control 引用后，scheduler 仍可能留有 GC receipt；损坏文件无法证明这些记录不存在。此时停止服务并按 [fresh-host restore](/zh/docs/ocd/incidents/fresh-host/) 恢复整机 snapshot；这不会撤销已发生的外部副作用。不要手动删除 referrer、operation、receipt 或 step row 绕过检查。
+调度历史损坏时，停止服务并恢复整机 snapshot。恢复不会撤销已发生的外部副作用。不要删除 referrer、operation、receipt 或 step 行绕过检查。
 
 Workflow 的 waiting/paused 不占执行并发；官方 Workflow instance 响应提供 lifecycle state 与 steps。`workflow_*_results`、`workflow_consumed_events` 等保留历史指标是 gauge，restart/purge 可以降低它们；`workflow_event_intake_total` 和 `workflow_lifecycle_total` 是本进程观察到的调用结果。固定 metrics 预算现在至少需要 567 条序列，默认仍为 1024。
 
 运行时未能确认 callback drain 时，当前 Workflow 执行路径会隔离当前 workerd generation。operator resume 不能解除隔离；只有 supervisor 启动的新 generation 才能重新接纳 Workflow。已有 lease 保留给 Unknown recovery，不按业务 retry 增加 attempt。
 
-允许的 mutation：以下命令仅用于 **control 可验证且没有上述产品 authority** 的 alarm-only 数据目录，并要求 scheduler DB 确认损坏、service 已停止。命令会在移动文件前拒绝持有产品 authority 的目录：
+Scheduler 表与控制数据共用 `control.sqlite`。数据库损坏时，停止服务并恢复整机 snapshot。`scheduler recover-corrupt` 会拒绝替换文件，因为替换也会覆盖控制数据。
 
-```sh
-/opt/open-compute/ocd --config /var/lib/open-compute/instances/default/compute.toml scheduler recover-corrupt --backup-name scheduler-corrupt-20260826
-```
+升级启动时，程序在一个事务中导入旧 `scheduler.sqlite`，并在 `platform_meta` 写入完成标记。程序将旧文件保留为 `scheduler.sqlite.imported`，同时保留仍存在的 WAL 和 SHM 文件。重启可继续未完成的导入或改名，不会重复导入。control 已有调度行但缺少标记时，启动失败，不合并数据。
 
-`--backup-name` 是创建在 `data/diagnostics/scheduler-recovery/` 下的唯一目录名。预期旧 DB 被精确隔离，空 projection 从 DO alarm authority repair，不伪造已投递。control/DO authority 也损坏、未知 token 重复 commit 或 backlog 不收敛是停止条件，并转整机 restore。回滚是保留隔离副本并恢复整机 snapshot。验证是 repair dry-run、alarm sentinel、lease expiry、重启和 lag 回到界限。
+新 snapshot 仅通过 `control.sqlite` 保存调度表。恢复旧 snapshot 时，先使用来源版本恢复，再升级；启动程序会导入恢复的 scheduler 文件。验证升级后的实例和 snapshot 后，再决定旧副本的保留期限。

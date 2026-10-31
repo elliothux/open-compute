@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn durable_object_queue_operation_survives_message_retention_until_finalize() {
     let temp = tempfile::tempdir().unwrap();
-    let path = temp.path().join("scheduler.sqlite");
+    let path = temp.path().join("control.sqlite");
     let store = open_store(&temp, 1);
     let queue_id = QueueId::generate();
     store

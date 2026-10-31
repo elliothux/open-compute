@@ -23,7 +23,7 @@ S3 实例可按下文从快照恢复至其 `compute.toml` 的显式空 `[data].p
 包含 Workflow 的 snapshot 必须同时保留 control/scheduler authority、restart/purge intent、
 operation progress 和 GC receipt。waiting/paused 的原始 deadline、inbox 及冻结 retention 不重算。
 恢复后先让 exact-release reconciler 完成合法中间态，再验证原版本 replay、暂停状态、事件和 due work；
-不得单独复制一边数据库或通过删除 operation row 使诊断变绿。这些状态的历史验收见
+控制与调度表共用 `control.sqlite`，新 snapshot 只保存这一份数据库。旧 snapshot 先按来源版本恢复，再升级；启动时导入独立的 scheduler 文件。不得删除 operation 行绕过诊断。这些状态的历史验收见
 [P2.5 实现与验证](../../implemented/p2-5-workflow-durable-waiting.md)；每次正式发布仍需对应源码、pin 和 schema 的单轮验收。
 
 预期是 sibling staging 全量验证后一次原子安装。非空 target、与其他已登记且存在的实例重复的 InstanceId、wrong key/release/object authority、path、hash、schema 或 marker 错误都是停止条件；不得使用 force 或覆盖旧目录。若其他实例的数据尚未恢复，所有目录恢复后、启动前还必须统一核对 InstanceId 不重复。失败时 target 保持为空，目标父目录保留 bounded `restore-failure` receipt 和同一 UUIDv7 的 object staging。确认不再需要诊断字节后，只允许精确清理该 receipt 报告的 ID：

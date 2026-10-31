@@ -34,7 +34,7 @@ fn queue_producer_persists_v8_content_type() {
             1,
         )
         .unwrap();
-    let connection = Connection::open(temp.path().join("scheduler.sqlite")).unwrap();
+    let connection = Connection::open(temp.path().join("control.sqlite")).unwrap();
     let (content_type, persisted): (String, Vec<u8>) = connection
         .query_row(
             "SELECT content_type, body FROM queue_messages WHERE queue_id = ?1",

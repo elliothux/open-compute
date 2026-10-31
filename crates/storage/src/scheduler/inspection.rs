@@ -102,16 +102,26 @@ pub fn inspect_p23_cross_database(
     scheduler_path: &std::path::Path,
     busy_timeout_ms: u64,
 ) -> Result<P23CrossDatabaseInspection, PlatformError> {
-    let flags = OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW;
-    let control_path = crate::control_db::leaf_nofollow_path(control_path)?;
-    let scheduler_path = crate::control_db::leaf_nofollow_path(scheduler_path)?;
-    let control = Connection::open_with_flags(control_path, flags).map_err(map_open_error)?;
-    let scheduler = Connection::open_with_flags(scheduler_path, flags).map_err(map_open_error)?;
-    for connection in [&control, &scheduler] {
-        connection
-            .busy_timeout(Duration::from_millis(busy_timeout_ms))
-            .map_err(map_sql_error)?;
-    }
+    inspect_p23_cross_database_with_mode(control_path, scheduler_path, busy_timeout_ms, false)
+}
+
+/// Inspect checkpointed scheduler state without creating or updating SQLite sidecars.
+pub fn inspect_p23_cross_database_readonly(
+    control_path: &std::path::Path,
+    scheduler_path: &std::path::Path,
+    busy_timeout_ms: u64,
+) -> Result<P23CrossDatabaseInspection, PlatformError> {
+    inspect_p23_cross_database_with_mode(control_path, scheduler_path, busy_timeout_ms, true)
+}
+
+fn inspect_p23_cross_database_with_mode(
+    control_path: &std::path::Path,
+    scheduler_path: &std::path::Path,
+    busy_timeout_ms: u64,
+    immutable: bool,
+) -> Result<P23CrossDatabaseInspection, PlatformError> {
+    let control = open_inspection_connection(control_path, busy_timeout_ms, immutable)?;
+    let scheduler = open_inspection_connection(scheduler_path, busy_timeout_ms, immutable)?;
     let control_id: String = control
         .query_row("SELECT instance_id FROM instance_identity", [], |row| {
             row.get(0)
@@ -215,12 +225,25 @@ pub fn inspect_scheduler_db(
     busy_timeout_ms: u64,
     now_ms: i64,
 ) -> Result<SchedulerInspection, PlatformError> {
-    let flags = OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW;
-    let open_path = crate::control_db::leaf_nofollow_path(path)?;
-    let mut connection = Connection::open_with_flags(open_path, flags).map_err(map_open_error)?;
-    connection
-        .busy_timeout(Duration::from_millis(busy_timeout_ms))
-        .map_err(map_sql_error)?;
+    inspect_scheduler_db_with_mode(path, busy_timeout_ms, now_ms, false)
+}
+
+/// Inspect checkpointed scheduler state without creating or updating SQLite sidecars.
+pub fn inspect_scheduler_db_readonly(
+    path: &std::path::Path,
+    busy_timeout_ms: u64,
+    now_ms: i64,
+) -> Result<SchedulerInspection, PlatformError> {
+    inspect_scheduler_db_with_mode(path, busy_timeout_ms, now_ms, true)
+}
+
+fn inspect_scheduler_db_with_mode(
+    path: &std::path::Path,
+    busy_timeout_ms: u64,
+    now_ms: i64,
+    immutable: bool,
+) -> Result<SchedulerInspection, PlatformError> {
+    let mut connection = open_inspection_connection(path, busy_timeout_ms, immutable)?;
     let quick: String = connection
         .pragma_query_value(None, "quick_check", |row| row.get(0))
         .map_err(map_sql_error)?;
@@ -229,7 +252,7 @@ pub fn inspect_scheduler_db(
     }
     let schema_version = crate::schema_migrations::inspect(
         &mut connection,
-        crate::schema_migrations::DatabaseKind::Scheduler,
+        crate::schema_migrations::DatabaseKind::Control,
     )
     .map_err(|_| corrupt())?;
     let data_format: String = connection
@@ -251,9 +274,24 @@ pub fn inspect_scheduler_db(
         .map_err(|_| corrupt())?;
     owner.parse::<InstanceId>().map_err(|_| corrupt())?;
     workflow::verify_operation_progress(&connection)?;
-    let journal_mode: String = connection
-        .pragma_query_value(None, "journal_mode", |row| row.get(0))
-        .map_err(map_sql_error)?;
+    let journal_mode: String = if immutable {
+        // Immutable SQLite readers report DELETE mode; the header records the file's mode.
+        use std::io::Read as _;
+        let mut header = [0_u8; 20];
+        std::fs::File::open(path)
+            .and_then(|mut file| file.read_exact(&mut header))
+            .map_err(|_| corrupt())?;
+        if header[18..20] == [2, 2] {
+            "wal"
+        } else {
+            "delete"
+        }
+        .to_owned()
+    } else {
+        connection
+            .pragma_query_value(None, "journal_mode", |row| row.get(0))
+            .map_err(map_sql_error)?
+    };
     let synchronous: i64 = connection
         .pragma_query_value(None, "synchronous", |row| row.get(0))
         .map_err(map_sql_error)?;
@@ -396,7 +434,7 @@ pub(crate) fn inspect_scheduler_schema_version(
     }
     let schema_version = crate::schema_migrations::inspect(
         &mut connection,
-        crate::schema_migrations::DatabaseKind::Scheduler,
+        crate::schema_migrations::DatabaseKind::Control,
     )
     .map_err(|_| corrupt())?;
     let marker: String = connection
@@ -410,4 +448,26 @@ pub(crate) fn inspect_scheduler_schema_version(
         return Err(corrupt());
     }
     Ok(schema_version)
+}
+
+pub(super) fn open_inspection_connection(
+    path: &std::path::Path,
+    busy_timeout_ms: u64,
+    immutable: bool,
+) -> Result<Connection, PlatformError> {
+    let path = crate::control_db::leaf_nofollow_path(path)?;
+    let flags = OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW;
+    let connection = if immutable {
+        Connection::open_with_flags(
+            crate::control_db::sqlite_readonly_uri(&path),
+            flags | OpenFlags::SQLITE_OPEN_URI,
+        )
+    } else {
+        Connection::open_with_flags(path, flags)
+    }
+    .map_err(map_open_error)?;
+    connection
+        .busy_timeout(Duration::from_millis(busy_timeout_ms))
+        .map_err(map_sql_error)?;
+    Ok(connection)
 }

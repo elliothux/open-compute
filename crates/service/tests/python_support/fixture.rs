@@ -379,7 +379,7 @@ impl Fixture {
 
     pub(crate) fn scheduler_connection(&self) -> rusqlite::Connection {
         rusqlite::Connection::open_with_flags(
-            self.data.join("scheduler.sqlite"),
+            self.data.join("control.sqlite"),
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
         )
         .unwrap()

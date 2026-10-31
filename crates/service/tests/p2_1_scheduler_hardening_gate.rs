@@ -129,7 +129,7 @@ fn kill(child: &Child) {
 
 fn run_fault_case(point: SchedulerFaultPoint) {
     let temp = tempfile::tempdir().unwrap();
-    let database = temp.path().join("scheduler.sqlite");
+    let database = temp.path().join("control.sqlite");
     fs::OpenOptions::new()
         .create_new(true)
         .write(true)
@@ -215,7 +215,7 @@ fn p2_1_schema_and_product_scope_remain_frozen() {
     );
 
     let temp = tempfile::tempdir().unwrap();
-    let database = temp.path().join("scheduler.sqlite");
+    let database = temp.path().join("control.sqlite");
     fs::OpenOptions::new()
         .create_new(true)
         .write(true)

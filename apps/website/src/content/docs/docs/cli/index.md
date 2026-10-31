@@ -45,7 +45,7 @@ Read-only commands support `--json` where the command help advertises it. JSON i
 
 - `backup create|list|inspect|delete|retention-plan|restore`
 - `backup cleanup-incomplete|cleanup-restore|attest-restore-smoke`
-- `scheduler recover-corrupt`
+- `scheduler recover-corrupt` (refuses replacement of shared `control.sqlite`; use a full snapshot restore)
 - `cache clean [--instance <id-or-name>|--all] [--dry-run]`
 - `upgrade`, `uninstall [--purge --yes]`, `purge --instance <id>|--config <path>`
 

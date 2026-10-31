@@ -42,7 +42,7 @@ async fn p2_chain_preserves_queue_handoff_frozen_workflow_and_due_work_across_si
         hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
             .build_http();
     let database = Connection::open_with_flags(
-        fixture.data.join("scheduler.sqlite"),
+        fixture.data.join("control.sqlite"),
         OpenFlags::SQLITE_OPEN_READ_ONLY,
     )
     .unwrap();
@@ -162,7 +162,7 @@ async fn p2_chain_preserves_queue_handoff_frozen_workflow_and_due_work_across_si
     assert_eq!(next_attempt.attempt, attempt.attempt);
     assert_eq!(next_fence.instance_generation, fence.instance_generation);
     let store = SchedulerStore::open(
-        &fixture.data.join("scheduler.sqlite"),
+        &fixture.data.join("control.sqlite"),
         5000,
         p0_exit_support::now_ms(),
         fixture.account,
@@ -314,7 +314,7 @@ async fn p2_chain_preserves_queue_handoff_frozen_workflow_and_due_work_across_si
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
     let store = SchedulerStore::open(
-        &fixture.data.join("scheduler.sqlite"),
+        &fixture.data.join("control.sqlite"),
         5000,
         p0_exit_support::now_ms(),
         fixture.account,
