@@ -6,18 +6,19 @@ open-compute runs Cloudflare Workers on one machine for small teams. `ocd` (Rust
 
 - Code, commits, PRs, issues: use English.
 - A change request authorizes local edits and non-destructive checks. Ask first for external writes, destructive actions, downloads, runtime pin changes and releases.
-- Do not edit the parent Lynx OS project, rewrite Git history, force-push or create `codex/` branches. Keep unrelated changes.
-- Disposable output goes in `.temp/<purpose>/`. Research credentials: root `.env`, `cf` login.
+- Work and commit on the current branch. Create a branch only when asked.
+- Do not edit the parent Lynx OS project, rewrite Git history or force-push. Keep unrelated changes.
+- Disposable output: `.temp/<purpose>/`. Research credentials: root `.env`, `cf` login.
 
 ## Build and test
 
 ```sh
-bun install && bun run build            # inputs: docs/references/single-binary.md
-./test/gate.py <targets> --keep-going   # --list shows targets and cases
+bun install && bun run build  # inputs: docs/references/single-binary.md
+./test/gate.py <targets> --keep-going  # --list shows targets and cases
 mbx fmt --all --check && ./test/check-rust-clippy.sh
 ```
 
-Run the tests for what you changed. [Testing](docs/references/testing.md) lists targets and the full checks. Run the full workspace Gate only when the user asks or for a release.
+Run the tests for what you changed. [Testing](docs/references/testing.md) lists targets and full checks. Run the full workspace Gate only if the user asks or for a release.
 
 ## Five criteria for every change
 
