@@ -17,6 +17,8 @@ use open_compute_artifacts::{R2HttpMetadata, R2UploadedPart};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 
+include!("multipart_models.rs");
+
 const RESPONSE_LIMIT: usize = 1024 * 1024;
 
 pub(super) fn router() -> Router<HttpState> {
@@ -69,24 +71,6 @@ async fn create(
             .await,
     )
     .await
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct CreateBody {
-    key: String,
-    #[serde(default)]
-    options: CreateOptions,
-}
-
-#[derive(Default, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct CreateOptions {
-    #[serde(default)]
-    http_metadata: R2HttpMetadata,
-    #[serde(default)]
-    custom_metadata: BTreeMap<String, String>,
-    storage_class: Option<String>,
 }
 
 impl From<CreateBody> for CreateMultipartRequest {
@@ -147,12 +131,6 @@ async fn upload_part(
             .await,
     )
     .await
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct CompleteBody {
-    parts: Vec<R2UploadedPart>,
 }
 
 async fn complete(

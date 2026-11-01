@@ -86,20 +86,26 @@ impl UserObjectKey {
 }
 
 /// Six HTTP metadata fields supported by the P0.5 facade.
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct R2HttpMetadata {
     /// `Content-Type`.
+    #[schemars(extend("type" = "string"))]
     pub content_type: Option<String>,
     /// `Content-Language`.
+    #[schemars(extend("type" = "string"))]
     pub content_language: Option<String>,
     /// `Content-Disposition`.
+    #[schemars(extend("type" = "string"))]
     pub content_disposition: Option<String>,
     /// `Content-Encoding`.
+    #[schemars(extend("type" = "string"))]
     pub content_encoding: Option<String>,
     /// `Cache-Control`.
+    #[schemars(extend("type" = "string"))]
     pub cache_control: Option<String>,
     /// `Expires` as Unix milliseconds.
+    #[schemars(extend("type" = "integer"))]
     pub cache_expiry: Option<i64>,
 }
 
@@ -419,10 +425,11 @@ pub struct R2MultipartCreateOptions {
 }
 
 /// One completed part returned to the tenant.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct R2UploadedPart {
     /// Part number in `1..=10000`.
+    #[schemars(extend("minimum" = 1, "maximum" = 10000))]
     pub part_number: i32,
     /// Provider part `ETag`.
     pub etag: String,
@@ -451,8 +458,9 @@ pub struct R2UploadSource {
 }
 
 /// Tenant-visible object metadata DTO.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[schemars(extend("additionalProperties" = true))]
 pub struct R2ObjectMetadata {
     /// Exact unnormalized tenant key.
     pub key: String,
@@ -468,19 +476,24 @@ pub struct R2ObjectMetadata {
     pub uploaded: i64,
     /// Standard HTTP metadata, omitted from unincluded list entries.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip)]
     pub http_metadata: Option<R2HttpMetadata>,
     /// Canonical tenant metadata, omitted from unincluded list entries.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip)]
     pub custom_metadata: Option<BTreeMap<String, String>>,
     /// Returned byte range, when present.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip)]
     pub range: Option<R2Range>,
     /// Stored checksums as lowercase hex.
+    #[schemars(skip)]
     pub checksums: R2Checksums,
     /// Worker API storage class.
     pub storage_class: String,
     /// Lowercase hex MD5 of the SSE-C key when the object is encrypted.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip)]
     pub ssec_key_md5: Option<String>,
 }
 

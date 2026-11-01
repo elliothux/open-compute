@@ -5,28 +5,13 @@ use axum::routing::get;
 use open_compute_storage::d1::{D1Migration, D1MigrationRecord};
 use serde::{Deserialize, Serialize};
 
+include!("migrations_models.rs");
+
 pub(super) fn router() -> Router<HttpState> {
     Router::new().route(
         "/accounts/{account_id}/open-compute/d1/databases/{database_id}/migrations",
         get(list).put(apply),
     )
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct MigrationInput {
-    id: u32,
-    name: String,
-    sha256: String,
-    sql: String,
-}
-
-#[derive(Serialize)]
-struct MigrationOutput {
-    id: u32,
-    name: String,
-    sha256: String,
-    applied_at_ms: i64,
 }
 
 impl From<D1MigrationRecord> for MigrationOutput {

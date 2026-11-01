@@ -1,0 +1,18 @@
+[package]
+name = "open-compute-vendor-schema"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+open-compute-core = { path = "../core" }
+open-compute-storage = { path = "../storage" }
+open-compute-artifacts = { path = "../artifacts" }
+schemars.workspace = true
+serde.workspace = true
+serde_json = { workspace = true, features = ["preserve_order"] }
+
+[lints]
+workspace = true

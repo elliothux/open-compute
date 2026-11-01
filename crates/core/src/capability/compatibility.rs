@@ -4,12 +4,14 @@ use super::{is_sha256, unique_nonempty};
 use serde::{Deserialize, Serialize};
 
 /// One compatibility implication reflected from workerd's schema.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CompatibilityImplicationV1 {
     /// Compatibility feature field names which activate this feature.
+    #[schemars(extend("minItems" = 1, "uniqueItems" = true, "items" = {"type": "string", "minLength": 1}))]
     pub flags: Vec<String>,
     /// First compatibility date on which the implication applies.
+    #[schemars(extend("format" = "date"))]
     pub after_date: String,
 }
 
@@ -20,19 +22,23 @@ impl CompatibilityImplicationV1 {
 }
 
 /// One compatibility feature reflected from workerd's compiled schema.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CompatibilityFeatureV1 {
     /// Cap'n Proto field name.
+    #[schemars(extend("minLength" = 1))]
     pub field: String,
     /// User input which explicitly enables the feature.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("minLength" = 1, "type" = "string"))]
     pub enable_flag: Option<String>,
     /// User input which explicitly disables the feature.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("minLength" = 1, "type" = "string"))]
     pub disable_flag: Option<String>,
     /// Date on which the feature becomes enabled by default.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("format" = "date", "type" = "string"))]
     pub default_on_date: Option<String>,
     /// Whether the feature is enabled for every compatibility date.
     pub enabled_for_all_dates: bool,
@@ -69,20 +75,24 @@ impl CompatibilityFeatureV1 {
 }
 
 /// Tenant compatibility capability emitted by the exact embedded workerd binary.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RuntimeCompatibilityV1 {
     /// Runtime validation authority.
+    #[schemars(extend("const" = "workerd_code_version"))]
     pub validation: String,
     /// Latest date compiled into the binary.
+    #[schemars(extend("format" = "date"))]
     pub binary_maximum_date: String,
     /// Whether dates after the current UTC day are accepted.
+    #[schemars(extend("const" = false))]
     pub future_dates_allowed: bool,
     /// Whether the workerd process enables experimental compatibility flags.
     pub experimental_enabled: bool,
     /// Features in Cap'n Proto field ordinal order.
     pub features: Vec<CompatibilityFeatureV1>,
     /// SHA-256 of the exact workerd catalog bytes.
+    #[schemars(extend("pattern" = "^[a-f0-9]{64}$"))]
     pub catalog_sha256: String,
 }
 
@@ -110,12 +120,14 @@ impl RuntimeCompatibilityV1 {
 }
 
 /// Compatibility metadata used only by platform-owned system Workers.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SystemWorkerCompatibilityV1 {
     /// Fixed system Worker compatibility date.
+    #[schemars(extend("format" = "date"))]
     pub compatibility_date: String,
     /// Fixed system Worker compatibility flags.
+    #[schemars(extend("uniqueItems" = true, "items" = {"type": "string", "minLength": 1}))]
     pub compatibility_flags: Vec<String>,
 }
 

@@ -6,6 +6,8 @@ use open_compute_storage::d1::D1SnapshotRepository;
 use open_compute_workers::{D1ResourceDriver, ResourceController};
 use serde::{Deserialize, Serialize};
 
+include!("d1_resources_models.rs");
+
 pub(super) fn router() -> Router<HttpState> {
     Router::new()
         .route(
@@ -16,23 +18,6 @@ pub(super) fn router() -> Router<HttpState> {
             "/accounts/{account_id}/open-compute/d1/databases/{database_id}/time-travel/checkpoints",
             get(checkpoints),
         )
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct RenameRequest {
-    name: String,
-}
-
-#[derive(Serialize)]
-struct RenameResult {
-    id: String,
-    name: String,
-}
-
-#[derive(Serialize)]
-struct CheckpointResult {
-    checkpoints_ms: Vec<i64>,
 }
 
 async fn checkpoints(

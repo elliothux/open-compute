@@ -312,10 +312,10 @@ export type Capabilities = {
     "supported" | "supported_with_deviation" | "unsupported"
   >;
   readonly deviations: readonly string[];
+  readonly limits: Record<string, number>;
   readonly configuration: {
     readonly ai_search: boolean;
   };
-  readonly limits: Record<string, number>;
 };
 
 export type D1CheckpointTimes = {

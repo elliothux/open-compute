@@ -14,6 +14,10 @@ fixtures 与刷新 workflow 切换为 cf。历史只读 scan 已发现更新的 
 [`cloudflare-subset-manifest.json`](../../openapi/cloudflare-subset-manifest.json) 和
 [Cloudflare 兼容矩阵](cloudflare-compatibility.md)共同定义。
 
+Vendor `/open-compute/**` HTTP schemas derive from the Rust request and response models with `schemars`.
+The existing `p6-contract.mjs` generator exports the shared DTO definitions through a runtime-independent Cargo tool; the SDK generator produces the SDK and Dashboard types from that OpenAPI fragment.
+Cloudflare-compatible shapes and their coverage checks retain the pinned upstream inputs.
+
 ## 目标与更新单位
 
 上游刷新以一个 **candidate compatibility set** 为更新单位，同时复核但不要求每次都改变：

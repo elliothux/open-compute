@@ -16,6 +16,8 @@ use open_compute_storage::kv::{KvBackupRecord, KvNamespaceRepository};
 use open_compute_storage::resources::ResourceRepository;
 use serde::{Deserialize, Serialize};
 
+include!("backups_models.rs");
+
 const MAX_RESTORE_BODY: usize = 4096;
 const IDEMPOTENCY_HEADER: &str = "idempotency-key";
 
@@ -424,29 +426,6 @@ fn backup_list_response(
         Ok(value) => success_response(context, value),
         Err(error) => error_response(error, context.request_id()),
     }
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct RestoreRequest {
-    name: String,
-}
-
-#[derive(Serialize)]
-struct RestoredResource {
-    id: String,
-    name: String,
-    kind: &'static str,
-    created_on: String,
-}
-
-#[derive(Serialize)]
-struct Backup {
-    id: String,
-    created_on: String,
-    state: &'static str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    size: Option<u64>,
 }
 
 impl TryFrom<KvBackupRecord> for Backup {

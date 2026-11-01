@@ -68,7 +68,7 @@ pub struct WorkerRecord {
 }
 
 /// Secret-free deployment runtime-assessment aggregate.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, schemars::JsonSchema)]
 pub struct DeploymentRuntimeAssessmentSummary {
     /// Deployments admitted by a real runtime generation.
     pub dispatchable: u64,
@@ -77,6 +77,7 @@ pub struct DeploymentRuntimeAssessmentSummary {
     /// Whether every active pointer references a dispatchable assessment.
     pub active_runtime_dispatchable: bool,
     /// Most recent stable quarantine reason, if any.
+    #[schemars(extend("type" = "string"))]
     pub last_quarantine_reason: Option<String>,
 }
 

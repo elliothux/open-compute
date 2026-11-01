@@ -13,6 +13,7 @@ default = []
 test-support = []
 
 [dependencies]
+schemars.workspace = true
 croner.workspace = true
 jiff.workspace = true
 regex.workspace = true

@@ -20,6 +20,8 @@ use open_compute_storage::queues::QueueRecord;
 use open_compute_storage::worker_repository::WorkerRepository;
 use serde::{Deserialize, Serialize};
 
+include!("consumers_models.rs");
+
 pub(super) fn router() -> Router<HttpState> {
     Router::new()
         .route(
@@ -461,17 +463,6 @@ struct ConsumerSettings {
     max_retries: u32,
     max_wait_time_ms: u32,
     retry_delay: u32,
-}
-
-#[derive(Serialize)]
-struct ConsumerRuntimeResponse {
-    projection_exists: bool,
-    backlog_messages: u64,
-    backlog_bytes: u64,
-    ready_messages: u64,
-    claimed_batches: u64,
-    claimed_messages: u64,
-    dlq_pending: u64,
 }
 
 #[derive(Serialize)]

@@ -8,6 +8,8 @@ use serde::Serialize;
 use std::collections::BTreeMap;
 use std::str::FromStr;
 
+include!("durable_objects_models.rs");
+
 pub(super) struct NamespaceListQuery {
     pub(super) search: Option<String>,
     pub(super) status: Option<ResourceState>,
@@ -109,46 +111,4 @@ fn parse_per_page(value: Option<&String>) -> Result<u16, V4Error> {
     (value > 0 && value <= 1_000)
         .then_some(value)
         .ok_or(V4Error::InvalidRequest)
-}
-
-#[derive(Serialize)]
-pub(super) struct DurableObjectNamespace {
-    pub(super) id: String,
-    pub(super) name: String,
-    pub(super) script_name: String,
-    pub(super) class_name: String,
-    pub(super) state: &'static str,
-    pub(super) availability: &'static str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(super) availability_code: Option<String>,
-    pub(super) spec_generation: u64,
-    pub(super) schema_version: u32,
-    pub(super) created_on: String,
-    pub(super) modified_on: String,
-}
-
-#[derive(Serialize)]
-pub(super) struct DurableObjectRecord {
-    pub(super) id: String,
-    pub(super) namespace_id: String,
-    pub(super) generation: u64,
-    pub(super) state: &'static str,
-    pub(super) created_on: String,
-    pub(super) modified_on: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(super) deleted_on: Option<String>,
-}
-
-#[derive(Serialize)]
-pub(super) struct DurableObjectNamespacePage {
-    pub(super) items: Vec<DurableObjectNamespace>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(super) next_cursor: Option<String>,
-}
-
-#[derive(Serialize)]
-pub(super) struct DurableObjectRecordPage {
-    pub(super) items: Vec<DurableObjectRecord>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(super) next_cursor: Option<String>,
 }

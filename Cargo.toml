@@ -10,6 +10,7 @@ members = [
     "crates/search",
     "crates/workers",
     "crates/service",
+    "crates/vendor-schema",
     "test/fuzz",
 ]
 exclude = ["third_party/gitserver"]
@@ -24,6 +25,7 @@ description = "Open Compute local Cloudflare Workers-compatible platform"
 publish = false
 
 [workspace.dependencies]
+schemars = "1.2.3"
 semver = "1.0.28"
 aws-credential-types = "1.2.3"
 # Production injects the verified Smithy HTTP client; SDK TLS/SigV4a defaults are unused.

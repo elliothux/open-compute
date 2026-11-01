@@ -3,22 +3,7 @@
 use crate::install_receipt::cmp_stable_semver;
 use serde::{Deserialize, Serialize};
 
-/// Result of a version check against the formal release authority or local cache.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct UpgradeCheckResult {
-    /// Schema version for this payload.
-    pub schema_version: u32,
-    /// Currently running release version.
-    pub current_version: String,
-    /// Newest stable version known from cache or a fresh check, if any.
-    pub available_version: Option<String>,
-    /// Whether `available_version` is strictly newer than `current_version`.
-    pub update_available: bool,
-    /// Whether this install may be upgraded by the local `ocd upgrade` command.
-    pub upgrade_allowed: bool,
-    /// Human-safe reason when upgrade is blocked, for example package-manager ownership.
-    pub blocked_reason: Option<String>,
-}
+include!("upgrade_api_model.rs");
 
 /// Build a check result from the current binary and an optional cached version.
 #[must_use]

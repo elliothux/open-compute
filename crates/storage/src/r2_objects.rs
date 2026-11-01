@@ -25,7 +25,8 @@ pub struct R2ObjectRecord {
 }
 
 /// Current committed object count and known total bytes for one bucket.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, schemars::JsonSchema)]
+#[schemars(extend("required" = ["object_count", "size_bytes"]))]
 pub struct R2BucketUsage {
     /// Number of committed objects.
     pub object_count: u64,

@@ -190,10 +190,10 @@ impl R2BindingService {
             }
             return Err(error);
         }
-        Ok(json_response(serde_json::json!({
-            "key": key.as_str(),
-            "uploadId": upload_id,
-        })))
+        Ok(json_response(MultipartCreated {
+            key: key.as_str().to_owned(),
+            upload_id,
+        }))
     }
 
     pub(super) async fn upload_part(
@@ -713,3 +713,5 @@ fn multipart_invalid() -> PlatformError {
 #[cfg(test)]
 #[path = "r2_backend_multipart_tests.rs"]
 mod validation_tests;
+
+include!("r2_backend_multipart_model.rs");

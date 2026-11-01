@@ -17,7 +17,7 @@ use open_compute_storage::worker_repository::WorkerRepository;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 
-const CF_VERSION: &str = "1.0.0-beta.12";
+include!("vendor_models.rs");
 
 mod backups;
 mod d1_resources;
@@ -659,45 +659,6 @@ fn platform_error(error: &PlatformError, context: V4RequestContext) -> Response 
     error_response(V4Error::from(error), context.request_id())
 }
 
-#[derive(Serialize)]
-struct Capabilities<'a> {
-    release: &'a str,
-    cf_version: &'a str,
-    compatibility: open_compute_core::RuntimeCompatibilityV1,
-    system_workers: open_compute_core::SystemWorkerCompatibilityV1,
-    endpoints: BTreeMap<&'a str, &'static str>,
-    deviations: Vec<String>,
-    limits: BTreeMap<String, u64>,
-    configuration: ProductConfiguration,
-}
-
-#[derive(Serialize)]
-struct ProductConfiguration {
-    ai_search: bool,
-}
-
-#[derive(Serialize)]
-struct SystemStatus {
-    state: &'static str,
-    version: &'static str,
-    components: Vec<StatusComponent>,
-    operator_proxy: OperatorProxyStatus,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    observability: Option<ObservabilityStatus>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    deployment_runtime:
-        Option<open_compute_storage::worker_repository::DeploymentRuntimeAssessmentSummary>,
-}
-
-#[derive(Serialize)]
-struct OperatorProxyStatus {
-    mode: &'static str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    source_variable: Option<&'static str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    origin: Option<String>,
-}
-
 fn operator_proxy_status() -> OperatorProxyStatus {
     match open_compute_core::OperatorProxyPolicy::from_process_env() {
         Ok(policy) => match policy.proxy() {
@@ -718,47 +679,6 @@ fn operator_proxy_status() -> OperatorProxyStatus {
             origin: None,
         },
     }
-}
-
-#[derive(Serialize)]
-struct ObservabilityStatus {
-    state: &'static str,
-    retention_ms: u64,
-    max_database_bytes: u64,
-    query_max_timeframe_ms: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    oldest_event_ms: Option<i64>,
-    tail_sessions: usize,
-    closed_client_drops: u64,
-    overload_drops: u64,
-}
-
-#[derive(Serialize)]
-struct StatusComponent {
-    name: &'static str,
-    state: &'static str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    message: Option<&'static str>,
-}
-
-#[derive(Serialize)]
-struct SchedulerStatus {
-    state: &'static str,
-    pending: u64,
-    running: usize,
-}
-
-#[derive(Serialize)]
-struct CacheStatus {
-    entries: u64,
-    bytes: u64,
-}
-
-#[derive(Serialize)]
-struct ImageCapacity {
-    queued: u64,
-    running: u64,
-    capacity: u16,
 }
 
 #[cfg(test)]

@@ -2691,6 +2691,883 @@
   },
   "components": {
     "schemas": {
+      "Backup": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "created_on": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "state": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": ["id", "created_on", "state"],
+        "additionalProperties": false
+      },
+      "CacheStatus": {
+        "type": "object",
+        "properties": {
+          "entries": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": ["entries", "bytes"],
+        "additionalProperties": false
+      },
+      "Capabilities": {
+        "type": "object",
+        "properties": {
+          "release": {
+            "type": "string",
+            "minLength": 1
+          },
+          "cf_version": {
+            "type": "string",
+            "const": "1.0.0-beta.12"
+          },
+          "compatibility": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "validation": {
+                "type": "string",
+                "const": "workerd_code_version"
+              },
+              "binary_maximum_date": {
+                "type": "string",
+                "format": "date"
+              },
+              "future_dates_allowed": {
+                "type": "boolean",
+                "const": false
+              },
+              "experimental_enabled": {
+                "type": "boolean"
+              },
+              "features": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "field": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "enable_flag": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "disable_flag": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "default_on_date": {
+                      "type": "string",
+                      "format": "date"
+                    },
+                    "enabled_for_all_dates": {
+                      "type": "boolean"
+                    },
+                    "experimental": {
+                      "type": "boolean"
+                    },
+                    "python_snapshot_release": {
+                      "type": "boolean"
+                    },
+                    "implied_by": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "flags": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "minItems": 1,
+                            "uniqueItems": true
+                          },
+                          "after_date": {
+                            "type": "string",
+                            "format": "date"
+                          }
+                        },
+                        "additionalProperties": false,
+                        "required": ["flags", "after_date"]
+                      }
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "field",
+                    "enabled_for_all_dates",
+                    "experimental",
+                    "python_snapshot_release"
+                  ]
+                }
+              },
+              "catalog_sha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              }
+            },
+            "required": [
+              "validation",
+              "binary_maximum_date",
+              "future_dates_allowed",
+              "experimental_enabled",
+              "features",
+              "catalog_sha256"
+            ]
+          },
+          "system_workers": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "compatibility_date": {
+                "type": "string",
+                "format": "date"
+              },
+              "compatibility_flags": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              }
+            },
+            "required": ["compatibility_date", "compatibility_flags"]
+          },
+          "endpoints": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string",
+              "enum": ["supported", "supported_with_deviation", "unsupported"]
+            }
+          },
+          "deviations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "uniqueItems": true
+          },
+          "limits": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "configuration": {
+            "type": "object",
+            "properties": {
+              "ai_search": {
+                "type": "boolean"
+              }
+            },
+            "required": ["ai_search"],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "release",
+          "cf_version",
+          "compatibility",
+          "system_workers",
+          "endpoints",
+          "deviations",
+          "limits",
+          "configuration"
+        ],
+        "additionalProperties": false
+      },
+      "D1CheckpointTimes": {
+        "type": "object",
+        "properties": {
+          "checkpoints_ms": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "required": ["checkpoints_ms"],
+        "additionalProperties": false
+      },
+      "D1Migration": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "applied_at_ms": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": ["id", "name", "sha256", "applied_at_ms"],
+        "additionalProperties": false
+      },
+      "D1MigrationInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "sql": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": ["id", "name", "sha256", "sql"]
+      },
+      "D1RenameRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$"
+          }
+        },
+        "required": ["name"]
+      },
+      "D1RenameResult": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": ["id", "name"],
+        "additionalProperties": false
+      },
+      "DurableObjectNamespace": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "script_name": {
+            "type": "string"
+          },
+          "class_name": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": ["creating", "ready", "deleting", "tombstoned"]
+          },
+          "availability": {
+            "type": "string",
+            "enum": ["healthy", "degraded", "unavailable"]
+          },
+          "availability_code": {
+            "type": "string"
+          },
+          "spec_generation": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "schema_version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "created_on": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "modified_on": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "script_name",
+          "class_name",
+          "state",
+          "availability",
+          "spec_generation",
+          "schema_version",
+          "created_on",
+          "modified_on"
+        ],
+        "additionalProperties": false
+      },
+      "DurableObjectNamespacePage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DurableObjectNamespace"
+            }
+          },
+          "next_cursor": {
+            "type": "string"
+          }
+        },
+        "required": ["items"],
+        "additionalProperties": false
+      },
+      "DurableObjectRecord": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "namespace_id": {
+            "type": "string"
+          },
+          "generation": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "state": {
+            "type": "string"
+          },
+          "created_on": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "modified_on": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "deleted_on": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "namespace_id",
+          "generation",
+          "state",
+          "created_on",
+          "modified_on"
+        ],
+        "additionalProperties": false
+      },
+      "DurableObjectRecordPage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DurableObjectRecord"
+            }
+          },
+          "next_cursor": {
+            "type": "string"
+          }
+        },
+        "required": ["items"],
+        "additionalProperties": false
+      },
+      "ImageCapacity": {
+        "type": "object",
+        "properties": {
+          "queued": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "running": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "capacity": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": ["queued", "running", "capacity"],
+        "additionalProperties": false
+      },
+      "PublicOriginRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 63,
+            "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"
+          }
+        },
+        "required": ["name"]
+      },
+      "QueueConsumerRuntime": {
+        "type": "object",
+        "properties": {
+          "projection_exists": {
+            "type": "boolean"
+          },
+          "backlog_messages": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "backlog_bytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "ready_messages": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "claimed_batches": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "claimed_messages": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "dlq_pending": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "projection_exists",
+          "backlog_messages",
+          "backlog_bytes",
+          "ready_messages",
+          "claimed_batches",
+          "claimed_messages",
+          "dlq_pending"
+        ],
+        "additionalProperties": false
+      },
+      "R2BucketUsage": {
+        "type": "object",
+        "properties": {
+          "object_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "size_bytes": {
+            "type": ["integer", "null"],
+            "minimum": 0
+          }
+        },
+        "required": ["object_count", "size_bytes"],
+        "additionalProperties": false
+      },
+      "R2MultipartCompleteRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "parts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/R2MultipartPart"
+            },
+            "minItems": 1,
+            "maxItems": 10000
+          }
+        },
+        "required": ["parts"]
+      },
+      "R2MultipartCompletedObject": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "etag": {
+            "type": "string"
+          },
+          "httpEtag": {
+            "type": "string"
+          },
+          "uploaded": {
+            "type": "integer"
+          },
+          "storageClass": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "version",
+          "size",
+          "etag",
+          "httpEtag",
+          "uploaded",
+          "storageClass"
+        ]
+      },
+      "R2MultipartCreate": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "uploadId": {
+            "type": "string"
+          }
+        },
+        "required": ["key", "uploadId"],
+        "additionalProperties": false
+      },
+      "R2MultipartCreateRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "type": "string",
+            "minLength": 1
+          },
+          "options": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "httpMetadata": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "contentType": {
+                    "type": "string"
+                  },
+                  "contentLanguage": {
+                    "type": "string"
+                  },
+                  "contentDisposition": {
+                    "type": "string"
+                  },
+                  "contentEncoding": {
+                    "type": "string"
+                  },
+                  "cacheControl": {
+                    "type": "string"
+                  },
+                  "cacheExpiry": {
+                    "type": "integer"
+                  }
+                },
+                "required": []
+              },
+              "customMetadata": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "storageClass": {
+                "type": "string",
+                "enum": ["Standard", "InfrequentAccess"]
+              }
+            },
+            "required": []
+          }
+        },
+        "required": ["key"]
+      },
+      "R2MultipartPart": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "partNumber": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000
+          },
+          "etag": {
+            "type": "string"
+          }
+        },
+        "required": ["partNumber", "etag"]
+      },
+      "RestoreRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[^\\u0000-\\u001F\\u007F]+$"
+          }
+        },
+        "required": ["name"]
+      },
+      "RestoredResource": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["kv_namespace", "d1_database"]
+          },
+          "created_on": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": ["id", "name", "kind", "created_on"],
+        "additionalProperties": false
+      },
+      "SchedulerStatus": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "string"
+          },
+          "pending": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "running": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": ["state", "pending", "running"],
+        "additionalProperties": false
+      },
+      "SystemStatus": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "components": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "state": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              },
+              "required": ["name", "state"],
+              "additionalProperties": false
+            }
+          },
+          "operator_proxy": {
+            "type": "object",
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": ["direct", "proxy", "invalid"]
+              },
+              "source_variable": {
+                "type": "string"
+              },
+              "origin": {
+                "type": "string"
+              }
+            },
+            "required": ["mode"],
+            "additionalProperties": false
+          },
+          "observability": {
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": ["healthy", "degraded"]
+              },
+              "retention_ms": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "max_database_bytes": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "query_max_timeframe_ms": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "oldest_event_ms": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "tail_sessions": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "closed_client_drops": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "overload_drops": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "state",
+              "retention_ms",
+              "max_database_bytes",
+              "query_max_timeframe_ms",
+              "tail_sessions",
+              "closed_client_drops",
+              "overload_drops"
+            ],
+            "additionalProperties": false
+          },
+          "deployment_runtime": {
+            "type": "object",
+            "properties": {
+              "dispatchable": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "quarantined": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "active_runtime_dispatchable": {
+                "type": "boolean"
+              },
+              "last_quarantine_reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "dispatchable",
+              "quarantined",
+              "active_runtime_dispatchable"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": ["state", "version", "components", "operator_proxy"],
+        "additionalProperties": false
+      },
+      "UpgradeCheck": {
+        "type": "object",
+        "properties": {
+          "schema_version": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "current_version": {
+            "type": "string"
+          },
+          "available_version": {
+            "type": ["string", "null"],
+            "minLength": 1
+          },
+          "update_available": {
+            "type": "boolean"
+          },
+          "upgrade_allowed": {
+            "type": "boolean"
+          },
+          "blocked_reason": {
+            "type": ["string", "null"],
+            "minLength": 1
+          }
+        },
+        "required": [
+          "schema_version",
+          "current_version",
+          "update_available",
+          "upgrade_allowed"
+        ],
+        "additionalProperties": false
+      },
+      "WorkerEndpoint": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["local_origin", "public_origin"]
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "scope": {
+            "type": "string",
+            "enum": ["local_machine", "public_network"]
+          },
+          "created_on": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": ["id", "kind", "url", "scope", "created_on"],
+        "additionalProperties": false
+      },
       "PathSegment": {
         "type": "string",
         "minLength": 1,
@@ -2734,698 +3611,11 @@
           }
         }
       },
-      "Capabilities": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "release",
-          "cf_version",
-          "compatibility",
-          "system_workers",
-          "endpoints",
-          "deviations",
-          "configuration",
-          "limits"
-        ],
-        "properties": {
-          "release": {
-            "type": "string",
-            "minLength": 1
-          },
-          "cf_version": {
-            "type": "string",
-            "const": "1.0.0-beta.12"
-          },
-          "compatibility": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": [
-              "validation",
-              "binary_maximum_date",
-              "future_dates_allowed",
-              "experimental_enabled",
-              "features",
-              "catalog_sha256"
-            ],
-            "properties": {
-              "validation": {
-                "type": "string",
-                "const": "workerd_code_version"
-              },
-              "binary_maximum_date": {
-                "type": "string",
-                "format": "date"
-              },
-              "future_dates_allowed": {
-                "type": "boolean",
-                "const": false
-              },
-              "experimental_enabled": {
-                "type": "boolean"
-              },
-              "features": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": [
-                    "field",
-                    "enabled_for_all_dates",
-                    "experimental",
-                    "python_snapshot_release"
-                  ],
-                  "properties": {
-                    "field": {
-                      "type": "string",
-                      "minLength": 1
-                    },
-                    "enable_flag": {
-                      "type": "string",
-                      "minLength": 1
-                    },
-                    "disable_flag": {
-                      "type": "string",
-                      "minLength": 1
-                    },
-                    "default_on_date": {
-                      "type": "string",
-                      "format": "date"
-                    },
-                    "enabled_for_all_dates": {
-                      "type": "boolean"
-                    },
-                    "experimental": {
-                      "type": "boolean"
-                    },
-                    "python_snapshot_release": {
-                      "type": "boolean"
-                    },
-                    "implied_by": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "additionalProperties": false,
-                        "required": ["flags", "after_date"],
-                        "properties": {
-                          "flags": {
-                            "type": "array",
-                            "minItems": 1,
-                            "uniqueItems": true,
-                            "items": {
-                              "type": "string",
-                              "minLength": 1
-                            }
-                          },
-                          "after_date": {
-                            "type": "string",
-                            "format": "date"
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              },
-              "catalog_sha256": {
-                "type": "string",
-                "pattern": "^[a-f0-9]{64}$"
-              }
-            }
-          },
-          "system_workers": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["compatibility_date", "compatibility_flags"],
-            "properties": {
-              "compatibility_date": {
-                "type": "string",
-                "format": "date"
-              },
-              "compatibility_flags": {
-                "type": "array",
-                "uniqueItems": true,
-                "items": {
-                  "type": "string",
-                  "minLength": 1
-                }
-              }
-            }
-          },
-          "endpoints": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "string",
-              "enum": ["supported", "supported_with_deviation", "unsupported"]
-            }
-          },
-          "deviations": {
-            "type": "array",
-            "uniqueItems": true,
-            "items": {
-              "type": "string"
-            }
-          },
-          "configuration": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["ai_search"],
-            "properties": {
-              "ai_search": {
-                "type": "boolean"
-              }
-            }
-          },
-          "limits": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "integer",
-              "minimum": 0
-            }
-          }
-        }
-      },
-      "SystemStatus": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["state", "version", "components", "operator_proxy"],
-        "properties": {
-          "state": {
-            "type": "string"
-          },
-          "version": {
-            "type": "string"
-          },
-          "components": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": ["name", "state"],
-              "properties": {
-                "name": {
-                  "type": "string"
-                },
-                "state": {
-                  "type": "string"
-                },
-                "message": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "operator_proxy": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["mode"],
-            "properties": {
-              "mode": {
-                "type": "string",
-                "enum": ["direct", "proxy", "invalid"]
-              },
-              "source_variable": {
-                "type": "string"
-              },
-              "origin": {
-                "type": "string"
-              }
-            }
-          },
-          "observability": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": [
-              "state",
-              "retention_ms",
-              "max_database_bytes",
-              "query_max_timeframe_ms",
-              "tail_sessions",
-              "closed_client_drops",
-              "overload_drops"
-            ],
-            "properties": {
-              "state": {
-                "type": "string",
-                "enum": ["healthy", "degraded"]
-              },
-              "retention_ms": {
-                "type": "integer",
-                "minimum": 0
-              },
-              "max_database_bytes": {
-                "type": "integer",
-                "minimum": 0
-              },
-              "query_max_timeframe_ms": {
-                "type": "integer",
-                "minimum": 0
-              },
-              "oldest_event_ms": {
-                "type": "integer",
-                "minimum": 0
-              },
-              "tail_sessions": {
-                "type": "integer",
-                "minimum": 0
-              },
-              "closed_client_drops": {
-                "type": "integer",
-                "minimum": 0
-              },
-              "overload_drops": {
-                "type": "integer",
-                "minimum": 0
-              }
-            }
-          },
-          "deployment_runtime": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": [
-              "dispatchable",
-              "quarantined",
-              "active_runtime_dispatchable"
-            ],
-            "properties": {
-              "dispatchable": {
-                "type": "integer",
-                "minimum": 0
-              },
-              "quarantined": {
-                "type": "integer",
-                "minimum": 0
-              },
-              "active_runtime_dispatchable": {
-                "type": "boolean"
-              },
-              "last_quarantine_reason": {
-                "type": "string"
-              }
-            }
-          }
-        }
-      },
-      "SchedulerStatus": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["state", "pending", "running"],
-        "properties": {
-          "state": {
-            "type": "string"
-          },
-          "pending": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "running": {
-            "type": "integer",
-            "minimum": 0
-          }
-        }
-      },
-      "CacheStatus": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["entries", "bytes"],
-        "properties": {
-          "entries": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "bytes": {
-            "type": "integer",
-            "minimum": 0
-          }
-        }
-      },
-      "ImageCapacity": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["queued", "running", "capacity"],
-        "properties": {
-          "queued": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "running": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "capacity": {
-            "type": "integer",
-            "minimum": 0
-          }
-        }
-      },
-      "WorkerEndpoint": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["id", "kind", "url", "scope", "created_on"],
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "kind": {
-            "type": "string",
-            "enum": ["local_origin", "public_origin"]
-          },
-          "url": {
-            "type": "string",
-            "format": "uri"
-          },
-          "scope": {
-            "type": "string",
-            "enum": ["local_machine", "public_network"]
-          },
-          "created_on": {
-            "type": "string",
-            "format": "date-time"
-          }
-        }
-      },
-      "PublicOriginRequest": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["name"],
-        "properties": {
-          "name": {
-            "type": "string",
-            "maxLength": 63,
-            "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"
-          }
-        }
-      },
-      "DurableObjectNamespace": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "id",
-          "name",
-          "script_name",
-          "class_name",
-          "state",
-          "availability",
-          "spec_generation",
-          "schema_version",
-          "created_on",
-          "modified_on"
-        ],
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "script_name": {
-            "type": "string"
-          },
-          "class_name": {
-            "type": "string"
-          },
-          "state": {
-            "type": "string",
-            "enum": ["creating", "ready", "deleting", "tombstoned"]
-          },
-          "availability": {
-            "type": "string",
-            "enum": ["healthy", "degraded", "unavailable"]
-          },
-          "availability_code": {
-            "type": "string"
-          },
-          "spec_generation": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "schema_version": {
-            "type": "integer",
-            "minimum": 1
-          },
-          "created_on": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "modified_on": {
-            "type": "string",
-            "format": "date-time"
-          }
-        }
-      },
-      "DurableObjectRecord": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "id",
-          "namespace_id",
-          "generation",
-          "state",
-          "created_on",
-          "modified_on"
-        ],
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "namespace_id": {
-            "type": "string"
-          },
-          "generation": {
-            "type": "integer",
-            "minimum": 1
-          },
-          "state": {
-            "type": "string"
-          },
-          "created_on": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "modified_on": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "deleted_on": {
-            "type": "string",
-            "format": "date-time"
-          }
-        }
-      },
-      "Backup": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["id", "created_on", "state"],
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "created_on": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "state": {
-            "type": "string"
-          },
-          "size": {
-            "type": "integer",
-            "minimum": 0
-          }
-        }
-      },
-      "RestoreRequest": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["name"],
-        "properties": {
-          "name": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 128,
-            "pattern": "^[^\\u0000-\\u001F\\u007F]+$"
-          }
-        }
-      },
-      "D1Migration": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["id", "name", "sha256", "applied_at_ms"],
-        "properties": {
-          "id": {
-            "type": "integer",
-            "minimum": 1
-          },
-          "name": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 255
-          },
-          "sha256": {
-            "type": "string",
-            "pattern": "^[0-9a-f]{64}$"
-          },
-          "applied_at_ms": {
-            "type": "integer",
-            "minimum": 0
-          }
-        }
-      },
-      "D1CheckpointTimes": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["checkpoints_ms"],
-        "properties": {
-          "checkpoints_ms": {
-            "type": "array",
-            "items": {
-              "type": "integer",
-              "minimum": 0
-            }
-          }
-        }
-      },
-      "D1MigrationInput": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["id", "name", "sha256", "sql"],
-        "properties": {
-          "id": {
-            "type": "integer",
-            "minimum": 1
-          },
-          "name": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 255
-          },
-          "sha256": {
-            "type": "string",
-            "pattern": "^[0-9a-f]{64}$"
-          },
-          "sql": {
-            "type": "string",
-            "minLength": 1
-          }
-        }
-      },
       "D1MigrationRequest": {
         "type": "array",
         "minItems": 1,
         "items": {
           "$ref": "#/components/schemas/D1MigrationInput"
-        }
-      },
-      "RestoredResource": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["id", "name", "kind", "created_on"],
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 128
-          },
-          "kind": {
-            "type": "string",
-            "enum": ["kv_namespace", "d1_database"]
-          },
-          "created_on": {
-            "type": "string",
-            "format": "date-time"
-          }
-        }
-      },
-      "UpgradeCheck": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "schema_version",
-          "current_version",
-          "update_available",
-          "upgrade_allowed"
-        ],
-        "properties": {
-          "schema_version": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "current_version": {
-            "type": "string"
-          },
-          "available_version": {
-            "type": ["string", "null"],
-            "minLength": 1
-          },
-          "update_available": {
-            "type": "boolean"
-          },
-          "upgrade_allowed": {
-            "type": "boolean"
-          },
-          "blocked_reason": {
-            "type": ["string", "null"],
-            "minLength": 1
-          }
-        }
-      },
-      "DurableObjectNamespacePage": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["items"],
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/DurableObjectNamespace"
-            }
-          },
-          "next_cursor": {
-            "type": "string"
-          }
-        }
-      },
-      "DurableObjectRecordPage": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["items"],
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/DurableObjectRecord"
-            }
-          },
-          "next_cursor": {
-            "type": "string"
-          }
-        }
-      },
-      "D1RenameRequest": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["name"],
-        "properties": {
-          "name": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 128,
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$"
-          }
-        }
-      },
-      "D1RenameResult": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["id", "name"],
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          }
         }
       },
       "WorkerServiceMetadata": {
@@ -3608,196 +3798,6 @@
                 "minimum": 0
               }
             }
-          }
-        }
-      },
-      "QueueConsumerRuntime": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "projection_exists",
-          "backlog_messages",
-          "backlog_bytes",
-          "ready_messages",
-          "claimed_batches",
-          "claimed_messages",
-          "dlq_pending"
-        ],
-        "properties": {
-          "projection_exists": {
-            "type": "boolean"
-          },
-          "backlog_messages": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "backlog_bytes": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "ready_messages": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "claimed_batches": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "claimed_messages": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "dlq_pending": {
-            "type": "integer",
-            "minimum": 0
-          }
-        }
-      },
-      "R2BucketUsage": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["object_count", "size_bytes"],
-        "properties": {
-          "object_count": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "size_bytes": {
-            "type": ["integer", "null"],
-            "minimum": 0
-          }
-        }
-      },
-      "R2MultipartCreateRequest": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["key"],
-        "properties": {
-          "key": {
-            "type": "string",
-            "minLength": 1
-          },
-          "options": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": [],
-            "properties": {
-              "httpMetadata": {
-                "type": "object",
-                "additionalProperties": false,
-                "required": [],
-                "properties": {
-                  "contentType": {
-                    "type": "string"
-                  },
-                  "contentLanguage": {
-                    "type": "string"
-                  },
-                  "contentDisposition": {
-                    "type": "string"
-                  },
-                  "contentEncoding": {
-                    "type": "string"
-                  },
-                  "cacheControl": {
-                    "type": "string"
-                  },
-                  "cacheExpiry": {
-                    "type": "integer"
-                  }
-                }
-              },
-              "customMetadata": {
-                "type": "object",
-                "additionalProperties": {
-                  "type": "string"
-                }
-              },
-              "storageClass": {
-                "type": "string",
-                "enum": ["Standard", "InfrequentAccess"]
-              }
-            }
-          }
-        }
-      },
-      "R2MultipartPart": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["partNumber", "etag"],
-        "properties": {
-          "partNumber": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 10000
-          },
-          "etag": {
-            "type": "string"
-          }
-        }
-      },
-      "R2MultipartCompleteRequest": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["parts"],
-        "properties": {
-          "parts": {
-            "type": "array",
-            "minItems": 1,
-            "maxItems": 10000,
-            "items": {
-              "$ref": "#/components/schemas/R2MultipartPart"
-            }
-          }
-        }
-      },
-      "R2MultipartCreate": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["key", "uploadId"],
-        "properties": {
-          "key": {
-            "type": "string"
-          },
-          "uploadId": {
-            "type": "string"
-          }
-        }
-      },
-      "R2MultipartCompletedObject": {
-        "type": "object",
-        "additionalProperties": true,
-        "required": [
-          "key",
-          "version",
-          "size",
-          "etag",
-          "httpEtag",
-          "uploaded",
-          "storageClass"
-        ],
-        "properties": {
-          "key": {
-            "type": "string"
-          },
-          "version": {
-            "type": "string"
-          },
-          "size": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "etag": {
-            "type": "string"
-          },
-          "httpEtag": {
-            "type": "string"
-          },
-          "uploaded": {
-            "type": "integer"
-          },
-          "storageClass": {
-            "type": "string"
           }
         }
       },
@@ -4031,8 +4031,6 @@
           },
           "result": {
             "type": ["object", "null"],
-            "additionalProperties": false,
-            "required": ["name", "url"],
             "properties": {
               "name": {
                 "type": "string"
@@ -4041,7 +4039,9 @@
                 "type": "string",
                 "format": "uri"
               }
-            }
+            },
+            "required": ["name", "url"],
+            "additionalProperties": false
           },
           "errors": {
             "type": "array",
