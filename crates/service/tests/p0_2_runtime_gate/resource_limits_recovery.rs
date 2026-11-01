@@ -10,6 +10,7 @@
 
 use super::*;
 use futures::FutureExt as _;
+use open_compute_storage::worker_repository::EffectiveResourceLimits;
 use std::panic::AssertUnwindSafe;
 
 const TENANT_A: &str = r#"
@@ -233,10 +234,7 @@ async fn exercise(
         account,
         "w2-limits-a",
         TENANT_A,
-        Some(VersionResourceLimitsInput {
-            cpu_ms: Some(100),
-            sub_requests: None,
-        }),
+        Some(EffectiveResourceLimits::materialize(Some(100), None).unwrap()),
     )
     .await;
     let (worker_b, version_b) =
@@ -247,10 +245,7 @@ async fn exercise(
         account,
         "w2-limits-c",
         &TENANT_C.replace("__OUTBOUND_URL__", outbound_url),
-        Some(VersionResourceLimitsInput {
-            cpu_ms: None,
-            sub_requests: Some(2),
-        }),
+        Some(EffectiveResourceLimits::materialize(None, Some(2)).unwrap()),
     )
     .await;
     let (worker_d, version_d) = deploy(
@@ -259,10 +254,7 @@ async fn exercise(
         account,
         "w2-limits-d",
         &TENANT_D.replace("__OUTBOUND_URL__", outbound_url),
-        Some(VersionResourceLimitsInput {
-            cpu_ms: None,
-            sub_requests: Some(2),
-        }),
+        Some(EffectiveResourceLimits::materialize(None, Some(2)).unwrap()),
     )
     .await;
     assert_startup_limit_rejected(&controller, &repo, account).await;
@@ -504,7 +496,7 @@ async fn deploy(
     account: open_compute_core::InstanceId,
     name: &str,
     source: &str,
-    limits: Option<VersionResourceLimitsInput>,
+    limits: Option<EffectiveResourceLimits>,
 ) -> (
     open_compute_storage::worker_repository::WorkerRecord,
     open_compute_storage::worker_repository::VersionRecord,
@@ -536,7 +528,7 @@ async fn deploy(
         services: BTreeMap::new(),
         runtime_features: VersionRuntimeFeatures {
             compatibility_date: "2026-09-08".to_owned(),
-            limits,
+            limits: limits.unwrap_or_else(EffectiveResourceLimits::standard_defaults),
             ..Default::default()
         },
         queue_consumers: Vec::new(),

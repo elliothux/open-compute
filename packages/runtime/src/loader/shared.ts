@@ -93,9 +93,7 @@ function workerCodeOptions(snapshot: RuntimeSnapshot): {
     snapshot.compatibilityFlags.length > 64 ||
     !snapshot.compatibilityFlags.every(
       (flag) => typeof flag === "string" && flag.length <= 128,
-    ) ||
-    !Number.isSafeInteger(snapshot.limits?.cpuMs) ||
-    !Number.isSafeInteger(snapshot.limits?.subRequests)
+    )
   ) {
     throw bindingError("VERSION_INVARIANT_VIOLATION");
   }
@@ -103,10 +101,7 @@ function workerCodeOptions(snapshot: RuntimeSnapshot): {
     compatibilityDate: snapshot.compatibilityDate,
     compatibilityFlags: [...snapshot.compatibilityFlags],
     allowExperimental: true,
-    limits: {
-      cpuMs: snapshot.limits.cpuMs,
-      subRequests: snapshot.limits.subRequests,
-    },
+    limits: snapshot.limits,
   };
 }
 

@@ -293,7 +293,7 @@ fn map_version(row: &rusqlite::Row<'_>) -> rusqlite::Result<VersionRecord> {
         compatibility_date: row.get(16)?,
         compatibility_flags: serde_json::from_slice(&row.get::<_, Vec<u8>>(17)?)
             .map_err(|_| rusqlite::Error::InvalidQuery)?,
-        resource_limits: EffectiveResourceLimits::from_stored_json(&row.get::<_, Vec<u8>>(18)?)
+        resource_limits: serde_json::from_slice(&row.get::<_, Vec<u8>>(18)?)
             .map_err(|_| rusqlite::Error::InvalidQuery)?,
         created_at_ms: row.get(11)?,
         ready_at_ms: row.get(12)?,
@@ -428,35 +428,6 @@ mod resource_limits_model_tests {
     use open_compute_core::ErrorCode;
 
     #[test]
-    fn standard_defaults_and_validation_bounds() {
-        let defaults = EffectiveResourceLimits::standard_defaults();
-        assert_eq!(defaults.cpu_ms, 30_000);
-        assert_eq!(defaults.sub_requests, 10_000);
-        assert!(EffectiveResourceLimits::new(1, 1).is_ok());
-        assert!(EffectiveResourceLimits::new(300_000, 10_000_000).is_ok());
-        for (cpu, sub) in [(0, 1), (300_001, 1), (1, 0), (1, 10_000_001)] {
-            assert_eq!(
-                EffectiveResourceLimits::new(cpu, sub).unwrap_err().code(),
-                ErrorCode::LimitInvalid
-            );
-        }
-        assert_eq!(
-            EffectiveResourceLimits::materialize(None, None).unwrap(),
-            defaults
-        );
-        assert_eq!(
-            EffectiveResourceLimits::materialize(Some(1000), Some(50)).unwrap(),
-            EffectiveResourceLimits::new(1000, 50).unwrap()
-        );
-        assert_eq!(
-            EffectiveResourceLimits::materialize(Some(0), None)
-                .unwrap_err()
-                .code(),
-            ErrorCode::LimitInvalid
-        );
-    }
-
-    #[test]
     fn ownership_source_and_content_kind_tokens_round_trip() {
         use super::{DeploymentSource, VersionContentKind, WorkerOwnership};
         assert_eq!(WorkerOwnership::Tenant.as_str(), "tenant");
@@ -495,32 +466,16 @@ mod resource_limits_model_tests {
     }
 
     #[test]
-    fn stored_json_round_trip_and_fail_closed_shapes() {
-        let limits = EffectiveResourceLimits::standard_defaults();
-        let bytes = limits.to_stored_json();
+    fn stored_json_uses_typed_decoding() {
+        let defaults = EffectiveResourceLimits::standard_defaults();
         assert_eq!(
-            EffectiveResourceLimits::from_stored_json(&bytes).unwrap(),
-            limits
+            serde_json::from_slice::<EffectiveResourceLimits>(&defaults.to_stored_json()).unwrap(),
+            defaults
         );
-        for corrupt in [
-            &b"{}"[..],
-            b"null",
-            b"{\"cpuMs\":30000}",
-            b"{\"cpuMs\":0,\"subRequests\":10000}",
-            b"{\"cpuMs\":30000,\"subRequests\":10000,\"extra\":1}",
-            b"{\"cpuMs\":-1,\"subRequests\":10000}",
-            b"{\"cpuMs\":30000.5,\"subRequests\":10000}",
-            b"not json",
-            // Valid values in a non-canonical encoding must fail closed.
-            b"{\"subRequests\":10000,\"cpuMs\":30000}",
-        ] {
-            assert_eq!(
-                EffectiveResourceLimits::from_stored_json(corrupt)
-                    .unwrap_err()
-                    .code(),
-                ErrorCode::LimitInvalid,
-                "corrupt input {corrupt:?} must fail closed"
-            );
-        }
+        // Stored values are trusted; only upload and Settings boundaries check bounds.
+        let stored: EffectiveResourceLimits =
+            serde_json::from_str(r#"{"subRequests":0,"cpuMs":300001}"#).unwrap();
+        assert_eq!((stored.cpu_ms, stored.sub_requests), (300_001, 0));
+        assert!(serde_json::from_str::<EffectiveResourceLimits>(r#"{"cpuMs":1}"#).is_err());
     }
 }

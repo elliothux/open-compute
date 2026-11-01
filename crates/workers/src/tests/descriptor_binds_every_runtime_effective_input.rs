@@ -2,9 +2,15 @@ use super::*;
 
 #[test]
 fn descriptor_binds_every_runtime_effective_input() {
-    let account = InstanceId::generate();
-    let worker = WorkerId::generate();
-    let version = VersionId::generate();
+    let account = "019c0000000070008000000000000001"
+        .parse::<InstanceId>()
+        .unwrap();
+    let worker = "019c0000-0000-7000-8000-000000000002"
+        .parse::<WorkerId>()
+        .unwrap();
+    let version = "019c0000-0000-7000-8000-000000000003"
+        .parse::<VersionId>()
+        .unwrap();
     let bundle = CanonicalBundle::build(
         "index.js",
         vec![module("index.js", b"export default {}")],
@@ -14,7 +20,7 @@ fn descriptor_binds_every_runtime_effective_input() {
     let mut vars = BTreeMap::new();
     vars.insert("MODE".to_owned(), serde_json::json!({"b": 2, "a": 1}));
     let (vars, _) = canonicalize_vars(vars).unwrap();
-    let descriptor = WorkerCodeDescriptorV1::new(
+    let mut descriptor = WorkerCodeDescriptorV1::new(
         account,
         worker,
         version,
@@ -35,6 +41,12 @@ fn descriptor_binds_every_runtime_effective_input() {
         1,
     )
     .unwrap();
+    // Freeze the source-manifest input so runtime source edits do not change this fixture.
+    descriptor.system_worker_sources_sha256 = "ab".repeat(32);
+    assert_eq!(
+        hex::encode(descriptor.sha256().unwrap()),
+        "e4aad2d2a1b0fc64f283dab3fc5cb84fe0ecc740cd0d82dfefad1a3e95bab8ef"
+    );
     let encoded = serde_json::to_value(&descriptor).unwrap();
     assert_eq!(encoded["compatibilityDate"], "2026-09-08");
     assert_eq!(encoded["compatibilityFlags"], serde_json::json!([]));

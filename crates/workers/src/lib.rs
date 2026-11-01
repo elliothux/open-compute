@@ -53,8 +53,8 @@ pub use pipeline::{
     CreateVersionOutcome, CreateVersionRequest, CreateVersionResult, ModuleBindingKind,
     QueueConsumerInput, RuntimeValidator, ValidationCandidate, VersionAiInput, VersionBindingInput,
     VersionBundle, VersionCacheInput, VersionCachePolicyInput, VersionContent, VersionController,
-    VersionImagesInput, VersionModuleBindingInput, VersionResourceLimitsInput,
-    VersionRuntimeFeatures, VersionServiceInput, VersionVersionMetadataInput,
+    VersionImagesInput, VersionModuleBindingInput, VersionRuntimeFeatures, VersionServiceInput,
+    VersionVersionMetadataInput,
 };
 pub use queue_lifecycle::{
     CreateQueueOutcome, CreateQueueRequest, CreateQueueResult, DeleteQueueResult, QueueController,

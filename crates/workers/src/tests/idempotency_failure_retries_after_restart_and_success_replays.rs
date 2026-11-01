@@ -72,10 +72,23 @@ async fn idempotency_failure_retries_after_restart_and_success_replays() {
     ));
     assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 3);
     assert!(matches!(
-        restarted_controller.create_version(request).await.unwrap(),
+        restarted_controller
+            .create_version(request.clone())
+            .await
+            .unwrap(),
         CreateVersionOutcome::Replay(_)
     ));
     assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 3);
+    let mut changed = request;
+    changed.runtime_features.limits.cpu_ms = 1;
+    assert_eq!(
+        restarted_controller
+            .create_version(changed)
+            .await
+            .unwrap_err()
+            .code(),
+        ErrorCode::IdempotencyConflict
+    );
     let restarted_repo = WorkerRepository::new(restarted.db());
     let versions = restarted_repo.list_versions(account, worker.id).unwrap();
     assert_eq!(versions.len(), 2);

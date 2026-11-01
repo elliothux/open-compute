@@ -364,35 +364,9 @@ impl EffectiveResourceLimits {
         )
     }
 
-    /// Canonical JSON bytes stored in the version row; unknown shapes fail closed on read.
+    /// Canonical JSON bytes stored in the Version row.
     pub fn to_stored_json(&self) -> Vec<u8> {
         serde_json::to_vec(self).unwrap_or_default()
-    }
-
-    /// Strictly decodes the stored canonical bytes. Anything but the exact canonical encoding
-    /// of in-range values is corrupt state.
-    pub fn from_stored_json(bytes: &[u8]) -> Result<Self, PlatformError> {
-        let value: serde_json::Value =
-            serde_json::from_slice(bytes).map_err(|_| limits_invalid())?;
-        let map = value.as_object().ok_or_else(limits_invalid)?;
-        if map.len() != 2 {
-            return Err(limits_invalid());
-        }
-        let cpu_ms = map
-            .get("cpuMs")
-            .and_then(serde_json::Value::as_u64)
-            .ok_or_else(limits_invalid)?;
-        let sub_requests = map
-            .get("subRequests")
-            .and_then(serde_json::Value::as_u64)
-            .ok_or_else(limits_invalid)?;
-        let cpu_ms = u32::try_from(cpu_ms).map_err(|_| limits_invalid())?;
-        let sub_requests = u32::try_from(sub_requests).map_err(|_| limits_invalid())?;
-        let limits = Self::new(cpu_ms, sub_requests)?;
-        if limits.to_stored_json() != bytes {
-            return Err(limits_invalid());
-        }
-        Ok(limits)
     }
 }
 

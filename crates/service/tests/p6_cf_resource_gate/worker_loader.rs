@@ -268,6 +268,7 @@ pub(super) async fn resource_limits_settings_clone_and_restart() {
         bound["result"]["bindings"],
         json!([{"name":"LABEL","type":"plain_text","text":"first"}])
     );
+    assert_eq!(bound["result"]["limits"], partial["result"]["limits"]);
     let bound_version = active_version(&client, fixture.admin_addr, &fixture.public_account).await;
     assert_ne!(bound_version, partial_replacement);
     let (status, inherited) = patch_settings(
@@ -321,6 +322,7 @@ pub(super) async fn resource_limits_settings_clone_and_restart() {
         annotated["result"]["annotations"]["workers/message"],
         "saved settings"
     );
+    assert_eq!(annotated["result"]["limits"], partial["result"]["limits"]);
     let annotated_version =
         active_version(&client, fixture.admin_addr, &fixture.public_account).await;
     assert_ne!(annotated_version, before_annotation);

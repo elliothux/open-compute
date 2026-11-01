@@ -13,7 +13,7 @@ function namespacePrefixes(value: unknown): value is string[] {
   );
 }
 
-/** Revoke a bounded, generation-authenticated batch of Script or route epochs. */
+/** Revoke a bounded batch of Script or route epochs over the private Unix socket. */
 export async function revokeWorkerLoaders(
   request: Request,
   factory: NativeWorkerLoaderFactory,

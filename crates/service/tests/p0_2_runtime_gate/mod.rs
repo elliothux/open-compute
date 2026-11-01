@@ -40,7 +40,7 @@ use open_compute_storage::workflows::WorkflowRepository;
 use open_compute_workers::{
     BundleLimits, CanonicalBundle, CreateVersionOutcome, CreateVersionRequest, ModuleInput,
     ModuleType, ResourcePins, RuntimeSource, RuntimeValidator, VersionController, VersionPins,
-    VersionResourceLimitsInput, VersionRuntimeFeatures,
+    VersionRuntimeFeatures,
 };
 use std::collections::BTreeMap;
 use std::convert::Infallible;

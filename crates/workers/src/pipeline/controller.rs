@@ -274,15 +274,7 @@ impl<'a> VersionController<'a> {
                 }
             }
         }
-        let limits_input = request
-            .runtime_features
-            .limits
-            .unwrap_or(VersionResourceLimitsInput {
-                cpu_ms: None,
-                sub_requests: None,
-            });
-        let resource_limits =
-            EffectiveResourceLimits::materialize(limits_input.cpu_ms, limits_input.sub_requests)?;
+        let resource_limits = request.runtime_features.limits;
         let descriptor = WorkerCodeDescriptorV1::new(
             request.instance_id,
             request.worker_id,

@@ -86,6 +86,8 @@
 
 ### R4.5 资源限制的平台侧简化
 
+状态：**已完成**（2026-11-01）。上传转换和 Settings PATCH 一次性校验并物化 limits；持久化读取、Loader 和 Version 克隆直接使用类型值，PATCH 仍按维度继承 active Version。snapshot 签名、探活凭证和平台侧 ceiling 计算在动手前已不存在。W2 补丁账本写明了删除条件。
+
 能力、v4 API、Settings PATCH 克隆 Version、错误码 1101、1102、10021 和 Version response 字段形状都保留，这是 Cloudflare 的行为。
 原生执行器（CPU 计时、isolate 内存、startup、subrequest、连接数）留在 fork 中。平台侧改动：
 

@@ -229,7 +229,7 @@ async fn r2_binding_uses_recreated_bucket_instead_of_tombstone() {
     }))
     .unwrap();
     let authority = V4InstanceContext::new(account, 1);
-    let mut upload = UploadInput::new(metadata.clone());
+    let mut upload = UploadInput::new(metadata.clone()).unwrap();
     upload
         .apply_explicit_bindings(
             api,
@@ -247,7 +247,7 @@ async fn r2_binding_uses_recreated_bucket_instead_of_tombstone() {
     assert_eq!(upload.bindings["BUCKET"].id, current);
 
     resources.begin_delete(account, current, 7).unwrap();
-    let mut upload = UploadInput::new(metadata);
+    let mut upload = UploadInput::new(metadata).unwrap();
     assert!(
         upload
             .apply_explicit_bindings(
@@ -284,7 +284,7 @@ async fn named_vectorize_binding_uses_recreated_index() {
         "bindings": [{"name":"INDEX","type":"vectorize","index_name":"reused-index"}]
     }))
     .unwrap();
-    let mut upload = UploadInput::new(metadata);
+    let mut upload = UploadInput::new(metadata).unwrap();
     upload
         .apply_explicit_bindings(
             api,
@@ -318,7 +318,7 @@ async fn ai_search_binding_resolves_public_instance_key_inside_the_requested_nam
         ]
     }))
     .unwrap();
-    let mut input = UploadInput::new(metadata);
+    let mut input = UploadInput::new(metadata).unwrap();
     input
         .apply_explicit_bindings(
             api,
@@ -364,7 +364,7 @@ async fn deprecated_queue_binding_delay_does_not_change_queue_authority() {
         }]
     }))
     .unwrap();
-    let mut input = UploadInput::new(metadata);
+    let mut input = UploadInput::new(metadata).unwrap();
     input
         .apply_explicit_bindings(
             api,
@@ -410,7 +410,7 @@ async fn service_binding_props_are_projected_into_the_immutable_version_input() 
         }]
     }))
     .unwrap();
-    let mut input = UploadInput::new(metadata);
+    let mut input = UploadInput::new(metadata).unwrap();
     input
         .apply_explicit_bindings(
             api,
@@ -452,7 +452,7 @@ async fn failed_upload_content_releases_its_unconsumed_workflow_reservation() {
         }]
     }))
     .unwrap();
-    let mut input = UploadInput::new(metadata);
+    let mut input = UploadInput::new(metadata).unwrap();
     input
         .apply_explicit_bindings(
             api,
@@ -555,7 +555,7 @@ async fn explicit_binding_projection_accepts_every_day1_binding_kind() {
         ]
     }))
     .unwrap();
-    let mut input = UploadInput::new(metadata);
+    let mut input = UploadInput::new(metadata).unwrap();
     input
         .apply_explicit_bindings(
             api,
@@ -602,7 +602,7 @@ async fn ai_search_instance_binding_rejects_ambiguous_keys_across_namespaces() {
         "bindings": [{"name":"SEARCH","type":"ai_search","instance_name":"shared"}]
     }))
     .unwrap();
-    let mut upload = UploadInput::new(metadata);
+    let mut upload = UploadInput::new(metadata).unwrap();
     let authority = V4InstanceContext::new(account, 1);
     assert!(
         upload
@@ -643,7 +643,7 @@ async fn explicit_binding_projection_rejects_cross_script_and_missing_resources(
             "bindings": [binding]
         }))
         .unwrap();
-        let mut input = UploadInput::new(metadata);
+        let mut input = UploadInput::new(metadata).unwrap();
         assert!(
             input
                 .apply_explicit_bindings(
@@ -843,8 +843,7 @@ async fn strict_inheritance_restores_each_persisted_binding_family() {
         worker_code_sha256: [5; 32],
         compatibility_date: "2026-09-08".to_owned(),
         compatibility_flags: Vec::new(),
-        resource_limits:
-            open_compute_storage::worker_repository::EffectiveResourceLimits::standard_defaults(),
+        resource_limits: EffectiveResourceLimits::standard_defaults(),
         vars: BTreeMap::from([
             ("PLAIN".to_owned(), br#""value""#.to_vec()),
             ("JSON".to_owned(), br#"{"ok":true}"#.to_vec()),
@@ -935,7 +934,7 @@ async fn strict_inheritance_restores_each_persisted_binding_family() {
         "bindings": names.map(|name| serde_json::json!({"name":name,"type":"inherit"}))
     }))
     .unwrap();
-    let mut inherited = UploadInput::new(metadata);
+    let mut inherited = UploadInput::new(metadata).unwrap();
     inherited
         .apply_inheritance(api, Some(&previous), true)
         .unwrap();
@@ -970,6 +969,7 @@ async fn strict_inheritance_restores_each_persisted_binding_family() {
         .unwrap();
         assert!(
             UploadInput::new(metadata)
+                .unwrap()
                 .apply_inheritance(api, previous, strict)
                 .is_err()
         );
@@ -996,7 +996,7 @@ async fn explicit_workflow_owner_references_resolve_and_foreign_scripts_fail_clo
             serde_json::json!({"main_module":"index.js","bindings":[binding]}),
         )
         .unwrap();
-        let mut input = UploadInput::new(metadata);
+        let mut input = UploadInput::new(metadata).unwrap();
         let result = input.apply_explicit_bindings(
             api,
             &authority,
@@ -1019,5 +1019,39 @@ async fn explicit_workflow_owner_references_resolve_and_foreign_scripts_fail_clo
             assert!(input.bindings.is_empty());
             assert!(input.workflow_reservations.is_empty());
         }
+    }
+}
+
+#[test]
+fn upload_limits_are_validated_and_materialized_at_conversion() {
+    for (json, expected) in [
+        (r#"{}"#, (30_000, 10_000)),
+        (r#"{"limits":{}}"#, (30_000, 10_000)),
+        (r#"{"limits":{"cpu_ms":1}}"#, (1, 10_000)),
+        (r#"{"limits":{"subrequests":1}}"#, (30_000, 1)),
+        (r#"{"limits":{"cpu_ms":1,"subrequests":1}}"#, (1, 1)),
+        (
+            r#"{"limits":{"cpu_ms":300000,"subrequests":10000000}}"#,
+            (300_000, 10_000_000),
+        ),
+    ] {
+        let input = UploadInput::new(serde_json::from_str(json).unwrap()).unwrap();
+        assert_eq!(
+            (
+                input.runtime_features.limits.cpu_ms,
+                input.runtime_features.limits.sub_requests
+            ),
+            expected
+        );
+    }
+    for (cpu, sub) in [(0, 1), (300_001, 1), (1, 0), (1, 10_000_001)] {
+        let metadata = serde_json::from_value(serde_json::json!({
+            "limits":{"cpu_ms":cpu,"subrequests":sub}
+        }))
+        .unwrap();
+        assert_eq!(
+            UploadInput::new(metadata).err().unwrap().code(),
+            ErrorCode::LimitInvalid
+        );
     }
 }

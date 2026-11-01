@@ -34,7 +34,7 @@ async fn container_upload_projection_requires_matching_same_worker_sqlite_export
     let second = fixture.admit_image("alternate").await;
     let api = api(&fixture);
     let instance = fixture.service.instance_id();
-    let mut input = UploadInput::new(metadata("ContainerClass"));
+    let mut input = UploadInput::new(metadata("ContainerClass")).unwrap();
     input
         .apply_containers(&api, instance, fixture._artifacts.worker, None)
         .unwrap();
@@ -59,7 +59,7 @@ async fn container_upload_projection_requires_matching_same_worker_sqlite_export
             format!("registry/app@sha256:{}", hex::encode(second)),
         ),
     ]);
-    let mut named_input = UploadInput::new(named.clone());
+    let mut named_input = UploadInput::new(named.clone()).unwrap();
     named_input
         .apply_containers(&api, instance, fixture._artifacts.worker, None)
         .unwrap();
@@ -77,17 +77,20 @@ async fn container_upload_projection_requires_matching_same_worker_sqlite_export
     );
     assert!(
         UploadInput::new(named)
+            .unwrap()
             .apply_containers(&api, instance, fixture._artifacts.worker, None)
             .is_err()
     );
 
     assert!(
         UploadInput::new(metadata("ContainerClass"))
+            .unwrap()
             .apply_containers(&api, instance, WorkerId::generate(), None)
             .is_err()
     );
     assert!(
         UploadInput::new(metadata("MissingClass"))
+            .unwrap()
             .apply_containers(&api, instance, fixture._artifacts.worker, None)
             .is_err()
     );
@@ -101,6 +104,7 @@ async fn container_upload_projection_requires_matching_same_worker_sqlite_export
         invalid.exports = Some(serde_json::from_value(json!({"ContainerClass":value})).unwrap());
         assert!(
             UploadInput::new(invalid)
+                .unwrap()
                 .apply_containers(&api, instance, fixture._artifacts.worker, None)
                 .is_err()
         );
@@ -108,7 +112,7 @@ async fn container_upload_projection_requires_matching_same_worker_sqlite_export
     let empty: WorkerUploadMetadata =
         serde_json::from_value(json!({"main_module":"index.js","compatibility_date":"2026-09-08"}))
             .unwrap();
-    let mut empty = UploadInput::new(empty);
+    let mut empty = UploadInput::new(empty).unwrap();
     empty
         .apply_containers(&api, instance, fixture._artifacts.worker, None)
         .unwrap();
@@ -241,20 +245,23 @@ async fn container_cf_declarative_multipart_prepares_sqlite_without_legacy_migra
     assert_eq!(repo.list_namespaces(instance).unwrap().len(), before);
     assert!(
         UploadInput::new(upload.metadata.clone())
+            .unwrap()
             .apply_containers(&api, instance, worker, None)
             .is_err()
     );
     assert!(
         UploadInput::new(upload.metadata.clone())
+            .unwrap()
             .apply_containers(&api, instance, worker, Some("wrong-migration"))
             .is_err()
     );
     assert!(
         UploadInput::new(upload.metadata.clone())
+            .unwrap()
             .apply_containers(&api, instance, WorkerId::generate(), Some(migration.tag()))
             .is_err()
     );
-    let mut input = UploadInput::new(upload.metadata);
+    let mut input = UploadInput::new(upload.metadata).unwrap();
     input
         .apply_containers(&api, instance, worker, Some(migration.tag()))
         .unwrap();

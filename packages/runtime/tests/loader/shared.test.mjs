@@ -140,3 +140,17 @@ test("Python artifact is read only during cold assembly, never metadata resoluti
   assert.ok(pythonPreparedSha256);
   assert.equal(pythonPreparationCode(raw).openComputePythonSnapshot, undefined);
 });
+
+test("WorkerCode forwards the Version limits object directly", async () => {
+  const limits = { cpuMs: 30_000, subRequests: 10_000 };
+  const code = await snapshotWorkerCode(
+    {},
+    {
+      compatibilityDate: "2026-09-08",
+      compatibilityFlags: [],
+      limits,
+    },
+    "runtime",
+  );
+  assert.equal(code.limits, limits);
+});

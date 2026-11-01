@@ -274,3 +274,12 @@ test("named images enforce the documented count and Unicode character bounds", (
       /VERSION_INVARIANT_VIOLATION/,
     );
 });
+
+test("snapshot trusts Version limits validated at the upload boundary", () => {
+  assert.doesNotThrow(() =>
+    assertSnapshot({
+      ...snapshot({}),
+      limits: { cpuMs: 0, subRequests: 10_000_001 },
+    }),
+  );
+});

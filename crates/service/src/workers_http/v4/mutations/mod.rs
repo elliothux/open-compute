@@ -470,20 +470,20 @@ pub(super) async fn patch_settings(
         }
     }
     if patch.limits.is_some() || patch.bindings.is_some() || annotation_change {
-        let limits = patch
+        let replacement = match patch
             .limits
-            .unwrap_or(super::model::WorkerUploadResourceLimits {
-                cpu_ms: None,
-                sub_requests: None,
-            });
-        let replacement = match EffectiveResourceLimits::new(
-            limits
-                .cpu_ms
-                .unwrap_or(snapshot.version.resource_limits.cpu_ms),
-            limits
-                .sub_requests
-                .unwrap_or(snapshot.version.resource_limits.sub_requests),
-        ) {
+            .map(|limits| {
+                EffectiveResourceLimits::new(
+                    limits
+                        .cpu_ms
+                        .unwrap_or(snapshot.version.resource_limits.cpu_ms),
+                    limits
+                        .sub_requests
+                        .unwrap_or(snapshot.version.resource_limits.sub_requests),
+                )
+            })
+            .transpose()
+        {
             Ok(value) => value,
             Err(error) => return platform_error(context.request_id(), &error),
         };
@@ -503,7 +503,7 @@ pub(super) async fn patch_settings(
                 deployment_source: None,
                 secret_updates: BTreeMap::new(),
                 crons: None,
-                resource_limits: Some(replacement),
+                resource_limits: replacement,
                 binding_patch: bindings,
                 annotations,
                 request_id: context.request_id(),

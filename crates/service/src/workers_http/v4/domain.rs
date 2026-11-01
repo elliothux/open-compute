@@ -17,14 +17,13 @@ use open_compute_storage::resources::ResourceRepository;
 use open_compute_storage::runtime_features::BuiltinBindingKind;
 use open_compute_storage::services::ServiceTarget;
 use open_compute_storage::worker_repository::{
-    DeploymentSource, VersionSnapshot, WorkerRecord, WorkerRepository,
+    DeploymentSource, EffectiveResourceLimits, VersionSnapshot, WorkerRecord, WorkerRepository,
 };
 use open_compute_storage::workflows::{WorkflowDefinitionReservation, WorkflowRepository};
 use open_compute_workers::{
     CreateVersionOutcome, CreateVersionRequest, ModuleBindingKind, RuntimeValidator,
     ServiceDescriptor, VersionBindingInput, VersionBundle, VersionCachePolicyInput, VersionContent,
-    VersionController, VersionModuleBindingInput, VersionResourceLimitsInput,
-    VersionRuntimeFeatures, VersionServiceInput,
+    VersionController, VersionModuleBindingInput, VersionRuntimeFeatures, VersionServiceInput,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -95,7 +94,7 @@ async fn create_from_prepared_upload(
     now_ms: i64,
     migration: Option<&super::do_lifecycle::PreparedDoMigration>,
 ) -> Result<CreateVersionOutcome, PlatformError> {
-    let mut input = UploadInput::new(upload.metadata);
+    let mut input = UploadInput::new(upload.metadata)?;
     let previous = worker
         .active_version_id
         .map(|version| {
@@ -218,7 +217,7 @@ pub(super) async fn validate_new_upload(
     if !upload.metadata.containers.is_empty() {
         api.require_containers().await?;
     }
-    let mut input = UploadInput::new(upload.metadata.clone());
+    let mut input = UploadInput::new(upload.metadata.clone())?;
     input.apply_inheritance(api, None, strict_inheritance)?;
     input.apply_explicit_bindings(
         api,

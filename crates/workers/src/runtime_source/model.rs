@@ -343,7 +343,7 @@ pub struct RuntimePayload {
 }
 
 impl RuntimePayload {
-    /// Borrow bytes for the generation-authenticated loopback response.
+    /// Borrow bytes for the private Unix-socket response.
     #[must_use]
     pub fn expose(&self) -> &[u8] {
         &self.bytes

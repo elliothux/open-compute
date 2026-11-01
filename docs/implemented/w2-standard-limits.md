@@ -21,8 +21,8 @@ fallback。正式源码、四平台二进制和 digest 以
 归一化为 v4 wire 的 snake-case `limits.cpu_ms` / `limits.subrequests`。配置与 wire 是不同边界，
 v4 decoder 拒绝未知字段、wire camelCase、`null` 维度、非整数、零、负数和超上限值；省略整个对象、`null` 配置或
 空对象都在 Version 创建时一次性物化 Standard 默认值。仓库内部只保留
-`EffectiveResourceLimits`，持久化 Version、signed runtime-source snapshot、Loader 与 workerd 沿一条链传递，
-读取非 canonical 或越界的持久化值会 fail closed。
+`EffectiveResourceLimits`，持久化 Version、runtime-source snapshot、Loader 与 workerd 沿一条链传递，
+读取持久化值时只做 JSON 类型解码（R4.5 删除了 canonical 字节和上下限复检）。
 
 Cloudflare v4 Script Settings `GET` 返回两个 effective limits；multipart `PATCH` 支持逐维更新。PATCH 克隆
 active Version、切换 active pointer 并保留未声明维度，绝不修改历史 Version。Version response 的
@@ -47,7 +47,7 @@ camelCase `cpuMs` / `subRequests`。Version、WorkerCode、entrypoint 及继续�
   `exceededCpu` / `exceededMemory` outcome。普通 subrequest 超限是 uncaught exception：HTTP 500、`1101`、
   `cf-error-type: 1101`、`exception`。响应和日志不暴露源码、Loader key、内部 URL/token 或原始异常。
 - 若 workerd 退出或仍存活但 generation-scoped `/internal/live` 不推进，supervisor 经过同 generation 确认后
-  撤销 credential、bounded teardown/reap 并按既有 budget 重启。普通 tenant 超限不会消耗 restart budget。
+  bounded teardown/reap 并按既有 budget 重启（R4.4 已将探活改为无 credential 的 Unix socket）。普通 tenant 超限不会消耗 restart budget。
 
 ## 历史测试与当前资格边界
 

@@ -1,7 +1,7 @@
 //! Immutable Version content cloning for metadata-only mutations.
 
 use super::domain::UploadInput;
-use super::model::{WorkerUploadBinding, WorkerUploadMetadata, WorkerUploadResourceLimits};
+use super::model::{WorkerUploadBinding, WorkerUploadMetadata};
 use crate::cloudflare_v4::accounts::V4InstanceContext;
 use crate::workers_http::WorkerApiState;
 use open_compute_artifacts::{ARTIFACT_KEY_VERSION, ArtifactRef};
@@ -93,58 +93,58 @@ pub(super) async fn clone_version(
     let content = clone_content(api, &snapshot).await?;
     let resource_limits = resource_limits.unwrap_or(snapshot.version.resource_limits);
     let replace_bindings = binding_patch.is_some();
-    let mut input = UploadInput::new(WorkerUploadMetadata {
-        main_module: snapshot.version.main_module.clone(),
-        body_part: None,
-        compatibility_date: snapshot.version.compatibility_date.clone(),
-        compatibility_flags: snapshot.version.compatibility_flags.clone(),
-        package_dependencies: Vec::new(),
-        code_update_strategy: None,
-        limits: Some(WorkerUploadResourceLimits {
-            cpu_ms: Some(resource_limits.cpu_ms),
-            sub_requests: Some(resource_limits.sub_requests),
-        }),
-        bindings: binding_patch
-            .as_ref()
-            .map_or_else(Vec::new, |(_, bindings)| bindings.clone()),
-        keep_bindings: if replace_bindings {
-            Vec::new()
-        } else {
-            [
-                "plain_text",
-                "json",
-                "secret_text",
-                "kv_namespace",
-                "r2_bucket",
-                "d1",
-                "durable_object_namespace",
-                "vectorize",
-                "ai_search_namespace",
-                "ai_search",
-                "artifacts",
-                "queue",
-                "workflow",
-                "service",
-                "ai",
-                "images",
-                "version_metadata",
-                "worker_loader",
-                "wasm_module",
-                "text_blob",
-                "data_blob",
-            ]
-            .into_iter()
-            .map(str::to_owned)
-            .collect()
+    let mut input = UploadInput::with_limits(
+        WorkerUploadMetadata {
+            main_module: snapshot.version.main_module.clone(),
+            body_part: None,
+            compatibility_date: snapshot.version.compatibility_date.clone(),
+            compatibility_flags: snapshot.version.compatibility_flags.clone(),
+            package_dependencies: Vec::new(),
+            code_update_strategy: None,
+            limits: None,
+            bindings: binding_patch
+                .as_ref()
+                .map_or_else(Vec::new, |(_, bindings)| bindings.clone()),
+            keep_bindings: if replace_bindings {
+                Vec::new()
+            } else {
+                [
+                    "plain_text",
+                    "json",
+                    "secret_text",
+                    "kv_namespace",
+                    "r2_bucket",
+                    "d1",
+                    "durable_object_namespace",
+                    "vectorize",
+                    "ai_search_namespace",
+                    "ai_search",
+                    "artifacts",
+                    "queue",
+                    "workflow",
+                    "service",
+                    "ai",
+                    "images",
+                    "version_metadata",
+                    "worker_loader",
+                    "wasm_module",
+                    "text_blob",
+                    "data_blob",
+                ]
+                .into_iter()
+                .map(str::to_owned)
+                .collect()
+            },
+            annotations,
+            assets: None,
+            observability: None,
+            cache_options: None,
+            exports: None,
+            migrations: None,
+            containers: Vec::new(),
         },
-        annotations,
-        assets: None,
-        observability: None,
-        cache_options: None,
-        exports: None,
-        migrations: None,
-        containers: Vec::new(),
-    });
+        resource_limits,
+    );
     input.apply_inheritance(api, Some(&snapshot), true)?;
     input.runtime_features.containers =
         open_compute_storage::containers::ContainerAuthority::new(api.storage.db())
