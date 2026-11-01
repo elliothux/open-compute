@@ -15,7 +15,7 @@ open-compute runs Cloudflare Workers on one machine for small teams. `ocd` (Rust
 ```sh
 bun install && bun run build  # inputs: docs/references/single-binary.md
 ./test/gate.py <targets> --keep-going  # --list shows targets and cases
-mbx fmt --all --check && ./test/check-rust-clippy.sh
+cargo fmt --all --check && ./test/check-rust-clippy.sh
 ```
 
 Run the tests for what you changed. [Testing](docs/references/testing.md) lists targets and full checks. Run the full workspace Gate only if the user asks or for a release.

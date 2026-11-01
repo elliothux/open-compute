@@ -2,11 +2,8 @@
 
 2026-09-26 的 GitHub Actions run 复盘；以下数字是墙钟，不是 runner 分钟。历史 run 的数字和缓存记录保留。
 
-2026-10-06 起，Rust 工具直接调用全局安装的 `mbx`，不同项目和 worktree 共用全局对象缓存；CI 安装 mbx 1.22.0。
-普通编译 job 直接缓存可写 Cargo target，不导出 mbx objects bundle，也不使用 sccache；Cargo registry/git 下载仍独立缓存。
-coverage 使用 action 的 `local` backend，不恢复普通检查留下的其他配置 target。
-Cargo 下载缓存、全局 MBX 配置和 store 保持不变，不创建第二份缓存。
-具体策略与安装命令见[测试说明](testing.md)。下文已观察到的成本与研究取舍记录当时的实现，不代表当前缓存配置。
+Rust 工具直接调用 `cargo`。CI 缓存 Cargo registry/git 下载；编译产物保留在各 job 的 Cargo target 目录。
+下文的历史 run 数字与研究取舍不代表当前缓存配置。
 
 ## 已观察到的成本
 
@@ -132,12 +129,11 @@ workspace/final binary。当前没有应用 benchmark，且仓库 cache 已接�
 
 ## 缓存与证据
 
-当前配置以 [setup action](../../.github/actions/setup-open-compute/action.yml) 为准；全局 mbx 设置、磁盘预算与本地清理见[测试说明](testing.md#验证磁盘预算)。
+当前配置以 [setup action](../../.github/actions/setup-open-compute/action.yml) 为准；磁盘预算见[测试说明](testing.md#验证磁盘预算)。
 
-- CI 直接缓存可写 Cargo target；不导出 mbx object bundle，不使用 sccache。key 区分工具链、平台、编译输入及 job/suite，防止并行任务争抢同一不可覆盖条目。
-- 只有成功的 main push 写共享缓存，PR/tag 只恢复；Cargo registry/index/git 下载缓存与编译产物分开。
+- CI 只缓存 Cargo registry/index/git 下载，编译产物留在当前 job。
 - 正式 package profile 使用 `.temp/release-target/`，普通开发使用 `target/`；不互相覆盖，不把开发产物或缓存当发行物。
-- 保留 Cargo timings 和 cache statistics，结合实际 restore、fresh units 与墙钟判断收益；最终链接等不可缓存部分仍可能占主要耗时。下一次必需 package run 提供测量，不为性能分析单独重复构建。
+- 保留 Cargo timings，结合 fresh units 与墙钟判断收益；最终链接等不可缓存部分仍可能占主要耗时。下一次必需 package run 提供测量，不为性能分析单独重复构建。
 - pin、source、生成资产和 artifact SHA 仍需校验。不得伪造 mtime、复用不同 revision 的二进制或把 cache hit 当成验证通过。诊断产物按[证据生命周期](testing.md#日志与保留证据)保留。
 
 ### 历史缓存测量

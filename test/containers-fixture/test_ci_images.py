@@ -48,8 +48,6 @@ class ImageWorkflowTests(unittest.TestCase):
         self.assertIn('default: true', source)
         self.assertIn('"os":"ubuntu-24.04","architecture":"amd64"', source)
         self.assertIn('"os":"ubuntu-24.04-arm","architecture":"arm64"', source)
-        self.assertIn('backend: local', source)
-        self.assertIn('version: 1.22.0', source)
         self.assertNotIn('--image ', source)
         self.assertLess(source.index('./scripts/build-container-sidecar-source.sh'),
                         source.index('test/containers-fixture/build-images.py'))
@@ -68,16 +66,21 @@ class ImageWorkflowTests(unittest.TestCase):
         self.assertNotIn('"containers":', consumer)
         self.assertNotIn('qualified-input', consumer)
 
-    def test_build_policy_disables_automatic_gc(self):
+    def test_builds_use_cargo_without_wrapper_policy(self):
         for name in ('.github/actions/setup-open-compute/action.yml',
                      '.github/workflows/container-images.yml',
-                     'test/gateway/runtime.Dockerfile'):
+                     '.github/workflows/container-diagnostic.yml',
+                     '.github/workflows/ci.yml', '.github/workflows/release.yml',
+                     'test/gateway/runtime.Dockerfile', 'test/release-dry-run/Dockerfile',
+                     'test/containers-fixture/Dockerfile.base'):
             with self.subTest(file=name):
                 source = (ROOT / name).read_text()
-                self.assertIn('mbx settings set gc.auto false', source)
-                self.assertRegex(source, r'MBX_GC_AUTO[=:] ?"?false')
-                for setting in ('build_script_execution', 'target.views', 'restore_hardlink'):
-                    self.assertIn('mbx settings set ' + setting + ' false', source)
+                self.assertNotRegex(source, r'\bmbx\b|MBX_|mr-boxington|rust-cache-backend')
+        setup = (ROOT / '.github/actions/setup-open-compute/action.yml').read_text()
+        self.assertNotIn('Intel', setup)
+        self.assertIn('toolchain: 1.98.0', setup)
+        self.assertIn('Cache Cargo downloads', setup)
+        self.assertIn('cargo build --locked', (ROOT / 'test/gateway/runtime.Dockerfile').read_text())
 
     def test_release_requires_full_linux_workspace_and_coverage(self):
         source = (ROOT / '.github/workflows/release.yml').read_text()
@@ -102,13 +105,6 @@ class ImageWorkflowTests(unittest.TestCase):
             {"target": "linux-arm64", "os": "ubuntu-24.04-arm"},
             {"target": "linux-x64", "os": "ubuntu-24.04"},
         ])
-
-    def test_supported_hosts_use_one_pinned_mbx_installation(self):
-        source = (ROOT / '.github/actions/setup-open-compute/action.yml').read_text()
-        self.assertNotIn('cargo install mbx', source)
-        self.assertNotIn('Intel', source)
-        self.assertEqual(source.count('uses: jdx/mr-boxington-action@v1'), 1)
-        self.assertIn('version: 1.22.0', source)
 
 if __name__ == '__main__':
     unittest.main()

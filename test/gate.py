@@ -281,7 +281,7 @@ def verify_case_inventory(targets, prepared):
 def resolve_targets(selected, workspace):
     """Use Cargo's workspace inventory; unaudited targets remain exclusive."""
     metadata = json.loads(subprocess.check_output(
-        ['mbx', 'metadata', '--locked', '--offline',
+        ['cargo', 'metadata', '--locked', '--offline',
          '--no-deps', '--format-version=1'], cwd=ROOT, text=True))
     known = {(package, name): (label, exclusive)
              for label, (package, name, exclusive) in CARGO_TARGETS.items()}
@@ -372,8 +372,8 @@ def resolve_targets(selected, workspace):
                 ('--list',),
                 (
                     'PATH', 'HOME', 'RUSTFLAGS', 'CARGO_HOME', 'RUSTUP_HOME',
-                    'CARGO_INCREMENTAL', 'MBX_CACHE_EXPORT_GROUP', 'MBX_CACHE_LINKS',
-                    'MBX_GC_AUTO', 'OPEN_COMPUTE_TEST_WORKERD',
+                    'CARGO_INCREMENTAL',
+                    'OPEN_COMPUTE_TEST_WORKERD',
                     'OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE', 'OPEN_COMPUTE_BUILD_CADDY',
                     'BAILIAN_API_HOST', 'BAILIAN_API_KEY', 'DEEPSEEK_API_KEY',
                     'COHERE_API_KEY',
@@ -398,8 +398,7 @@ def resolve_targets(selected, workspace):
                 ('--list',),
                 (
                     'PATH', 'HOME', 'RUSTFLAGS', 'CARGO_HOME', 'RUSTUP_HOME',
-                    'CARGO_INCREMENTAL', 'MBX_CACHE_EXPORT_GROUP', 'MBX_CACHE_LINKS',
-                    'MBX_GC_AUTO',
+                    'CARGO_INCREMENTAL',
                     'OPEN_COMPUTE_TEST_R2_S3_ENDPOINT',
                     'OPEN_COMPUTE_TEST_R2_S3_REGION',
                     'OPEN_COMPUTE_TEST_R2_S3_BUCKET',
@@ -619,7 +618,7 @@ def build_targets(targets, directory, workspace):
     for names in expected.values():
         if len(names) > 1 and set(names) != allowed_aliases:
             raise RuntimeError(f'Cargo test executable has duplicate Gate owners: {sorted(names)}')
-    command = ['mbx', 'test', '--locked', '--offline',
+    command = ['cargo', 'test', '--locked', '--offline',
                '--all-features', '--no-run', '--message-format=json']
     if workspace:
         command += ['--workspace', '--all-targets']

@@ -90,25 +90,25 @@ jobs:
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s test/containers-fixture -p 'test_*.py'
       - name: Service installation permissions and umask regression
         if: matrix.suite == 'core'
-        run: mbx test --locked -p open-compute-service --lib service_manager::tests -- --test-threads=1
+        run: cargo test --locked -p open-compute-service --lib service_manager::tests -- --test-threads=1
       - name: fmt
         if: matrix.suite == 'core'
-        run: mbx fmt --all --check
+        run: cargo fmt --all --check
       - name: clippy
         if: matrix.suite == 'clippy'
         run: ./test/check-rust-clippy.sh
       - name: no-default-features
         if: matrix.suite == 'core'
-        run: mbx check --workspace --no-default-features
+        run: cargo check --workspace --no-default-features
       - name: Rust 1.98 workspace and target compile check
         if: matrix.suite == 'core'
-        run: mbx +1.98.0 check --workspace --all-targets
+        run: cargo +1.98.0 check --workspace --all-targets
       - name: metadata
         if: matrix.suite == 'core'
-        run: mbx metadata --no-deps --format-version 1
+        run: cargo metadata --no-deps --format-version 1
       - name: Fetch locked crates for offline production checks
         if: matrix.suite == 'production'
-        run: mbx fetch --locked
+        run: cargo fetch --locked
       - name: Production feature and artifact hygiene
         if: matrix.suite == 'production'
         run: ./test/check-production.py
@@ -142,7 +142,7 @@ jobs:
             command=(env OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO=1 ./test/test-p0-2-egress-linux.sh)
           fi
           if [[ " $GATE_TARGETS " == *" p23-containers "* ]]; then
-            mbx build --locked -p open-compute-service --bin ocd --features test-support
+            cargo build --locked -p open-compute-service --bin ocd --features test-support
             bash test/containers-fixture/with-ci-linux-engine.sh \
               --images '${{ steps.container-images.outputs.directory }}' \
               --binary "$PWD/target/debug/ocd" \

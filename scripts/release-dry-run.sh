@@ -64,7 +64,7 @@ inside() {
   caddy_runtime="$output/build-caddy"
   if [ "$phase" = hydrate ]; then
     bun install --frozen-lockfile --ignore-scripts
-    mbx fetch --locked
+    cargo fetch --locked
     bun scripts/prepare-workerd.ts --dest "$runtime" --download >/dev/null
     bun scripts/prepare-caddy.ts --dest "$caddy_runtime" --download >/dev/null
     return
@@ -72,7 +72,7 @@ inside() {
   [ "$phase" = qualify ] || fail "unknown container phase: $phase"
 
   export CARGO_NET_OFFLINE=true
-  mbx fetch --locked --offline
+  cargo fetch --locked --offline
   bun test/conformance/check.ts --case baseline-identity
   node --test test/release-tools.test.mjs
 

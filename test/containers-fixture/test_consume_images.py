@@ -23,7 +23,7 @@ class Consume(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name).resolve()
         self.report = {'schemaVersion': 1, 'architecture': 'arm64', 'selectedImage': None,
-            'binaryInputs': {'mbxSha256': 'a' * 64, 'sidecarSha256': 'b' * 64},
+            'binaryInputs': {'sidecarSha256': 'b' * 64},
             'sourceInputs': {}, 'engineImageIds': {'base': 'sha256:' + 'c' * 64},
             'images': {}, 'dockerArchives': {}}
         for name in fixture.producer.SOURCE_FILES:
@@ -73,6 +73,14 @@ class Consume(unittest.TestCase):
         self.write()
         with self.assertRaisesRegex(ValueError, '^COMPLETE_PRODUCER_REPORT_REQUIRED$'):
             fixture.consume(self.root, 'arm64')
+
+    def test_binary_inputs_require_only_the_verified_sidecar_digest(self):
+        for binaries in ({}, {'sidecarSha256': 'invalid'},
+                         {'sidecarSha256': 'b' * 64, 'mbxSha256': 'a' * 64}):
+            self.report['binaryInputs'] = binaries
+            self.write()
+            with self.assertRaisesRegex(ValueError, '^ARTIFACT_BINARY_FIELDS$'):
+                fixture.consume(self.root, 'arm64')
 
     def test_source_mismatch_is_rejected(self):
         self.report['sourceInputs'][fixture.producer.SOURCE_FILES[0]]['sha256'] = '0' * 64

@@ -103,7 +103,7 @@ E2E 依赖专用多实例与可选产品 fixture，不在干净的 production pa
 该已复现的历史问题不能通过修改旧二进制掩盖，候选版本的原始 installer 首装仍必须无 workaround 通过。
 
 `publish` 明确依赖 main 静态资格、coverage、Linux 最终 Gate、Linux egress 和三个正式平台 assemble；
-任何一项未通过均不得公开发布。构建保留编译耗时和必要失败证据；当前 mbx/Cargo target 缓存策略见 [CI 构建性能](ci-build-performance.md#缓存与证据)。
+任何一项未通过均不得公开发布。构建保留编译耗时和必要失败证据；当前 Cargo 缓存策略见 [CI 构建性能](ci-build-performance.md#缓存与证据)。
 
 npm 发布以 `npm publish` 成功退出为完成信号，成功后不轮询 registry，也不等待 eventual-consistency read-back。
 只有 `npm publish` 返回失败时才做一次只读身份查询：若同版本已经存在且 tarball shasum/integrity 与已验证
@@ -149,7 +149,7 @@ vinext/Next.js 端到端或 hosted Cloudflare differential。其冻结摘要和�
    `packages/sdk/package.json` 的 `version` 改为同一 `X.Y.Z`（`@open-compute/sdk` 与 `ocd` 共享同一
    stable 版本，没有独立 SDK tag；release workflow 的 `failfast` job 会拒绝 SDK 与 workspace 版本不一致
    的 tag）；
-2. 通过全局 `mbx` 调用 Rust 工具更新 `Cargo.lock` 的 workspace package 版本，不手改 lockfile；
+2. 通过 `cargo` 更新 `Cargo.lock` 的 workspace package 版本，不手改 lockfile；
 3. 检查并上传 Git LFS 实体，不能只把 pointer 推到 Git：
 
    ```sh

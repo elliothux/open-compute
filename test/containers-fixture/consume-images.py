@@ -41,7 +41,7 @@ def consume(directory, architecture):
         oci.require(isinstance(expected, dict) and expected == {'sha256': actual, 'bytes': size}
                     and type(expected['bytes']) is int, 'ARTIFACT_SOURCE_MISMATCH')
     binaries = report['binaryInputs']
-    oci.require(isinstance(binaries, dict) and set(binaries) == {'mbxSha256', 'sidecarSha256'}
+    oci.require(isinstance(binaries, dict) and set(binaries) == {'sidecarSha256'}
                 and all(digest(value) for value in binaries.values()), 'ARTIFACT_BINARY_FIELDS')
     identities = report['engineImageIds']
     oci.require(isinstance(identities, dict) and set(identities) == {'base', 'one', 'two', 'sidecar'}

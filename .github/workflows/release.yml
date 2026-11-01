@@ -27,10 +27,6 @@ concurrency:
   group: ${{ github.event_name == 'workflow_dispatch' && format('candidate-{0}-{1}', github.ref, inputs.target) || format('release-{0}', github.ref) }}
   cancel-in-progress: false
 
-# Release tags consume the reusable default-branch caches without creating
-# tag-scoped entries that no later release can restore.
-cache-mode: read
-
 permissions:
   contents: read
   actions: read
@@ -291,7 +287,7 @@ jobs:
       - name: Build current runtime and application assets
         run: bun run build
       - name: Fetch locked Rust dependencies
-        run: mbx fetch --locked
+        run: cargo fetch --locked
       - name: Require protected provider configuration
         env:
           BAILIAN_API_HOST: ${{ secrets.BAILIAN_API_HOST }}
@@ -351,7 +347,7 @@ jobs:
       - name: Build current runtime and application assets
         run: bun run build
       - name: Fetch locked Rust dependencies
-        run: mbx fetch --locked
+        run: cargo fetch --locked
       - name: Run production S3 preflight against hosted R2
         env:
           OPEN_COMPUTE_TEST_R2_S3_ENDPOINT: ${{ secrets.OPEN_COMPUTE_TEST_R2_S3_ENDPOINT }}
@@ -392,12 +388,6 @@ jobs:
           browser-fixture: "true"
       - uses: ./.github/actions/prepare-container-fixture-images
         id: container-images
-      - name: Reserve disk headroom for real-runtime coverage
-        run: |
-          mbx settings set gc.min_free_size 20GiB
-          ./scripts/clean-mbx-cache.sh
-          df -h .
-          du -sh target .temp || true
       - name: Build untracked runtime and toolchain assets from this checkout
         run: bun run build
       - uses: actions/download-artifact@v8
@@ -551,7 +541,7 @@ jobs:
       - uses: ./.github/actions/prepare-container-fixture-images
         if: github.event_name == 'push'
       - name: Fetch locked crates for offline packaged-binary tests
-        run: mbx fetch --locked
+        run: cargo fetch --locked
       - name: Package and verify the native single executable
         shell: bash
         env:
@@ -576,7 +566,7 @@ jobs:
             '
           # Test-only transport driver; never included in the release artifact.
           host_target="$(rustc -vV | sed -n 's/^host: //p')"
-          mbx build --locked --offline --release --target "$host_target" -p open-compute-service \
+          cargo build --locked --offline --release --target "$host_target" -p open-compute-service \
             --features test-support --bin install-upgrade-fixture
           cp "$CARGO_TARGET_DIR/$host_target/release/install-upgrade-fixture" "$RUNNER_TEMP/install-upgrade-fixture"
           unset CARGO_TARGET_DIR
@@ -639,9 +629,6 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           compression-level: 0
-      - name: Compiler cache statistics
-        if: always()
-        run: mbx cache stats
       - name: Retain compiler timings
         if: always()
         uses: actions/upload-artifact@v7

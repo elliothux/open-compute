@@ -132,7 +132,7 @@ require('node:fs').appendFileSync(process.env.CI_COMMAND_LOG, JSON.stringify({na
     for (const name of [
       "test/gate.py",
       "test/test-p0-2-egress-linux.sh",
-      "mbx",
+      "cargo",
     ])
       await writeTestCommand(root, name, recorder);
     await writeTestCommand(
@@ -355,13 +355,14 @@ test("release qualification and local Docker diagnostic keep their exact boundar
     ),
     "utf8",
   );
+  assert.doesNotMatch(
+    setup,
+    /mr-boxington|rust-cache-backend|MBX_|settings set|github-cache-mode/,
+  );
   assert.match(
     setup,
-    /backend: \$\{\{ inputs\.llvm-cov == 'true' && 'local' \|\| inputs\.rust-cache-backend \}\}/,
+    /name: Cache Cargo downloads[\s\S]*?key: \$\{\{ runner\.os \}\}-cargo-downloads-/,
   );
-  assert.match(setup, /rust-cache-backend:\n[\s\S]*?default: github/);
-  assert.match(setup, /github-cache-mode: target/);
-  assert.doesNotMatch(setup, /isolate-objects-cache|MBX_CACHE_DIR/);
   const recovery = await readFile(recoveryWorkflowPath, "utf8");
   const ci = await readFile(ciWorkflowPath, "utf8");
   const localDryRun = await readFile(localDryRunPath, "utf8");
@@ -388,7 +389,7 @@ test("release qualification and local Docker diagnostic keep their exact boundar
     /release_head="\$\(git rev-parse refs\/remotes\/origin\/release\)"[\s\S]*?if \[ "\$GITHUB_SHA" != "\$release_head" \]/,
   );
   assert.doesNotMatch(workflow, /merge-base --is-ancestor "\$GITHUB_SHA"/);
-  assert.match(workflow, /^cache-mode: read$/m);
+  assert.doesNotMatch(workflow, /^cache-mode:/m);
   assert.match(
     workflow,
     /  coverage:\n    needs: \[failfast, fixture-images, package\]\n/,
@@ -415,8 +416,8 @@ test("release qualification and local Docker diagnostic keep their exact boundar
   }
   for (const command of [
     "./test/check-rust-clippy.sh",
-    "mbx check --workspace --no-default-features",
-    "mbx +1.98.0 check --workspace --all-targets",
+    "cargo check --workspace --no-default-features",
+    "cargo +1.98.0 check --workspace --all-targets",
     "./test/check-production.py",
   ]) {
     assert.equal(ci.split(command).length - 1, 1);
@@ -431,7 +432,7 @@ test("release qualification and local Docker diagnostic keep their exact boundar
   );
   assert.match(
     workflow,
-    /Fetch locked crates for offline packaged-binary tests\n\s+run: mbx fetch --locked/,
+    /Fetch locked crates for offline packaged-binary tests\n\s+run: cargo fetch --locked/,
   );
   assert.doesNotMatch(workflow, /v3-release-|actions\/cache\/save@/);
   const rustSetup = await readFile(
@@ -441,17 +442,11 @@ test("release qualification and local Docker diagnostic keep their exact boundar
     ),
     "utf8",
   );
-  assert.match(rustSetup, /jdx\/mr-boxington-action@v1/);
-  assert.match(rustSetup, /github-cache-mode: target/);
-  assert.match(
-    rustSetup,
-    /uses: jdx\/mr-boxington-action@v1\n\s+env:\n\s+MBX_BUILD_SCRIPT_EXECUTION: "0"\n\s+MBX_TARGET_VIEWS: "0"\n\s+MBX_RESTORE_HARDLINK: "0"/,
+  assert.match(rustSetup, /toolchain: 1\.98\.0/);
+  assert.doesNotMatch(
+    workflow + ci + rustSetup + localDryRunDockerfile,
+    /\bmbx\b|MBX_|mr-boxington/,
   );
-  assert.match(
-    rustSetup,
-    /cache-key-suffix: \$\{\{ github\.job \}\}-\$\{\{ matrix\.suite \|\| 'build' \}\}/,
-  );
-  assert.match(rustSetup, /version: 1\.22\.0/);
   assert.doesNotMatch(
     workflow + ci + rustSetup,
     /Swatinem\/rust-cache|sccache|rust-cache-key|rust-cache-save/,
@@ -508,7 +503,7 @@ test("release qualification and local Docker diagnostic keep their exact boundar
   );
   assert.match(
     localDryRun,
-    /export RUSTFLAGS='-D warnings'[\s\S]*?export CARGO_NET_OFFLINE=true[\s\S]*?mbx fetch --locked --offline[\s\S]*?bun test\/conformance\/check\.ts --case baseline-identity[\s\S]*?node --test test\/release-tools\.test\.mjs/,
+    /export RUSTFLAGS='-D warnings'[\s\S]*?export CARGO_NET_OFFLINE=true[\s\S]*?cargo fetch --locked --offline[\s\S]*?bun test\/conformance\/check\.ts --case baseline-identity[\s\S]*?node --test test\/release-tools\.test\.mjs/,
   );
   assert.match(
     localDryRun,
@@ -615,7 +610,7 @@ test("Linux qualification reuses same-run packages without a dependency cycle or
       job,
       /--binary "\$RUNNER_TEMP\/release-broker\/ocd-\$\{\{ needs\.failfast\.outputs\.tag \}\}-linux-x64"/,
     );
-    assert.doesNotMatch(job, /mbx build|target\/debug\/ocd|run-id:/);
+    assert.doesNotMatch(job, /cargo build|target\/debug\/ocd|run-id:/);
   }
   const packageJob = workflow
     .split("\n  package:")[1]
@@ -1233,7 +1228,7 @@ test("installation qualification is a mandatory publication dependency", async (
   assert.match(workflow, /for scope in user system/);
   assert.match(
     ci,
-    /mbx test --locked -p open-compute-service --lib service_manager::tests/,
+    /cargo test --locked -p open-compute-service --lib service_manager::tests/,
   );
   const recovery = await readFile(recoveryWorkflowPath, "utf8");
   assert.match(recovery, /startswith\("install-lifecycle \("\)/);

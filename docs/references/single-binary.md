@@ -57,7 +57,6 @@ macOS Intel 可使用 lock 中的 `darwin-x64` archive。Windows 需要使用适
 和本机编译的 workerd；仓库不提供 Windows 的预构建 archive、交叉编译配置或兼容性保证。
 
 ```sh
-cargo install mbx --version 1.22.0 --locked
 git submodule update --init --depth 1 third_party/gitserver third_party/workerd
 git lfs pull --include="share/pyodide/**,share/tessdata/**,share/xberg-tesseract-cache/**"
 bun install --frozen-lockfile --ignore-scripts
@@ -67,7 +66,7 @@ eval "$(bun scripts/prepare-workerd.ts --dest "$runtime_inputs/workerd" --downlo
 eval "$(bun scripts/prepare-caddy.ts --dest "$runtime_inputs/caddy" --download)"
 bun run build
 bun run check:generated
-mbx build --locked --release -p open-compute-service --bin ocd
+cargo build --locked --release -p open-compute-service --bin ocd
 ```
 
 准备工具只在显式 `--download` 时获取 lock 指定的 GitHub Release asset，并校验 URL、大小、archive/binary digest、版本与

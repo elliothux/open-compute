@@ -6,7 +6,7 @@ cd "$root"
 ./test/check-source-policy.sh
 python3 - <<'PY'
 import json, subprocess, sys
-meta = json.loads(subprocess.check_output(["mbx", "metadata", "--format-version", "1", "--no-deps", "--offline"]))
+meta = json.loads(subprocess.check_output(["cargo", "metadata", "--format-version", "1", "--no-deps", "--offline"]))
 # cargo metadata workspace_members may be ids
 ids = set(meta["workspace_members"])
 pkgs = [p for p in meta["packages"] if p["id"] in ids]

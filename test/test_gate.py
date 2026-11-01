@@ -35,10 +35,13 @@ class GateTests(unittest.TestCase):
             'id': 'service', 'name': 'open-compute-service', 'manifest_path': '/repo/crates/service/Cargo.toml',
             'targets': [{'name': 'p21_python_main', 'kind': ['test'], 'test': True}],
         }]}
-        with patch.object(gate.subprocess, 'check_output', return_value=json.dumps(metadata)), \
+        with patch.object(gate.subprocess, 'check_output', return_value=json.dumps(metadata)) as cargo, \
              patch.object(gate, 'CARGO_TARGETS', {name: gate.CARGO_TARGETS[name]}):
             targets = gate.resolve_targets([name], False)
             workspace = gate.resolve_targets([], True)
+        for call in cargo.call_args_list:
+            self.assertEqual(call.args[0], ['cargo', 'metadata', '--locked', '--offline',
+                                            '--no-deps', '--format-version=1'])
         self.assertEqual(targets[name].name, 'p21_python_main')
         self.assertTrue(targets[name].exclusive)
         self.assertEqual(targets[name].cases, (case,))
@@ -806,7 +809,7 @@ class GateTests(unittest.TestCase):
         self.assertEqual(target.executable, '/bin/sh')
         self.assertEqual(target.cases, ('production-preflight',))
         self.assertIn('OPEN_COMPUTE_TEST_R2_S3_SECRET_ACCESS_KEY', target.env_allowlist)
-        self.assertIn('MBX_CACHE_EXPORT_GROUP', target.env_allowlist)
+        self.assertFalse(any(key.startswith('MBX_') for key in target.env_allowlist))
         self.assertIn('CARGO_INCREMENTAL', target.env_allowlist)
 
     def test_ai_provider_qualification_forwards_pinned_build_inputs(self):
@@ -818,7 +821,7 @@ class GateTests(unittest.TestCase):
         # The harness rebuilds the Rust gate; build.rs requires both pinned runtime inputs.
         self.assertIn('OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE', target.env_allowlist)
         self.assertIn('OPEN_COMPUTE_BUILD_CADDY', target.env_allowlist)
-        self.assertIn('MBX_CACHE_EXPORT_GROUP', target.env_allowlist)
+        self.assertFalse(any(key.startswith('MBX_') for key in target.env_allowlist))
         self.assertIn('CARGO_INCREMENTAL', target.env_allowlist)
 
     def test_diagnostic_workspace_runs_complete_inventory_once_and_only_timing_twice_more(self):
@@ -1080,7 +1083,7 @@ class GateTests(unittest.TestCase):
             workerd.write_text('verified runtime input belongs to the real Gate')
             tools = {}
             sources = {
-                'mbx': """import sys
+                'cargo': """import sys
 if sys.argv[1:3] == ['llvm-cov', 'show-env']:
     print('export CARGO_LLVM_COV=1')
 elif sys.argv[1:] not in (['llvm-cov', '--version'], ['fetch', '--locked']):
@@ -1191,6 +1194,9 @@ if '--list' not in sys.argv:
             self.assertEqual(build['executables'][gate.SERVICE_LIB_TARGET],
                              build['executables'][gate.SERVICE_PROCESS_TARGET])
             self.assertEqual(build['invocations'], 1)
+            self.assertEqual(run.call_args.args[0][:7], [
+                'cargo', 'test', '--locked', '--offline', '--all-features',
+                '--no-run', '--message-format=json'])
             self.assertIn('--all-targets', run.call_args.args[0])
             missing = root / 'missing'
             missing.mkdir()
@@ -1342,7 +1348,7 @@ if '--list' not in sys.argv:
                         {'id': 'second', 'status': 'passed'},
                     ],
                 }) + '\n')
-                kwargs['stderr'].write('mbx: diagnostic after the JSON result\n')
+                kwargs['stderr'].write('cargo: diagnostic after the JSON result\n')
                 return SimpleNamespace(returncode=0)
 
             with patch.dict(os.environ, {'PATH': '/usr/bin', 'ALLOWED': 'yes',
@@ -1353,7 +1359,7 @@ if '--list' not in sys.argv:
             self.assertEqual(result['exit_code'], 0)
             self.assertEqual(result['cases_passed'], 2)
             self.assertEqual((Path(temp) / 'execute/stderr.log').read_text(),
-                             'mbx: diagnostic after the JSON result\n')
+                             'cargo: diagnostic after the JSON result\n')
 
     def test_contract_report_keeps_local_and_remote_verdicts_separate(self):
         with tempfile.TemporaryDirectory() as temp, patch.object(gate, 'ROOT', Path(temp)):

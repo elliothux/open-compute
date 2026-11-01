@@ -5,10 +5,5 @@ RUN apt-get update \
     && useradd --create-home --uid 501 --gid 20 --shell /bin/bash oc-test \
     && mkdir /src \
     && chown 501:20 /src
-COPY mbx /usr/local/bin/mbx
 USER oc-test
-RUN mbx settings set build_script_execution false \
-    && mbx settings set target.views false \
-    && mbx settings set restore_hardlink false \
-    && mbx settings set gc.auto false
 WORKDIR /src

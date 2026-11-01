@@ -98,8 +98,8 @@ class Lifecycle(unittest.TestCase):
         for key in ('NPM_TOKEN', 'GITHUB_TOKEN', 'CLOUDFLARE_API_TOKEN',
                     'OPEN_COMPUTE_ADMIN_TOKEN', 'DYLD_INSERT_LIBRARIES'):
             self.assertNotIn(key, value)
-        self.assertEqual(value['MBX_GC_AUTO'], 'false')
-        self.assertEqual(value['MBX_TARGET_VIEWS'], '0')
+        self.assertNotIn('MBX_GC_AUTO', value)
+        self.assertNotIn('MBX_TARGET_VIEWS', value)
 
     def test_clone_never_chmods_or_relinks_original(self):
         source = self.root / 'source'

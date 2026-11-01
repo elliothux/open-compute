@@ -23,7 +23,7 @@ if [ "${OPEN_COMPUTE_GATE_ROUNDS:-1}" != 1 ]; then
   exit 1
 fi
 
-if ! mbx llvm-cov --version >/dev/null 2>&1; then
+if ! cargo llvm-cov --version >/dev/null 2>&1; then
   echo "cargo-llvm-cov is required; install it with 'brew install cargo-llvm-cov' or 'cargo install cargo-llvm-cov --locked'" >&2
   exit 1
 fi
@@ -52,8 +52,8 @@ PYTHON
 )
 ignore_filename_regex="$ignore_filename_regex|^$cargo_home_regex/(registry|git)/"
 # Gate compiles with --offline; fetch the locked crate graph while network is allowed.
-mbx fetch --locked
-# Keep the instrumented target dir so mbx can reuse compiled artifacts.
+cargo fetch --locked
+# Keep the instrumented target dir so Cargo can reuse compiled artifacts.
 # Do not `cargo llvm-cov clean --workspace`; that cargo-cleans the target.
 # Profile names include process/module identity, so parallel processes cannot collide.
 export CARGO_TARGET_DIR="$root/target/llvm-cov-target"
@@ -66,7 +66,7 @@ mkdir -p "$OPEN_COMPUTE_COVERAGE_RUN_DIR/profiles"
 report_dir="$OPEN_COMPUTE_COVERAGE_RUN_DIR/reports"
 # Use cargo-llvm-cov's external-runner contract in its own existing build cache.
 ./test/gate.py --workspace --list "$@" >/dev/null
-coverage_env=$(mbx llvm-cov show-env --sh)
+coverage_env=$(cargo llvm-cov show-env --sh)
 eval "$coverage_env"
 # Merge child-process profiles into LLVM's bounded pool instead of creating one
 # full-size profile per PID; the latter exhausts hosted-runner disks.

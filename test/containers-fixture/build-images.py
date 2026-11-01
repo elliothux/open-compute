@@ -52,7 +52,7 @@ def copy_elf(source, destination, architecture):
     return digest
 
 
-def build(docker_host, mbx, sidecar, output, selected=None):
+def build(docker_host, sidecar, output, selected=None):
     oci.require(selected is None or selected in IMAGES, 'BUILD_SELECTED_IMAGE')
     architecture = {'aarch64': 'arm64', 'arm64': 'arm64', 'x86_64': 'amd64'}.get(platform.machine())
     oci.require(platform.system() == 'Linux' and architecture is not None, 'BUILD_NATIVE_LINUX_REQUIRED')
@@ -91,11 +91,7 @@ def build(docker_host, mbx, sidecar, output, selected=None):
             contexts[name] = work / name
             contexts[name].mkdir(mode=0o700)
         binary_inputs = {
-            'mbxSha256': copy_elf(mbx, contexts['base'] / 'mbx', architecture),
             'sidecarSha256': copy_elf(sidecar, contexts['sidecar'] / 'container-sidecar', architecture)}
-        version = subprocess.run([str(contexts['base'] / 'mbx'), '--version'], check=True, text=True,
-                                 stdout=subprocess.PIPE, env=env).stdout.strip()
-        oci.require(version == 'mbx 1.22.0', 'BUILD_MBX_VERSION')
         sources = {HERE / ('Dockerfile.' + name): contexts[name] / 'Dockerfile'
                    for name in ('base', 'sidecar')}
         sources.update({ROOT / 'test/applications/containers' / name: contexts['application'] / name
@@ -176,12 +172,11 @@ def build(docker_host, mbx, sidecar, output, selected=None):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--docker-host', required=True)
-    parser.add_argument('--mbx', required=True, type=Path)
     parser.add_argument('--sidecar', required=True, type=Path)
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--image', choices=IMAGES, help='Retry only one failed artifact; default builds all images')
     args = parser.parse_args()
-    print(json.dumps(build(args.docker_host, args.mbx, args.sidecar, args.output, args.image)))
+    print(json.dumps(build(args.docker_host, args.sidecar, args.output, args.image)))
 
 
 if __name__ == '__main__':

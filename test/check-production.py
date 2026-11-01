@@ -22,7 +22,7 @@ MARKER_GROUPS = ((
 
 
 def main():
-    result = subprocess.run(['mbx', 'build', '--locked', '--offline',
+    result = subprocess.run(['cargo', 'build', '--locked', '--offline',
                              '--no-default-features', '-p', 'open-compute-service', '--bin',
                              'ocd', '--message-format=json'], cwd=ROOT,
                             stdout=subprocess.PIPE, text=True, check=True)

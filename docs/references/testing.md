@@ -4,12 +4,12 @@
 
 ## 按输入选择测试
 
-| 改动                                                                      | 运行                                                                                                |
-| ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| 文档、release notes、规则文件、skill                                      | `git diff --check`、`bun scripts/check-docs.ts`；改了摘要输入时同步 `sourceDigest`（见下文）        |
-| SDK、Dashboard、Website、JS 工具                                          | 所属包的 typecheck、test 和 build                                                                   |
-| Rust 生产代码                                                             | 受影响 crate 的单元测试、受影响的 Gate 目标、`mbx fmt --all --check`、`./test/check-rust-clippy.sh` |
-| workerd/Caddy lock、submodule、runtime loader、Cap'n Proto、兼容 baseline | 重建 runtime，运行 `p3-contract` 和受影响目标；换 pin 另按 [workerd](../workerd/README.md) 执行     |
+| 改动                                                                      | 运行                                                                                                  |
+| ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| 文档、release notes、规则文件、skill                                      | `git diff --check`、`bun scripts/check-docs.ts`；改了摘要输入时同步 `sourceDigest`（见下文）          |
+| SDK、Dashboard、Website、JS 工具                                          | 所属包的 typecheck、test 和 build                                                                     |
+| Rust 生产代码                                                             | 受影响 crate 的单元测试、受影响的 Gate 目标、`cargo fmt --all --check`、`./test/check-rust-clippy.sh` |
+| workerd/Caddy lock、submodule、runtime loader、Cap'n Proto、兼容 baseline | 重建 runtime，运行 `p3-contract` 和受影响目标；换 pin 另按 [workerd](../workerd/README.md) 执行       |
 
 SDK 消费者读取 `packages/sdk/dist/`。SDK 生成面变化时先运行 `bun run --filter @open-compute/sdk build`。
 
@@ -107,22 +107,13 @@ python3 -B -m unittest discover -s test/install-lifecycle
 
 ## 完整检查与最终验收
 
-Rust 命令使用全局安装的 `mbx`（CI 为 1.22.0）。首次安装后设置：
+Rust 命令直接使用 `cargo`。
 
 ```sh
-mbx settings set build_script_execution false
-mbx settings set target.views false
-mbx settings set restore_hardlink false
-mbx settings set gc.auto true
-mbx settings set gc.max_total_size 8GiB
-mbx settings set gc.min_free_size 4GiB
-```
-
-```sh
-mbx fmt --all --check
+cargo fmt --all --check
 ./test/check-rust-clippy.sh
-RUSTFLAGS='-D warnings' mbx check --workspace --no-default-features
-mbx +1.98.0 check --workspace --all-targets
+RUSTFLAGS='-D warnings' cargo check --workspace --no-default-features
+cargo +1.98.0 check --workspace --all-targets
 ./test/check-boundaries.sh
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s test -p 'test_gate.py'
 ./test/check-production.py
@@ -138,7 +129,7 @@ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s test -p 'test_gate.py'
 ## 验证磁盘预算
 
 - 长构建和 Gate 前后检查空闲空间和 `docker system df -v`。
-- 本任务的可丢弃数据不超过 32 GiB，共享 mbx 缓存不超过 8 GiB。用 `./scripts/clean-mbx-cache.sh`（可加 `--dry-run`、`--max-size 2GiB`）回收缓存。
+- 本任务的可丢弃数据不超过 32 GiB。
 - Durable Objects 在磁盘用量达到 95% 时拒绝新对象，因此测试数据所在文件系统要保留超过总容量 5% 的空闲。
 - Docker 容器用 `--rm`，卷要有明确归属，结束后删除。不要运行全局 `docker prune`。
 

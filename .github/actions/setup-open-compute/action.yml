@@ -22,10 +22,6 @@ inputs:
     description: Explicitly download and prepare the pinned chrome-headless-shell test input
     required: false
     default: "false"
-  rust-cache-backend:
-    description: mbx backend; local avoids restoring a different target build profile
-    required: false
-    default: github
 
 runs:
   using: composite
@@ -101,31 +97,9 @@ runs:
       if: ${{ inputs.llvm-cov == 'true' }}
       uses: taiki-e/install-action@cargo-llvm-cov
 
-    - name: Install mbx and restore Rust build cache
-      uses: jdx/mr-boxington-action@v1
-      env:
-        MBX_BUILD_SCRIPT_EXECUTION: "0"
-        MBX_TARGET_VIEWS: "0"
-        MBX_RESTORE_HARDLINK: "0"
-        MBX_GC_AUTO: "false"
-      with:
-        version: 1.22.0
-        backend: ${{ inputs.llvm-cov == 'true' && 'local' || inputs.rust-cache-backend }}
-        github-cache-mode: target
-        cache-links: "false"
-        cache-key-suffix: ${{ github.job }}-${{ matrix.suite || 'build' }}
-
-    - name: Configure global mbx build policy
+    - name: Use local temporary storage
       shell: bash
-      run: |
-        mbx settings set build_script_execution false
-        mbx settings set target.views false
-        mbx settings set restore_hardlink false
-        mbx settings set gc.auto false
-        mbx settings set gc.max_total_size 8GiB
-        mbx settings set gc.min_free_size 4GiB
-        echo "TMPDIR=/tmp" >> "$GITHUB_ENV"
-        echo "MBX_GC_AUTO=false" >> "$GITHUB_ENV"
+      run: echo "TMPDIR=/tmp" >> "$GITHUB_ENV"
 
     - name: Download and verify pinned runtime inputs
       shell: bash

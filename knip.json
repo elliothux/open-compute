@@ -10,7 +10,7 @@
   ],
   "ignoreWorkspaces": ["test/applications/*", "third_party/*"],
   "ignoreDependencies": ["tailwindcss"],
-  "ignoreBinaries": ["mbx", "ocd"],
+  "ignoreBinaries": ["ocd"],
   "workspaces": {
     ".": {
       "entry": ["scripts/*.ts"],

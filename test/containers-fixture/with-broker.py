@@ -31,8 +31,8 @@ ASSET_ENV = ('OPEN_COMPUTE_TEST_WORKERD', 'OPEN_COMPUTE_BUILD_CADDY',
     'OPEN_COMPUTE_TEST_OCD')
 BUILD_ENV = ('RUSTUP_TOOLCHAIN', 'RUSTFLAGS', 'CARGO_TARGET_DIR', 'CARGO_BUILD_BUILD_DIR',
     'CARGO_BUILD_JOBS', 'CARGO_NET_OFFLINE', 'CARGO_INCREMENTAL', 'CARGO_PROFILE_DEV_DEBUG',
-    'CARGO_PROFILE_TEST_DEBUG', 'CARGO_HOME', 'RUSTUP_HOME', 'MBX_CACHE_EXPORT_GROUP',
-    'MBX_CACHE_LINKS', 'MALLOC_CONF', 'OPEN_COMPUTE_GATE_ROUNDS',
+    'CARGO_PROFILE_TEST_DEBUG', 'CARGO_HOME', 'RUSTUP_HOME',
+    'MALLOC_CONF', 'OPEN_COMPUTE_GATE_ROUNDS',
     'OPEN_COMPUTE_COVERAGE_HTML', 'GITHUB_ACTIONS', 'CI')
 
 
@@ -124,9 +124,7 @@ def relay_gate_progress(log):
 def command_environment(root, source):
     environment = {key: source[key] for key in ('PATH', 'HOME', 'USER', 'LOGNAME', 'LANG', 'TMPDIR',
         *ASSET_ENV, *BUILD_ENV) if key in source}
-    environment.update(MBX_GC_AUTO='false', MBX_BUILD_SCRIPT_EXECUTION='0',
-                       MBX_TARGET_VIEWS='0', MBX_RESTORE_HARDLINK='0',
-                       DOCKER_CONFIG=str(root / 'docker-config'))
+    environment['DOCKER_CONFIG'] = str(root / 'docker-config')
     return environment
 
 
