@@ -240,53 +240,24 @@ pub fn unix_ms_now(now: SystemTime) -> Result<u64, PlatformError> {
 /// Stable `SemVer` `X.Y.Z` without prerelease or build metadata.
 #[must_use]
 pub fn is_stable_semver(value: &str) -> bool {
-    let mut parts = value.split('.');
-    let Some(major) = parts.next() else {
-        return false;
-    };
-    let Some(minor) = parts.next() else {
-        return false;
-    };
-    let Some(patch) = parts.next() else {
-        return false;
-    };
-    if parts.next().is_some() {
-        return false;
-    }
-    parse_numeric_component(major).is_some()
-        && parse_numeric_component(minor).is_some()
-        && parse_numeric_component(patch).is_some()
+    parse_stable_semver(value).is_some()
 }
 
 /// Compare two stable `SemVer` strings. Returns `None` when either is invalid.
 #[must_use]
 pub fn cmp_stable_semver(left: &str, right: &str) -> Option<std::cmp::Ordering> {
-    let l = parse_stable_semver(left)?;
-    let r = parse_stable_semver(right)?;
-    Some(l.cmp(&r))
+    Some(parse_stable_semver(left)?.cmp(&parse_stable_semver(right)?))
 }
 
 /// Parse `X.Y.Z` into sortable components.
 #[must_use]
 pub fn parse_stable_semver(value: &str) -> Option<(u64, u64, u64)> {
-    let mut parts = value.split('.');
-    let major = parse_numeric_component(parts.next()?)?;
-    let minor = parse_numeric_component(parts.next()?)?;
-    let patch = parse_numeric_component(parts.next()?)?;
-    if parts.next().is_some() {
-        return None;
-    }
-    Some((major, minor, patch))
-}
-
-fn parse_numeric_component(value: &str) -> Option<u64> {
-    if value.is_empty() || (value.len() > 1 && value.starts_with('0')) {
-        return None;
-    }
-    if !value.bytes().all(|b| b.is_ascii_digit()) {
-        return None;
-    }
-    value.parse().ok()
+    let version = semver::Version::parse(value).ok()?;
+    (version.pre.is_empty() && version.build.is_empty()).then_some((
+        version.major,
+        version.minor,
+        version.patch,
+    ))
 }
 
 fn require_absolute(path: &Path) -> Result<(), PlatformError> {

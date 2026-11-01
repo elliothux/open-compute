@@ -54,8 +54,29 @@ fn require_upgradeable_rejects_cellar_path() {
 #[test]
 fn stable_semver_helpers() {
     assert!(is_stable_semver("0.1.0"));
-    assert!(!is_stable_semver("0.1.0-rc.1"));
-    assert!(!is_stable_semver("v0.1.0"));
+    for invalid in [
+        "",
+        "v0.1.0",
+        "01.0.0",
+        "0.01.0",
+        "0.1.00",
+        "0.1.0-rc.1",
+        "0.1.0+build",
+        "0.1.0.1",
+        "0.1",
+        " 0.1.0",
+        "0.1.0\n",
+        "18446744073709551616.0.0",
+        "0.18446744073709551616.0",
+        "0.1.18446744073709551616",
+    ] {
+        assert_eq!(parse_stable_semver(invalid), None, "{invalid:?}");
+        assert!(!is_stable_semver(invalid), "{invalid:?}");
+    }
+    assert_eq!(
+        parse_stable_semver("18446744073709551615.0.0"),
+        Some((u64::MAX, 0, 0))
+    );
     assert_eq!(
         cmp_stable_semver("0.1.1", "0.1.0"),
         Some(std::cmp::Ordering::Greater)
@@ -171,12 +192,8 @@ fn validate_rejects_empty_source_and_method() {
     receipt = sample_receipt("manual", binary);
     receipt.method.clear();
     assert!(receipt.validate().is_err());
-    assert!(!is_stable_semver(""));
-    assert!(!is_stable_semver("01.0.0"));
-    assert!(!is_stable_semver("0.1.0.1"));
     assert_eq!(cmp_stable_semver("0.1.0", "0.1.0-rc.1"), None);
     assert_eq!(parse_stable_semver("0.10.2"), Some((0, 10, 2)));
-    assert_eq!(parse_stable_semver("0.1.0.9"), None);
 }
 
 #[test]

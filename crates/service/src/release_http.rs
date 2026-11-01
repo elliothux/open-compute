@@ -41,7 +41,7 @@ pub struct LiveReleaseHttp {
 }
 
 impl LiveReleaseHttp {
-    /// Build a client with webpki roots and the production timeout.
+    /// Build a client with reqwest's default platform verifier and the production timeout.
     pub fn new() -> Result<Self, PlatformError> {
         Self::with_timeout(RELEASE_HTTP_TIMEOUT)
     }

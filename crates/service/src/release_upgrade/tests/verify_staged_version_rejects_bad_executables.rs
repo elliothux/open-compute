@@ -16,4 +16,8 @@ fn verify_staged_version_rejects_bad_executables() {
             .message()
             .contains("unsuccessfully")
     );
+    let collision = temp.path().join("collision");
+    fs::write(&collision, fake_binary("10.1.0")).unwrap();
+    fs::set_permissions(&collision, fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(verify_staged_version(&collision, "0.1.0").is_err());
 }
