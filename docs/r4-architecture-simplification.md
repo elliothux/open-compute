@@ -143,6 +143,8 @@
 
 ### R4.9 结构简化
 
+状态：**三项小清理已完成，其余按调研结论收窄**（2026-11-01）：已移除 search→core 的未用依赖和 `check-boundaries.sh` 的未用 `members` 计算，并将 DO schema 最终定义移回原对象位置，删除后续覆盖赋值。crate 合并预计仅删除约 50–150 行胶水代码，却涉及 821 个导入文件、扩大重编译单元并牵涉 artifacts 的 `opt-level = 3` 覆盖，待构建计时证明收益后再做；按产品布局延期，纯移动没有净删除，`promotion::replace_products` 等共享事务必须保持原子性，`check-boundaries.sh` 保留，因为 Rust 模块不能表达其依赖与 Bun 策略。每产品 feature 暂不做，预计增加 400–1,200 行且组合未经测试；后续仅考虑从 Rust 生成 vendor `/open-compute` HTTP schema，Cloudflare 形状仍以上游为准，保留 capability/type/config 双射检查。
+
 - `core`、`storage`、`artifacts` 合成一个底层库。
 - 代码按产品组织：每个产品一个模块，自带表、逻辑、HTTP handler 和测试；`service` 只做组装。删除 `check-boundaries.sh`。
 - 每个产品一个 cargo feature：发行版全量编译，开发只编译受影响的产品。

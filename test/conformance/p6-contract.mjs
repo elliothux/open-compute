@@ -1060,16 +1060,58 @@ function extensionSchemas() {
         pattern: "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$",
       },
     }),
-    DurableObjectNamespace: objectSchema(["id", "script_name", "class_name"], {
-      id: string,
-      script_name: string,
-      class_name: string,
-    }),
-    DurableObjectRecord: objectSchema(["id", "namespace_id", "created_on"], {
-      id: string,
-      namespace_id: string,
-      created_on: { type: "string", format: "date-time" },
-    }),
+    DurableObjectNamespace: objectSchema(
+      [
+        "id",
+        "name",
+        "script_name",
+        "class_name",
+        "state",
+        "availability",
+        "spec_generation",
+        "schema_version",
+        "created_on",
+        "modified_on",
+      ],
+      {
+        id: string,
+        name: string,
+        script_name: string,
+        class_name: string,
+        state: {
+          type: "string",
+          enum: ["creating", "ready", "deleting", "tombstoned"],
+        },
+        availability: {
+          type: "string",
+          enum: ["healthy", "degraded", "unavailable"],
+        },
+        availability_code: string,
+        spec_generation: nonNegativeInteger,
+        schema_version: { type: "integer", minimum: 1 },
+        created_on: { type: "string", format: "date-time" },
+        modified_on: { type: "string", format: "date-time" },
+      },
+    ),
+    DurableObjectRecord: objectSchema(
+      [
+        "id",
+        "namespace_id",
+        "generation",
+        "state",
+        "created_on",
+        "modified_on",
+      ],
+      {
+        id: string,
+        namespace_id: string,
+        generation: { type: "integer", minimum: 1 },
+        state: string,
+        created_on: { type: "string", format: "date-time" },
+        modified_on: { type: "string", format: "date-time" },
+        deleted_on: { type: "string", format: "date-time" },
+      },
+    ),
     Backup: objectSchema(["id", "created_on", "state"], {
       id: string,
       created_on: { type: "string", format: "date-time" },
@@ -1132,51 +1174,6 @@ function extensionSchemas() {
     type: "object",
     additionalProperties: nonNegativeInteger,
   };
-  schemas.DurableObjectNamespace = objectSchema(
-    [
-      "id",
-      "name",
-      "script_name",
-      "class_name",
-      "state",
-      "availability",
-      "spec_generation",
-      "schema_version",
-      "created_on",
-      "modified_on",
-    ],
-    {
-      id: string,
-      name: string,
-      script_name: string,
-      class_name: string,
-      state: {
-        type: "string",
-        enum: ["creating", "ready", "deleting", "tombstoned"],
-      },
-      availability: {
-        type: "string",
-        enum: ["healthy", "degraded", "unavailable"],
-      },
-      availability_code: string,
-      spec_generation: nonNegativeInteger,
-      schema_version: { type: "integer", minimum: 1 },
-      created_on: { type: "string", format: "date-time" },
-      modified_on: { type: "string", format: "date-time" },
-    },
-  );
-  schemas.DurableObjectRecord = objectSchema(
-    ["id", "namespace_id", "generation", "state", "created_on", "modified_on"],
-    {
-      id: string,
-      namespace_id: string,
-      generation: { type: "integer", minimum: 1 },
-      state: string,
-      created_on: { type: "string", format: "date-time" },
-      modified_on: { type: "string", format: "date-time" },
-      deleted_on: { type: "string", format: "date-time" },
-    },
-  );
   schemas.DurableObjectNamespacePage = objectSchema(["items"], {
     items: {
       type: "array",

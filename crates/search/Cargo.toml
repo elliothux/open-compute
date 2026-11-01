@@ -9,7 +9,6 @@ description = "Pure bounded vector and metadata search algorithms"
 publish.workspace = true
 
 [dependencies]
-open-compute-core = { path = "../core" }
 serde.workspace = true
 serde_json.workspace = true
 
