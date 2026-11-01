@@ -246,7 +246,10 @@ test("release qualification and local Docker diagnostic keep their exact boundar
   await execFileAsync("bash", ["-n", localDryRunPath]);
   assert.equal(
     cargoConfig,
-    '[env]\nTESSERACT_RS_CACHE_DIR = { value = "share/xberg-tesseract-cache", relative = true, force = true }\n',
+    '[env]\nTESSERACT_RS_CACHE_DIR = { value = "share/xberg-tesseract-cache", relative = true, force = true }\n' +
+      "# SQLite's default memory statistics take a process-wide mutex on every\n" +
+      "# allocation; parallel connections parsing the control schema serialize on it.\n" +
+      'LIBSQLITE3_FLAGS = "-DSQLITE_DEFAULT_MEMSTATUS=0"\n',
   );
   assert.match(
     workflow,
@@ -1064,7 +1067,6 @@ test("default non-root install owns one user prefix and configures PATH", async 
           {
             schema_version: 1,
             version: "1.2.3",
-            sha256: sha256(binary),
             target,
             binary_path: destination,
             method: "install.sh",
