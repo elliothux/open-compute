@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { buildCapability, validateCommitted } from "./p6-contract.mjs";
+import {
+  buildCapability,
+  officialCfSchema,
+  validateCommitted,
+} from "./p6-contract.mjs";
 import { assertSanitizedTrace, sanitizeTrace } from "./p6-trace.mjs";
 
 const capability = JSON.parse(
@@ -387,4 +391,83 @@ test("management authority rejects a duplicate observed Container route", () => 
       ),
     /duplicate management capability route/,
   );
+});
+
+test("route annotations cover product groups, validate docs/cf and derive SDK use", () => {
+  const read = (path) =>
+    JSON.parse(readFileSync(new URL(path, import.meta.url)));
+  const source = read("../../openapi/p6-capability-source.json");
+  const schema = officialCfSchema(
+    new URL("../../node_modules/cf/", import.meta.url).pathname,
+  );
+  const build = (input = source) =>
+    buildCapability(
+      read("../../openapi/cloudflare-v4-subset.json"),
+      read("../../openapi/cloudflare-subset-manifest.json"),
+      input,
+      capability.cf.version,
+      capability.cf.configSchemaSha256,
+      schema,
+    ).managementApi;
+  const { routes, routeGroups } = build();
+  const route = (id) => routes.find((item) => item.id === id);
+  assert.equal(
+    route("POST /accounts/{account_id}/workers/scripts/{script_name}/versions")
+      .group,
+    "workers-versions",
+  );
+  const r2 = route("PUT /accounts/{account_id}/r2/buckets/{bucket_name}");
+  assert.equal(routeGroups[r2.group].cf, "emits");
+  assert.equal(r2.sdk, "not-found");
+  const service = route(
+    "GET /accounts/{account_id}/workers/services/{script_name}",
+  );
+  assert.equal(service.cf, "emits");
+  assert.match(service.docs, /#service-environments$/);
+  assert.equal(routeGroups["open-compute"].docs, null);
+  assert.deepEqual(
+    routeGroups["workers-scripts"].uploadFields.map((field) => field.id),
+    [
+      "body_part",
+      "bindings.wasm_module",
+      "bindings.text_blob",
+      "bindings.data_blob",
+      "bindings.d1.id",
+      "bindings.queue.delivery_delay",
+    ],
+  );
+  const surface = read("../../packages/sdk/surface.json");
+  for (const item of surface.operations)
+    assert.equal(route(item.operation).sdk, "official");
+  for (const item of [
+    ...surface.openComputeOperations,
+    ...surface.observedStandardOperations,
+  ])
+    assert.equal(route(`${item.method} ${item.path}`).sdk, "open-compute");
+  for (const item of surface.excludedOperations)
+    assert.equal(route(item.operation).sdk, "not-found");
+
+  for (const [mutate, error] of [
+    [(api) => delete api.routeGroups.kv, /unannotated management route/],
+    [
+      (api) => (api.routeGroups.kv.docs = "https://example.com/kv/"),
+      /invalid route annotation docs/,
+    ],
+    [
+      (api) => (api.routeGroups.kv.cf = "unverified"),
+      /invalid route annotation cf/,
+    ],
+    [
+      (api) => (api.routeGroups["workers-scripts"].uploadFields[0].cf = "bad"),
+      /invalid route annotation cf/,
+    ],
+    [
+      (api) => (api.routeOverrides[service.id].docs = null),
+      /invalid route annotation docs/,
+    ],
+  ]) {
+    const invalid = structuredClone(source);
+    mutate(invalid.managementApi);
+    assert.throws(() => build(invalid), error);
+  }
 });

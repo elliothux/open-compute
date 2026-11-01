@@ -2,6 +2,171 @@
   "schemaVersion": 1,
   "managementApi": {
     "root": "/client/v4",
+    "routeGroups": {
+      "accounts": {
+        "prefixes": ["/user", "/accounts", "/memberships"],
+        "docs": "https://developers.cloudflare.com/api/resources/accounts/",
+        "cf": "emits"
+      },
+      "workers-scripts": {
+        "prefixes": ["/workers/scripts", "/workers/services"],
+        "docs": "https://developers.cloudflare.com/api/resources/workers/subresources/scripts/",
+        "cf": "emits",
+        "uploadFields": [
+          {
+            "id": "body_part",
+            "docs": "https://developers.cloudflare.com/workers/reference/migrate-to-module-workers/",
+            "cf": "emits"
+          },
+          {
+            "id": "bindings.wasm_module",
+            "docs": "https://developers.cloudflare.com/api/resources/workers/subresources/scripts/methods/update/",
+            "cf": "emits"
+          },
+          {
+            "id": "bindings.text_blob",
+            "docs": "https://developers.cloudflare.com/api/resources/workers/subresources/scripts/methods/update/",
+            "cf": "emits"
+          },
+          {
+            "id": "bindings.data_blob",
+            "docs": "https://developers.cloudflare.com/api/resources/workers/subresources/scripts/methods/update/",
+            "cf": "emits"
+          },
+          {
+            "id": "bindings.d1.id",
+            "docs": "https://developers.cloudflare.com/api/resources/workers/subresources/scripts/methods/update/",
+            "cf": "emits"
+          },
+          {
+            "id": "bindings.queue.delivery_delay",
+            "docs": "https://developers.cloudflare.com/workers/wrangler/configuration/#queues",
+            "cf": "emits"
+          }
+        ]
+      },
+      "workers-versions": {
+        "prefixes": [
+          "/workers/scripts/{script_name}/versions",
+          "/workers/workers/{worker_id}/versions"
+        ],
+        "docs": "https://developers.cloudflare.com/workers/versions-and-deployments/",
+        "cf": "emits"
+      },
+      "workers-deployments": {
+        "prefixes": ["/workers/scripts/{script_name}/deployments"],
+        "docs": "https://developers.cloudflare.com/workers/versions-and-deployments/",
+        "cf": "emits"
+      },
+      "workers-beta": {
+        "prefixes": ["/workers/workers"],
+        "docs": "https://developers.cloudflare.com/workers/",
+        "cf": "emits"
+      },
+      "workers-subdomain": {
+        "prefixes": ["/workers/subdomain"],
+        "docs": "https://developers.cloudflare.com/workers/configuration/routing/workers-dev/",
+        "cf": "emits"
+      },
+      "workers-assets": {
+        "prefixes": [
+          "/workers/assets",
+          "/workers/scripts/{script_name}/assets-upload-session"
+        ],
+        "docs": "https://developers.cloudflare.com/workers/static-assets/",
+        "cf": "emits"
+      },
+      "workers-observability": {
+        "prefixes": ["/workers/observability"],
+        "docs": "https://developers.cloudflare.com/workers/observability/",
+        "cf": "emits"
+      },
+      "kv": {
+        "prefixes": ["/storage/kv"],
+        "docs": "https://developers.cloudflare.com/kv/",
+        "cf": "emits"
+      },
+      "d1": {
+        "prefixes": ["/d1"],
+        "docs": "https://developers.cloudflare.com/d1/",
+        "cf": "emits"
+      },
+      "r2": {
+        "prefixes": ["/r2"],
+        "docs": "https://developers.cloudflare.com/r2/",
+        "cf": "emits"
+      },
+      "queues": {
+        "prefixes": ["/queues"],
+        "docs": "https://developers.cloudflare.com/queues/",
+        "cf": "emits"
+      },
+      "workflows": {
+        "prefixes": ["/workflows"],
+        "docs": "https://developers.cloudflare.com/workflows/",
+        "cf": "emits"
+      },
+      "vectorize": {
+        "prefixes": ["/vectorize"],
+        "docs": "https://developers.cloudflare.com/vectorize/",
+        "cf": "emits"
+      },
+      "ai-search": {
+        "prefixes": ["/ai-search"],
+        "docs": "https://developers.cloudflare.com/ai-search/",
+        "cf": "emits"
+      },
+      "artifacts": {
+        "prefixes": ["/artifacts"],
+        "docs": "https://developers.cloudflare.com/artifacts/",
+        "cf": "emits"
+      },
+      "containers": {
+        "prefixes": ["/containers"],
+        "docs": "https://developers.cloudflare.com/containers/",
+        "cf": "emits"
+      },
+      "browser": {
+        "prefixes": ["/browser-rendering", "/browser-run"],
+        "docs": "https://developers.cloudflare.com/browser-run/",
+        "cf": "emits"
+      },
+      "open-compute": {
+        "prefixes": ["/open-compute"],
+        "docs": null,
+        "cf": "not-found"
+      }
+    },
+    "routeOverrides": {
+      "GET /accounts/{account_id}/workers/services/{script_name}": {
+        "docs": "https://developers.cloudflare.com/workers/wrangler/deprecations/#service-environments",
+        "cf": "emits"
+      },
+      "GET /accounts/{account_id}/workers/scripts/{script_name}/queue-consumers": {
+        "docs": "https://developers.cloudflare.com/queues/configuration/configure-queues/",
+        "cf": "not-found"
+      },
+      "GET /accounts/{account_id}/workers/observability/usage": {
+        "docs": "https://developers.cloudflare.com/workers/observability/",
+        "cf": "not-found"
+      },
+      "POST /accounts/{account_id}/workers/observability/telemetry/live-tail": {
+        "docs": "https://developers.cloudflare.com/workers/observability/",
+        "cf": "not-found"
+      },
+      "POST /accounts/{account_id}/workers/observability/telemetry/live-tail/heartbeat": {
+        "docs": "https://developers.cloudflare.com/workers/observability/",
+        "cf": "not-found"
+      },
+      "POST /accounts/{account_id}/d1/database/{database_id}/import": {
+        "docs": "https://developers.cloudflare.com/d1/",
+        "cf": "not-found"
+      },
+      "POST /accounts/{account_id}/d1/database/{database_id}/export": {
+        "docs": "https://developers.cloudflare.com/d1/",
+        "cf": "not-found"
+      }
+    },
     "deviations": [
       "OC-ACCOUNT-SUBDOMAIN-001",
       "OC-DEPLOY-001",

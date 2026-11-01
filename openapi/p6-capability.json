@@ -2,6 +2,141 @@
   "schemaVersion": 1,
   "managementApi": {
     "root": "/client/v4",
+    "routeGroups": {
+      "accounts": {
+        "prefixes": ["/user", "/accounts", "/memberships"],
+        "docs": "https://developers.cloudflare.com/api/resources/accounts/",
+        "cf": "emits"
+      },
+      "workers-scripts": {
+        "prefixes": ["/workers/scripts", "/workers/services"],
+        "docs": "https://developers.cloudflare.com/api/resources/workers/subresources/scripts/",
+        "cf": "emits",
+        "uploadFields": [
+          {
+            "id": "body_part",
+            "docs": "https://developers.cloudflare.com/workers/reference/migrate-to-module-workers/",
+            "cf": "emits"
+          },
+          {
+            "id": "bindings.wasm_module",
+            "docs": "https://developers.cloudflare.com/api/resources/workers/subresources/scripts/methods/update/",
+            "cf": "emits"
+          },
+          {
+            "id": "bindings.text_blob",
+            "docs": "https://developers.cloudflare.com/api/resources/workers/subresources/scripts/methods/update/",
+            "cf": "emits"
+          },
+          {
+            "id": "bindings.data_blob",
+            "docs": "https://developers.cloudflare.com/api/resources/workers/subresources/scripts/methods/update/",
+            "cf": "emits"
+          },
+          {
+            "id": "bindings.d1.id",
+            "docs": "https://developers.cloudflare.com/api/resources/workers/subresources/scripts/methods/update/",
+            "cf": "emits"
+          },
+          {
+            "id": "bindings.queue.delivery_delay",
+            "docs": "https://developers.cloudflare.com/workers/wrangler/configuration/#queues",
+            "cf": "emits"
+          }
+        ]
+      },
+      "workers-versions": {
+        "prefixes": [
+          "/workers/scripts/{script_name}/versions",
+          "/workers/workers/{worker_id}/versions"
+        ],
+        "docs": "https://developers.cloudflare.com/workers/versions-and-deployments/",
+        "cf": "emits"
+      },
+      "workers-deployments": {
+        "prefixes": ["/workers/scripts/{script_name}/deployments"],
+        "docs": "https://developers.cloudflare.com/workers/versions-and-deployments/",
+        "cf": "emits"
+      },
+      "workers-beta": {
+        "prefixes": ["/workers/workers"],
+        "docs": "https://developers.cloudflare.com/workers/",
+        "cf": "emits"
+      },
+      "workers-subdomain": {
+        "prefixes": ["/workers/subdomain"],
+        "docs": "https://developers.cloudflare.com/workers/configuration/routing/workers-dev/",
+        "cf": "emits"
+      },
+      "workers-assets": {
+        "prefixes": [
+          "/workers/assets",
+          "/workers/scripts/{script_name}/assets-upload-session"
+        ],
+        "docs": "https://developers.cloudflare.com/workers/static-assets/",
+        "cf": "emits"
+      },
+      "workers-observability": {
+        "prefixes": ["/workers/observability"],
+        "docs": "https://developers.cloudflare.com/workers/observability/",
+        "cf": "emits"
+      },
+      "kv": {
+        "prefixes": ["/storage/kv"],
+        "docs": "https://developers.cloudflare.com/kv/",
+        "cf": "emits"
+      },
+      "d1": {
+        "prefixes": ["/d1"],
+        "docs": "https://developers.cloudflare.com/d1/",
+        "cf": "emits"
+      },
+      "r2": {
+        "prefixes": ["/r2"],
+        "docs": "https://developers.cloudflare.com/r2/",
+        "cf": "emits"
+      },
+      "queues": {
+        "prefixes": ["/queues"],
+        "docs": "https://developers.cloudflare.com/queues/",
+        "cf": "emits"
+      },
+      "workflows": {
+        "prefixes": ["/workflows"],
+        "docs": "https://developers.cloudflare.com/workflows/",
+        "cf": "emits"
+      },
+      "vectorize": {
+        "prefixes": ["/vectorize"],
+        "docs": "https://developers.cloudflare.com/vectorize/",
+        "cf": "emits"
+      },
+      "ai-search": {
+        "prefixes": ["/ai-search"],
+        "docs": "https://developers.cloudflare.com/ai-search/",
+        "cf": "emits"
+      },
+      "artifacts": {
+        "prefixes": ["/artifacts"],
+        "docs": "https://developers.cloudflare.com/artifacts/",
+        "cf": "emits"
+      },
+      "containers": {
+        "prefixes": ["/containers"],
+        "docs": "https://developers.cloudflare.com/containers/",
+        "cf": "emits"
+      },
+      "browser": {
+        "prefixes": ["/browser-rendering", "/browser-run"],
+        "docs": "https://developers.cloudflare.com/browser-run/",
+        "cf": "emits"
+      },
+      "open-compute": {
+        "prefixes": ["/open-compute"],
+        "docs": null,
+        "cf": "not-found"
+      }
+    },
     "routes": [
       {
         "id": "GET /user",
@@ -11,7 +146,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "5c647aa1317a79dce8b71e6215beca8412b6c79eca0123464c5a6f81552c19cc",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "accounts",
+        "sdk": "official"
       },
       {
         "id": "GET /user/tokens/verify",
@@ -21,7 +158,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "7a5c53439ddaa024c373e95b15a61f7f1693e46d50c001ed6fe15733d4549cdd",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "accounts",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts",
@@ -31,7 +170,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "a909afbc72eebfed1735dd137d8d652fcf991c22dc56bba1b5f341e71ab1e919",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "accounts",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}",
@@ -41,7 +182,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "3f2b4e7b0673d9ffeca6c62a3407f3f676bd989e7aa6701ad4b7f86f4720f826",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "accounts",
+        "sdk": "official"
       },
       {
         "id": "GET /memberships",
@@ -51,7 +194,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "2264ac72a581486a06ffd08ff6b493f88bf788e5a0c8fd4aec7d82f3a8acc3b9",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "accounts",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}/workers/subdomain",
@@ -63,7 +208,9 @@
         "constraint": "Fixed Wrangler 4.143.0 discards this Workflow deploy prerequisite; open-compute returns a stable account-scoped non-DNS label and does not provide workers.dev DNS, routing, registration, update, or deletion",
         "deviations": ["OC-ACCOUNT-SUBDOMAIN-001"],
         "operationSha256": "5fd74e1bc71ea92d9ed0bb981b9b7070326dc06908949788fcdf304cc3a78b82",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "workers-subdomain",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}/workers/scripts",
@@ -73,7 +220,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "a641a974eaa527b7b4480b06ffca03bb3ef1b5be463325fe499c0f56f3745af6",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "workers-scripts",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}/workers/scripts/{script_name}",
@@ -83,7 +232,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "63df4f50992b062254d46e60aa52eda3089df86da4058e4f83771dbce322d027",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "workers-scripts",
+        "sdk": "official"
       },
       {
         "id": "PUT /accounts/{account_id}/workers/scripts/{script_name}",
@@ -93,7 +244,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "7aa37542a1eac22a3513487fbcc7a2966e00c692f7b27c97176ca5e1dd5dc8d6",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "workers-scripts",
+        "sdk": "official"
       },
       {
         "id": "DELETE /accounts/{account_id}/workers/scripts/{script_name}",
@@ -105,7 +258,9 @@
         "constraint": "force=true bypasses retained Version and inbound Service references and may rotate the single workerd generation, but external D1, KV, R2, Queue, Workflow, and Durable Object resources remain independent authorities rather than being cascade-deleted with the Script",
         "deviations": ["OC-DEPLOY-001"],
         "operationSha256": "9b1d3cb349e54f0b70a6ea0482303a207654ab4d1c61bced2652db8e20837410",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "workers-scripts",
+        "sdk": "official"
       },
       {
         "id": "POST /accounts/{account_id}/workers/scripts/{script_name}/versions",
@@ -115,7 +270,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "137c730471df702765da262577618ea1524bb2fc6efecac03a8a8bdf784e8539",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "workers-versions",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}/workers/scripts/{script_name}/versions",
@@ -125,7 +282,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "7095b04560aea7cf3e9fd6ea24ecb734e1d83af0d9412f69d92e92b311741828",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "workers-versions",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}/workers/scripts/{script_name}/versions/{version_id}",
@@ -135,7 +294,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "4b1a37e0e65d5e0e93f8cd0ede16a4e1fbd2f79c36785528cb89354df76d0233",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "workers-versions",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}/workers/scripts/{script_name}/deployments",
@@ -145,7 +306,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "84add923019d32c5b2e0d46fc316f9b925d874fcbfe5cf05f2b719d4d21ac903",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "workers-deployments",
+        "sdk": "official"
       },
       {
         "id": "POST /accounts/{account_id}/workers/scripts/{script_name}/deployments",
@@ -155,7 +318,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "5f64310a59b76625db22e7334f89cf74772d8cada0cf54864e6e31a8dc5351fd",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "workers-deployments",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}/workers/scripts/{script_name}/deployments/{deployment_id}",
@@ -165,7 +330,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "607a064422156d4d44dd97062347978afbac2ad136e3f0a7224e74f105dbd9ef",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "workers-deployments",
+        "sdk": "official"
       },
       {
         "id": "DELETE /accounts/{account_id}/workers/scripts/{script_name}/deployments/{deployment_id}",
@@ -175,7 +342,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "d246acaac0c1554ee68c9d60d4dfdb8e5239792ac9de0427059184db99a60acb",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "workers-deployments",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}/workers/scripts/{script_name}/script-settings",
@@ -185,7 +354,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "0ef47278cc3a3af3f117bde04d267fff5df2fa063ebce653292926c62bff2d1c",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "workers-scripts",
+        "sdk": "official"
       },
       {
         "id": "PATCH /accounts/{account_id}/workers/scripts/{script_name}/script-settings",
@@ -195,7 +366,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "8cc52b39423374c7fb893c684c98d7747a68bdd7de7cac14175bf69d2509af0b",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "workers-scripts",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}/workers/scripts/{script_name}/settings",
@@ -205,7 +378,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "61f9e958133be2deeb223c0080b67dc9ff8680b0ab2aa83062df9ddf2db9424c",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "workers-scripts",
+        "sdk": "official"
       },
       {
         "id": "PATCH /accounts/{account_id}/workers/scripts/{script_name}/settings",
@@ -215,7 +390,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "8e375717670e33288d02646cfb4bded456b937234e4f247ae7518ce87f7af940",
-        "requestMediaType": "multipart"
+        "requestMediaType": "multipart",
+        "group": "workers-scripts",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}/workers/scripts/{script_name}/tails",
@@ -227,7 +404,9 @@
         "constraint": "Script Tail sessions are process-local; GET returns the complete active-session array implied by List Tails instead of the pinned OpenAPI single-object type; sessions receive only the selected target Script and do not aggregate nested target logs",
         "deviations": ["OC-OBSERVABILITY-001"],
         "operationSha256": "83775be0e924c280d3a17b1604c479aebdf76434fb2b94f572b08db0bff286c2",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "workers-scripts",
+        "sdk": "official"
       },
       {
         "id": "POST /accounts/{account_id}/workers/scripts/{script_name}/tails",
@@ -239,7 +418,9 @@
         "constraint": "Script Tail sessions are process-local and receive only the selected target Script; they do not aggregate nested target logs",
         "deviations": ["OC-OBSERVABILITY-001"],
         "operationSha256": "fe85b88074e6975d062f1b16282a31c145a2363547c20a91ce3d159772c6c2c6",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "workers-scripts",
+        "sdk": "official"
       },
       {
         "id": "DELETE /accounts/{account_id}/workers/scripts/{script_name}/tails/{id}",
@@ -251,7 +432,9 @@
         "constraint": "Script Tail sessions are process-local and disappear on daemon restart",
         "deviations": ["OC-OBSERVABILITY-001"],
         "operationSha256": "edd34eed1cf8cbd02520df04d51ef69c33a325ca729bc729fbff3bf3123eb3ea",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "workers-scripts",
+        "sdk": "official"
       },
       {
         "id": "POST /accounts/{account_id}/workers/observability/telemetry/keys",
@@ -263,7 +446,9 @@
         "constraint": "Field discovery reads a bounded single-machine retention index containing target-attributed events only",
         "deviations": ["OC-OBSERVABILITY-001"],
         "operationSha256": "8995c04966d27334de5bfce9caf57d1ef28011591d6bb338f654db03241182da",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "workers-observability",
+        "sdk": "official"
       },
       {
         "id": "POST /accounts/{account_id}/workers/observability/telemetry/values",
@@ -275,7 +460,9 @@
         "constraint": "Value discovery reads a bounded single-machine retention index containing target-attributed events only",
         "deviations": ["OC-OBSERVABILITY-001"],
         "operationSha256": "dd6eecbf7196f7372e2b4186a38bad9a760283e84abea03777dbf09b00bc28ef",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "workers-observability",
+        "sdk": "official"
       },
       {
         "id": "POST /accounts/{account_id}/workers/observability/telemetry/query",
@@ -287,7 +474,9 @@
         "constraint": "Events and invocations views use a bounded local single-machine index and retention authority; calculations, traces, agents, requests, saved queries, global ordering, and hosted optional metadata are not provided",
         "deviations": ["OC-OBSERVABILITY-001"],
         "operationSha256": "8edb90cc6d3f2c705a4195abf447c7a5dd4bc1d64d880a59a931e474298cead8",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "workers-observability",
+        "sdk": "official"
       },
       {
         "id": "POST /accounts/{account_id}/workers/observability/telemetry/live-tail",
@@ -299,7 +488,11 @@
         "constraint": "Live Tail sessions are process-local and receive only the selected target Script; they do not aggregate nested target logs",
         "deviations": ["OC-OBSERVABILITY-001"],
         "operationSha256": "aa04b20ac5b3b7fd889df9f508c6c4ed3554c0181d0e2043f5a85179c95c4875",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "workers-observability",
+        "sdk": "official",
+        "docs": "https://developers.cloudflare.com/workers/observability/",
+        "cf": "not-found"
       },
       {
         "id": "POST /accounts/{account_id}/workers/observability/telemetry/live-tail/heartbeat",
@@ -311,7 +504,11 @@
         "constraint": "Heartbeat extends process-local selected-Script sessions only",
         "deviations": ["OC-OBSERVABILITY-001"],
         "operationSha256": "9da8354733fbf39ff839f27287c2c681aa03485a0a74a96b5a1fa82ac3584b35",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "workers-observability",
+        "sdk": "official",
+        "docs": "https://developers.cloudflare.com/workers/observability/",
+        "cf": "not-found"
       },
       {
         "id": "GET /accounts/{account_id}/workers/scripts/{script_name}/secrets",
@@ -321,7 +518,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "bef52deaa26e0952f18c9b300b834c3fc0f20f4f0efbb7afd06e82f0a4442863",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "workers-scripts",
+        "sdk": "official"
       },
       {
         "id": "PUT /accounts/{account_id}/workers/scripts/{script_name}/secrets",
@@ -331,7 +530,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "8c47448726ebba91e42dd8446ae48975287ba4078c3d9285dbd7f812d8ffcab5",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "workers-scripts",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}/workers/scripts/{script_name}/secrets/{secret_name}",
@@ -341,7 +542,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "d30f54ef5d1da7f81e58cb1a297a0bd2c4a654cfa2d354a5916389f30c4f21d7",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "workers-scripts",
+        "sdk": "official"
       },
       {
         "id": "DELETE /accounts/{account_id}/workers/scripts/{script_name}/secrets/{secret_name}",
@@ -351,7 +554,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "03ba0bcb1a7517c17830ecd1aacb80b63b20094f24292c8075b55ed6e86aa0fb",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "workers-scripts",
+        "sdk": "official"
       },
       {
         "id": "PATCH /accounts/{account_id}/workers/scripts/{script_name}/secrets-bulk",
@@ -361,7 +566,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "8c10f48180dd442becd219db9ed6ac11eecc3ed7f0cb2d473614df189d9fba4d",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "workers-scripts",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}/workers/scripts/{script_name}/schedules",
@@ -371,7 +578,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "d8b22bc2e5cb976d9ab9693ad9e4946690e6003b33973b9c9634f672ba7773e1",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "workers-scripts",
+        "sdk": "official"
       },
       {
         "id": "PUT /accounts/{account_id}/workers/scripts/{script_name}/schedules",
@@ -381,7 +590,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "2f0ed6f1b4fc32c6c115ac30a943055ef8902845beb9d1ad8f97814d29ac02e2",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "workers-scripts",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}/workers/scripts/{script_name}/subdomain",
@@ -391,7 +602,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "cd4e566a10dc8d27215ebacf79228c49aa6afa97e7e93112d590ce6f73294c65",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "workers-scripts",
+        "sdk": "official"
       },
       {
         "id": "POST /accounts/{account_id}/workers/scripts/{script_name}/subdomain",
@@ -401,7 +614,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "be5e2f8511d558641f92461ef52ed1751329ca08154b40e2ec7e57dad3b742e6",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "workers-scripts",
+        "sdk": "official"
       },
       {
         "id": "DELETE /accounts/{account_id}/workers/scripts/{script_name}/subdomain",
@@ -411,7 +626,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "84c655421adec656c1fa69728dc1ed08477928c727c211cf9af761afc50426e6",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "workers-scripts",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}/workers/workers/{worker_id}",
@@ -421,7 +638,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "3bb5b1d292f496624928a17d684a58fd92fbe161b4b01d43eebd0612bb1688c1",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "workers-beta",
+        "sdk": "official"
       },
       {
         "id": "DELETE /accounts/{account_id}/workers/workers/{worker_id}/versions/{version_id}",
@@ -431,7 +650,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "1920047ff9ab827925d673706bfda5f1a792d539ea9312d07b7442ec54e7fddb",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "workers-versions",
+        "sdk": "official"
       },
       {
         "id": "POST /accounts/{account_id}/workers/scripts/{script_name}/assets-upload-session",
@@ -441,7 +662,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "750212980636e0e3c334b84047aa56fc288d778053ed9aba00e73395fe071c22",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "workers-assets",
+        "sdk": "official"
       },
       {
         "id": "POST /accounts/{account_id}/workers/assets/upload",
@@ -451,7 +674,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "28cce8e09e04683407bc18dd32ef865ede86b10838d2aab791567312822d3c68",
-        "requestMediaType": "multipart"
+        "requestMediaType": "multipart",
+        "group": "workers-assets",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}/storage/kv/namespaces",
@@ -461,7 +686,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "5bdbdfb6f9d98c1d0bf2db32a71c6c325689b1eed266f6f89cffd9d8028ca37a",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "kv",
+        "sdk": "official"
       },
       {
         "id": "POST /accounts/{account_id}/storage/kv/namespaces",
@@ -471,7 +698,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "93a92688f2f75da7c6deccb76149d96c83972230a7788345eb324886b2f4707a",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "kv",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}/storage/kv/namespaces/{namespace_id}",
@@ -481,7 +710,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "05b6138121e5e869a940f466f7c6b07809e1848651d39c80250f1f460ab67676",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "kv",
+        "sdk": "official"
       },
       {
         "id": "PUT /accounts/{account_id}/storage/kv/namespaces/{namespace_id}",
@@ -491,7 +722,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "6a2bfdd3018fc9dd7253c549203cbef0ec03f29bbf6e4a84318678ac8a1c599b",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "kv",
+        "sdk": "official"
       },
       {
         "id": "DELETE /accounts/{account_id}/storage/kv/namespaces/{namespace_id}",
@@ -501,7 +734,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "2ca913071a9cfc088e1164734099582798ad51a09a890c8c2021fa9b83beeeb0",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "kv",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}/storage/kv/namespaces/{namespace_id}/keys",
@@ -511,7 +746,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "e34f2ce665f02228531d2517ec214291341d5541b7f1e469cf34b18f63e49ee1",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "kv",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}/storage/kv/namespaces/{namespace_id}/values/{key_name}",
@@ -521,7 +758,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "f766285d25c148cc95e1b3072ebb3fac7b912b2744306a50b511c5a86ce81142",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "kv",
+        "sdk": "official"
       },
       {
         "id": "PUT /accounts/{account_id}/storage/kv/namespaces/{namespace_id}/values/{key_name}",
@@ -531,7 +770,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "8c3eec783b86db2a5bf4f92859fd69626d882b7b1c01d54718e5e54024c9f5f0",
-        "requestMediaType": "multipart"
+        "requestMediaType": "multipart",
+        "group": "kv",
+        "sdk": "official"
       },
       {
         "id": "DELETE /accounts/{account_id}/storage/kv/namespaces/{namespace_id}/values/{key_name}",
@@ -541,7 +782,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "228b12b000646ff0eb06e4be503e125483cdd60b04eddd7d4ffb3a202708d1e1",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "kv",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}/storage/kv/namespaces/{namespace_id}/metadata/{key_name}",
@@ -551,7 +794,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "5e27558e24c83b9203cf5a24669e01334f63edbfee0be923d44592a3de520a82",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "kv",
+        "sdk": "official"
       },
       {
         "id": "PUT /accounts/{account_id}/storage/kv/namespaces/{namespace_id}/bulk",
@@ -561,7 +806,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "9955272a134e4edee051c18402037a7751ba32c7c84dcdb85d5c0575fbe5c79f",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "kv",
+        "sdk": "official"
       },
       {
         "id": "POST /accounts/{account_id}/storage/kv/namespaces/{namespace_id}/bulk/get",
@@ -571,7 +818,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "ca3d81b54f1c2c7260d72fb41b87fdc1c94d5f4535613e59be72feb661ea9873",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "kv",
+        "sdk": "official"
       },
       {
         "id": "POST /accounts/{account_id}/storage/kv/namespaces/{namespace_id}/bulk/delete",
@@ -581,7 +830,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "cd863638a7bad46f4500a880d09044d949b8024a1be31c0b1c9d6c87578603a7",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "kv",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}/d1/database",
@@ -591,7 +842,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "e0ace2544a6e14a42958433691e114764ab9f9c4a8ec20b74e7923c739628b36",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "d1",
+        "sdk": "official"
       },
       {
         "id": "POST /accounts/{account_id}/d1/database",
@@ -601,7 +854,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "49eb9a0bdf97eab56cc498427dc5a531372f02aa491d80fedfafebd67b69ab70",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "d1",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}/d1/database/{database_id}",
@@ -611,7 +866,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "0ad5bb2175e0a9f4ffbd9c9f2681015b3503f83f0b67dc9b6be7c13f1c994494",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "d1",
+        "sdk": "official"
       },
       {
         "id": "PUT /accounts/{account_id}/d1/database/{database_id}",
@@ -621,7 +878,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "9e40e0d5c390813b893cd5f6259306eab23a3aa7ff7cd6f825314edbfc5d9c7b",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "d1",
+        "sdk": "official"
       },
       {
         "id": "PATCH /accounts/{account_id}/d1/database/{database_id}",
@@ -631,7 +890,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "8ef5deeec197d7377a380b78268b938a2c918d59f0cfb73e180573c3c1afe138",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "d1",
+        "sdk": "official"
       },
       {
         "id": "DELETE /accounts/{account_id}/d1/database/{database_id}",
@@ -641,7 +902,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "61b6a1deda8a4553fd7e6b67ea90a1cea9d4dd8b61c4d06ecb4f59101a5cad3c",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "d1",
+        "sdk": "official"
       },
       {
         "id": "POST /accounts/{account_id}/d1/database/{database_id}/query",
@@ -651,7 +914,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "84c9cd118807729539064e7fc958976deee03013f685d031070e4d32fe26b6aa",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "d1",
+        "sdk": "official"
       },
       {
         "id": "POST /accounts/{account_id}/d1/database/{database_id}/raw",
@@ -661,7 +926,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "9243f4d0e0571ce79e7b9a89a4e8f6843b771faa83f297fc100721dabbab4e51",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "d1",
+        "sdk": "official"
       },
       {
         "id": "POST /accounts/{account_id}/d1/database/{database_id}/export",
@@ -671,7 +938,11 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "4b10553fa531e256103dba147014d6f7730bd56c31cdf3f090c86c32b8701d98",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "d1",
+        "sdk": "official",
+        "docs": "https://developers.cloudflare.com/d1/",
+        "cf": "not-found"
       },
       {
         "id": "POST /accounts/{account_id}/d1/database/{database_id}/import",
@@ -681,7 +952,11 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "bc10d7b379eb720e149e6337c831e6363097c028416c20b60af6c424b0ac0398",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "d1",
+        "sdk": "official",
+        "docs": "https://developers.cloudflare.com/d1/",
+        "cf": "not-found"
       },
       {
         "id": "GET /accounts/{account_id}/d1/database/{database_id}/time_travel/bookmark",
@@ -693,7 +968,9 @@
         "constraint": "Single-machine D1 retains at most eight explicit management checkpoints instead of Cloudflare's always-on minute-level 7/30-day PITR; timestamps resolve only retained checkpoints and ordinary Worker mutations do not create full database snapshots",
         "deviations": ["OC-D1-001"],
         "operationSha256": "86192bca129579498c2727bbc8cf67193172fe98d916d4cfda9473da4dd13bd4",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "d1",
+        "sdk": "official"
       },
       {
         "id": "POST /accounts/{account_id}/d1/database/{database_id}/time_travel/restore",
@@ -705,7 +982,9 @@
         "constraint": "Restore accepts only an exact retained explicit management checkpoint; ordinary D1 Session bookmarks are visibility tokens but are not automatically retained restore points",
         "deviations": ["OC-D1-001"],
         "operationSha256": "b700589275d62c11cc7934768863b89343a2530ec79b60c00fa10e83527f33bb",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "d1",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}/r2/buckets",
@@ -715,7 +994,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "990934c57aa454a9b6d5294519dbafedb120cbcda7295c3987263ec7b6e7cc49",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "r2",
+        "sdk": "official"
       },
       {
         "id": "POST /accounts/{account_id}/r2/buckets",
@@ -725,7 +1006,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "1c36f576b401e83f8383488e0b91a87274536c6457ad2a7210499e285b4a2835",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "r2",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}/r2/buckets/{bucket_name}",
@@ -735,7 +1018,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "70f06c6859d6c0b0fc3130f0d5633cd3bb880b0390c0fb10785c5730bbeea40d",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "r2",
+        "sdk": "official"
       },
       {
         "id": "PUT /accounts/{account_id}/r2/buckets/{bucket_name}",
@@ -745,7 +1030,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "309073bad2035483255ca6b6f1848b0d0a074e22f252d6b3e995b9cce5fa44ee",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "r2",
+        "sdk": "not-found"
       },
       {
         "id": "DELETE /accounts/{account_id}/r2/buckets/{bucket_name}",
@@ -755,7 +1042,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "db18477f65d10891d83f85a48b15b707d0c1734cb3cd7fbd4cd3623a7fe2be46",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "r2",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}/r2/buckets/{bucket_name}/objects/{object_key}",
@@ -765,7 +1054,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "b5ee1e67cd6d13a0c644d5422ed54fcf60bee4bf83c0cdec735130a19eb538c3",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "r2",
+        "sdk": "official"
       },
       {
         "id": "PUT /accounts/{account_id}/r2/buckets/{bucket_name}/objects/{object_key}",
@@ -775,7 +1066,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "b3eee264e4b542c5d07a73c37aadce1121a4d7901ec18ec37d7bba69921cf177",
-        "requestMediaType": "raw"
+        "requestMediaType": "raw",
+        "group": "r2",
+        "sdk": "official"
       },
       {
         "id": "DELETE /accounts/{account_id}/r2/buckets/{bucket_name}/objects/{object_key}",
@@ -785,7 +1078,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "ec38f873660cd49514a79774aca8d978904a97c536ccce83fe0c60473833ac9f",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "r2",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}/r2/buckets/{bucket_name}/objects",
@@ -795,7 +1090,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "fd60b192bfb1263a3e1c0f1b614298ca5441d5a70ac88616813554453a584ceb",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "r2",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}/vectorize/v2/indexes",
@@ -805,7 +1102,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "4bac6170648a4ca00761f2026755826e9bff05e55ab384c793111849f70f6623",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "vectorize",
+        "sdk": "official"
       },
       {
         "id": "POST /accounts/{account_id}/vectorize/v2/indexes",
@@ -815,7 +1114,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "82151bec60a41d55832b9adf2fdeb468280e28926a71d3fd07b5e9cb68cea6ff",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "vectorize",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}/vectorize/v2/indexes/{index_name}",
@@ -825,7 +1126,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "96e063712bb4f2580c1b64bea2f02bd57d6856335eadeb505f57d2e2a93d9b9d",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "vectorize",
+        "sdk": "official"
       },
       {
         "id": "DELETE /accounts/{account_id}/vectorize/v2/indexes/{index_name}",
@@ -835,7 +1138,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "8f293c470c973f795cb35daa85e54ed4b817056eeccd075aa45b80529b694f3b",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "vectorize",
+        "sdk": "official"
       },
       {
         "id": "POST /accounts/{account_id}/vectorize/v2/indexes/{index_name}/insert",
@@ -845,7 +1150,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "d0c9dc7920ba80af456e2b8a77a48c2313536e1c5865799a43a06b89374e6fcd",
-        "requestMediaType": "raw"
+        "requestMediaType": "raw",
+        "group": "vectorize",
+        "sdk": "official"
       },
       {
         "id": "POST /accounts/{account_id}/vectorize/v2/indexes/{index_name}/upsert",
@@ -855,7 +1162,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "3d5c1ca98be67dca5b0398c127f8022f9b40e7029c5e8340d9ba2d13f56d5135",
-        "requestMediaType": "raw"
+        "requestMediaType": "raw",
+        "group": "vectorize",
+        "sdk": "official"
       },
       {
         "id": "POST /accounts/{account_id}/vectorize/v2/indexes/{index_name}/query",
@@ -865,7 +1174,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "3f2c061bef9d923800733c6c73ad4751ce78e5fe19218f81342f5aa07c9ecde3",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "vectorize",
+        "sdk": "official"
       },
       {
         "id": "POST /accounts/{account_id}/vectorize/v2/indexes/{index_name}/get_by_ids",
@@ -875,7 +1186,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "727889cae59307979a4841b2a7d5ab8261b81c15e6eb31baa0bf261c258ede39",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "vectorize",
+        "sdk": "official"
       },
       {
         "id": "POST /accounts/{account_id}/vectorize/v2/indexes/{index_name}/delete_by_ids",
@@ -885,7 +1198,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "5f876e5dc3c7aa8d78d58926bccdd629499558be012e89dd690085d657ed1587",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "vectorize",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}/vectorize/v2/indexes/{index_name}/info",
@@ -895,7 +1210,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "4cadafa76bd5bfad97a7da85dbaa3afb77af10371aab2ee8d1cce197b9784acd",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "vectorize",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}/vectorize/v2/indexes/{index_name}/list",
@@ -905,7 +1222,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "a7c9515fd5fa26b57b4c8bdd18d271fed95d91666a707dfcb2ababec7514caa0",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "vectorize",
+        "sdk": "official"
       },
       {
         "id": "POST /accounts/{account_id}/vectorize/v2/indexes/{index_name}/metadata_index/create",
@@ -915,7 +1234,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "1ec8100121fd226408eec48f39c256aa40c0739e5b7135a9dbd6dfaa3ed80c22",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "vectorize",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}/vectorize/v2/indexes/{index_name}/metadata_index/list",
@@ -925,7 +1246,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "566f7184435fe45f229ed74e6b9f2242c996b72a6430d1bab487c4ebec33ce92",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "vectorize",
+        "sdk": "official"
       },
       {
         "id": "POST /accounts/{account_id}/vectorize/v2/indexes/{index_name}/metadata_index/delete",
@@ -935,7 +1258,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "9e3abf18af6e000788c054f701204b5427c5824c14cf2ef936dc0aea41eeaf25",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "vectorize",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}/ai-search/tokens",
@@ -947,7 +1272,9 @@
         "constraint": "Fixed Wrangler 4.143.0 requires account token metadata before AI Search creation; open-compute exposes one stable installation-managed metadata record without Cloudflare account credential storage or token mutation",
         "deviations": ["OC-AI-SEARCH-TOKEN-001"],
         "operationSha256": "5325159dd20b495d3374783d44caf0f117b2f8561a59ca2f0d64fbe383c5c7de",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "ai-search",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}/ai-search/namespaces",
@@ -957,7 +1284,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "6602ba819fa3158a66ab032c397ffee081e3068ae126a9202f52f967867daf9e",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "ai-search",
+        "sdk": "official"
       },
       {
         "id": "POST /accounts/{account_id}/ai-search/namespaces",
@@ -967,7 +1296,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "562fe9644922d3a2465e11f35d308702adc85c344c9a9b9ff94f341b44a745ba",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "ai-search",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}/ai-search/namespaces/{name}",
@@ -977,7 +1308,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "d10f5061c7842ef5cd63bba15fa7aef69655e88c2d8b9794d40d257aeb5ec1e2",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "ai-search",
+        "sdk": "official"
       },
       {
         "id": "PUT /accounts/{account_id}/ai-search/namespaces/{name}",
@@ -987,7 +1320,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "3e482af144086896a52049c7c0550f42d54190da67d7f941196aa46ab97428dc",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "ai-search",
+        "sdk": "official"
       },
       {
         "id": "DELETE /accounts/{account_id}/ai-search/namespaces/{name}",
@@ -997,7 +1332,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "eb127735240ea584dd58eaab26d6c69509b22663b65148c31534d9b34041f4a7",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "ai-search",
+        "sdk": "official"
       },
       {
         "id": "POST /accounts/{account_id}/ai-search/namespaces/{name}/search",
@@ -1007,7 +1344,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "768b0b658c13ec7fe14cee71f1ca20bf30337074d4868cede88928e7c4d05c1b",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "ai-search",
+        "sdk": "official"
       },
       {
         "id": "POST /accounts/{account_id}/ai-search/namespaces/{name}/chat/completions",
@@ -1017,7 +1356,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "9275e8ba9ac066e36aba30941de484a227a1559d88a46ec9585f91bf11e8241d",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "ai-search",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}/ai-search/namespaces/{name}/instances",
@@ -1027,7 +1368,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "43c284c6bf20cf953b9751f7e52f379d0e3f4557112caa6ed1e5414456969298",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "ai-search",
+        "sdk": "official"
       },
       {
         "id": "POST /accounts/{account_id}/ai-search/namespaces/{name}/instances",
@@ -1037,7 +1380,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "a5237999ef3e9734e42dc1fd4cbafa0f00c0545e7914833c785271d926deec6f",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "ai-search",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}",
@@ -1047,7 +1392,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "baa308c676317776e80d738b4217d51123b20ae17aedcf002add74a3b0cdb498",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "ai-search",
+        "sdk": "official"
       },
       {
         "id": "PUT /accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}",
@@ -1057,7 +1404,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "57d65e448fb78b3fdf7471232da3063ce3cc5baaad34a01a65af8d080cb64289",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "ai-search",
+        "sdk": "official"
       },
       {
         "id": "DELETE /accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}",
@@ -1067,7 +1416,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "3419a795db62a22eac04170ebea6d67672a17d2262a96d19ea010310c125f5af",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "ai-search",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/stats",
@@ -1077,7 +1428,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "6cd4ca2f1e24eb1e4db0dbb11710cc6f1526f3d7a6d083113b24dd07e61ad980",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "ai-search",
+        "sdk": "official"
       },
       {
         "id": "POST /accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/search",
@@ -1087,7 +1440,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "62c1a6bc497f423e0c7e1ece45aaa2baf0394e816ce78b958f41bf1473782cd9",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "ai-search",
+        "sdk": "official"
       },
       {
         "id": "POST /accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/chat/completions",
@@ -1097,7 +1452,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "49e8fc79ce8f3b8989a480cbdaa642b6371de965dd2d05c2b39ffdf7f81cb18e",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "ai-search",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/jobs",
@@ -1107,7 +1464,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "4523d3ac8a8375757c73f11e206c49ea139dba1b38efcdc67994c9626b93d3c9",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "ai-search",
+        "sdk": "official"
       },
       {
         "id": "POST /accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/jobs",
@@ -1117,7 +1476,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "126aff5a25bf7193f4a22ed5ff56c4996b7c25765fd7c1018c8357a436c684f6",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "ai-search",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/jobs/{job_id}",
@@ -1127,7 +1488,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "eb97e1b1bf9e66c2cf16f4b5258c30a3ffc3f676e7b3a12dffee422fc697703a",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "ai-search",
+        "sdk": "official"
       },
       {
         "id": "PATCH /accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/jobs/{job_id}",
@@ -1137,7 +1500,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "68b53b8e6342982e6eee682f098135a3d60f153e9c7896dd72ed23ffeabd39b2",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "ai-search",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/jobs/{job_id}/logs",
@@ -1147,7 +1512,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "a41411adefafd4d4a436a1ead674dc421a8a95a4c3b72d79eb41c60da6b82022",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "ai-search",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/items",
@@ -1157,7 +1524,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "5f40a3f4794c00a1062f3143f3d1d1f7e9a74b05014e05d9f8811de2715e6244",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "ai-search",
+        "sdk": "official"
       },
       {
         "id": "POST /accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/items",
@@ -1167,7 +1536,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "090c18ff2567a26365737abf59becb9105d95e096847b4b8d8e15a8cb09c4827",
-        "requestMediaType": "multipart"
+        "requestMediaType": "multipart",
+        "group": "ai-search",
+        "sdk": "official"
       },
       {
         "id": "PUT /accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/items",
@@ -1177,7 +1548,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "438b3eabbfa192597a09a374e8d3550bd41bf255861e41cbe42b9c0475d61605",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "ai-search",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/items/{item_id}",
@@ -1187,7 +1560,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "c25468f0547ac8d659febc0dcb6594ede076ceb404601d2fb8824a3ca08e0648",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "ai-search",
+        "sdk": "official"
       },
       {
         "id": "PATCH /accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/items/{item_id}",
@@ -1197,7 +1572,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "d66ec66fa38bda6c05d0dd6c61ed32704306bc426d4b783811fd196c49c39940",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "ai-search",
+        "sdk": "official"
       },
       {
         "id": "DELETE /accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/items/{item_id}",
@@ -1207,7 +1584,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "a75c874b4e0d8b6aed263b0135ce0b441574edf1b078849f7e0758d9526c8419",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "ai-search",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/items/{item_id}/download",
@@ -1217,7 +1596,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "1fcfff80f92c83a51e1d5a73bf659182c4ed77b4dc00ebef0546382f7f15937f",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "ai-search",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/items/{item_id}/logs",
@@ -1227,7 +1608,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "2c7702b9411eb55f912528391d61586096c6968b9ed000e294cc46633b16196e",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "ai-search",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/items/{item_id}/chunks",
@@ -1237,7 +1620,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "6c5513bd6498413219bd61d2099a3bc076cca971807623010c5753bdbfc09525",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "ai-search",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}/queues",
@@ -1247,7 +1632,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "96d26636647a45e9bedfc1031032b7eb49cb6a3907052fc9724e505188e530d3",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "queues",
+        "sdk": "official"
       },
       {
         "id": "POST /accounts/{account_id}/queues",
@@ -1257,7 +1644,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "9b8b4efd576e1dd83348e3799d8f2ecbd8bb444ba007537c210c24ecb2d7d266",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "queues",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}/queues/{queue_id}",
@@ -1267,7 +1656,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "0851c606c379c946f0608c0af45c9bd7f4c285dbbc612ffdb5e5e985a6b6bf60",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "queues",
+        "sdk": "official"
       },
       {
         "id": "PUT /accounts/{account_id}/queues/{queue_id}",
@@ -1277,7 +1668,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "34cff6eb3cc62b2550066eecd48f3a61ce1b954c9392615bd303e8392c78e828",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "queues",
+        "sdk": "official"
       },
       {
         "id": "DELETE /accounts/{account_id}/queues/{queue_id}",
@@ -1287,7 +1680,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "4b19524538d558e363df9260f4312b4dc23a37b2fe0166abf62e53540c9439b0",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "queues",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}/queues/{queue_id}/metrics",
@@ -1297,7 +1692,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "7ddf4c7d6c6508ad389fa2de6a934e9c181b6e03a8fc994e6d57d62bfce8064b",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "queues",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}/queues/{queue_id}/consumers",
@@ -1307,7 +1704,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "a610e3b0a9bf56beaeac164c35643dd4f367dd26b8b4002d18ff4e2af24e03ee",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "queues",
+        "sdk": "official"
       },
       {
         "id": "POST /accounts/{account_id}/queues/{queue_id}/consumers",
@@ -1317,7 +1716,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "e05cfe95b04d5d948bed774dcf00aa4b92656e5062b1341d5a36c049310e3bd1",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "queues",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}/queues/{queue_id}/consumers/{consumer_id}",
@@ -1327,7 +1728,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "11573cc0a6a8350ff044f4152ed01695f560d31c6b9761bc4bf40044d6efd02e",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "queues",
+        "sdk": "official"
       },
       {
         "id": "PUT /accounts/{account_id}/queues/{queue_id}/consumers/{consumer_id}",
@@ -1337,7 +1740,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "98e3f5584ac98eaaa761d4efe2dc7e6dc5744675d76e267d65a78339d858549c",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "queues",
+        "sdk": "official"
       },
       {
         "id": "DELETE /accounts/{account_id}/queues/{queue_id}/consumers/{consumer_id}",
@@ -1347,7 +1752,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "867db7749ae187f99bead76325795976f594c816730470c6fcbdd92c22fb3f1b",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "queues",
+        "sdk": "official"
       },
       {
         "id": "POST /accounts/{account_id}/queues/{queue_id}/messages",
@@ -1357,7 +1764,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "dabad8700ee66d439b26135b7faf50587e7d0cf4ac180085d775afa3bf20c667",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "queues",
+        "sdk": "official"
       },
       {
         "id": "POST /accounts/{account_id}/queues/{queue_id}/messages/batch",
@@ -1367,7 +1776,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "967cb00d897e11030f56dbdb11322ea87f3873fe15ee759dc31f7c532f980877",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "queues",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}/workflows",
@@ -1377,7 +1788,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "bf7a9c6c1fa34dc796d53bde08495fd0dd036330f6546691eb48b9f601d30685",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "workflows",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}/workflows/{workflow_name}",
@@ -1387,7 +1800,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "27ab1e81f8dbd6cc59d1b6da2a0eac8d6b011d711d78e706242122cffa5d080c",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "workflows",
+        "sdk": "official"
       },
       {
         "id": "PUT /accounts/{account_id}/workflows/{workflow_name}",
@@ -1397,7 +1812,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "834dfff3d34b49fcd89fb62722b26caae69cf3e97df2f4c306a8e520947c578f",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "workflows",
+        "sdk": "official"
       },
       {
         "id": "DELETE /accounts/{account_id}/workflows/{workflow_name}",
@@ -1407,7 +1824,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "8872f87deffd2022090940226d70f0185d9d7b805d74def98b5b7cbea7a9e07b",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "workflows",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}/workflows/{workflow_name}/versions",
@@ -1417,7 +1836,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "dad3f83c49d5005a3c547db25c89cdcbc7e2cd7a3d0dc30b749b692406c5fa1b",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "workflows",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}/workflows/{workflow_name}/versions/{version_id}",
@@ -1427,7 +1848,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "52f7100779e7655ab7ed77c317c6467cb61185d590fae40248dfd5c9704331b0",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "workflows",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}/workflows/{workflow_name}/instances",
@@ -1437,7 +1860,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "7048c017bf5300709794e16953392ec1f91a02eba21531ec0083e0bdcbdf1b2d",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "workflows",
+        "sdk": "official"
       },
       {
         "id": "POST /accounts/{account_id}/workflows/{workflow_name}/instances",
@@ -1447,7 +1872,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "2925bf9d7d60855f7e7ad29e4258a38df6d8d0cb4ab4ae46e483cd85c8f2f6cc",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "workflows",
+        "sdk": "official"
       },
       {
         "id": "POST /accounts/{account_id}/workflows/{workflow_name}/instances/batch",
@@ -1457,7 +1884,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "c58378d379e3ebf896e5ef1cb9ce346454ae07438cad469239551b4f5a264e2e",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "workflows",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}/workflows/{workflow_name}/instances/{instance_id}",
@@ -1467,7 +1896,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "6fe234d3b46029532a6a78d7cd87f114c1fa43cb1fad82067e91db0e00fa50c6",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "workflows",
+        "sdk": "official"
       },
       {
         "id": "PATCH /accounts/{account_id}/workflows/{workflow_name}/instances/{instance_id}/status",
@@ -1477,7 +1908,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "b03db150f0e92f04cb620a9487edbf50d7f2cec5ff9e4e7ec10655d9e1f81296",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "workflows",
+        "sdk": "official"
       },
       {
         "id": "POST /accounts/{account_id}/workflows/{workflow_name}/instances/{instance_id}/events/{event_type}",
@@ -1487,7 +1920,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "26afa53cf88d87e9ced524a2a018c150e1424b9b116472c8724a63fb22fb95a1",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "workflows",
+        "sdk": "official"
       },
       {
         "id": "DELETE /accounts/{account_id}/workers/workers/{worker_id}",
@@ -1497,7 +1932,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "55465f1dede51549995cd46be18a9dfa4ebb9ce080c555bf0780937a0c4c7245",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "workers-beta",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}/workers/workers/{worker_id}/versions",
@@ -1507,7 +1944,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "89bb76b59bfec49458949f7cf933610ce3a35b1e8ac4f8dbaf5421549564c341",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "workers-versions",
+        "sdk": "official"
       },
       {
         "id": "GET /accounts/{account_id}/workers/workers/{worker_id}/versions/{version_id}",
@@ -1517,7 +1956,9 @@
         "status": "supported",
         "source": "cloudflare-openapi",
         "operationSha256": "e210e42a96c685d7ecab9405c610b4a764c089a548cfa621bc6e038db1e1950c",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "workers-versions",
+        "sdk": "official"
       },
       {
         "id": "POST /accounts/{account_id}/artifacts/namespaces",
@@ -1527,7 +1968,9 @@
         "source": "cloudflare-artifacts-rest-2026-08-13",
         "constraint": "Artifacts REST namespace creation contract",
         "deviations": [],
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "artifacts",
+        "sdk": "open-compute"
       },
       {
         "id": "GET /accounts/{account_id}/artifacts/namespaces",
@@ -1537,7 +1980,9 @@
         "source": "wrangler-4.143.0-artifacts",
         "constraint": "Artifacts namespace list contract",
         "deviations": [],
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "artifacts",
+        "sdk": "open-compute"
       },
       {
         "id": "GET /accounts/{account_id}/artifacts/namespaces/{namespace}",
@@ -1547,7 +1992,9 @@
         "source": "wrangler-4.143.0-artifacts",
         "constraint": "Artifacts namespace lookup contract",
         "deviations": [],
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "artifacts",
+        "sdk": "open-compute"
       },
       {
         "id": "POST /accounts/{account_id}/artifacts/namespaces/{namespace}/repos",
@@ -1557,7 +2004,9 @@
         "source": "wrangler-4.143.0-artifacts",
         "constraint": "Artifacts repository creation contract",
         "deviations": [],
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "artifacts",
+        "sdk": "open-compute"
       },
       {
         "id": "GET /accounts/{account_id}/artifacts/namespaces/{namespace}/repos",
@@ -1567,7 +2016,9 @@
         "source": "wrangler-4.143.0-artifacts",
         "constraint": "Artifacts repository list contract",
         "deviations": [],
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "artifacts",
+        "sdk": "open-compute"
       },
       {
         "id": "GET /accounts/{account_id}/artifacts/namespaces/{namespace}/repos/{repository}",
@@ -1577,7 +2028,9 @@
         "source": "wrangler-4.143.0-artifacts",
         "constraint": "Artifacts repository lookup contract",
         "deviations": [],
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "artifacts",
+        "sdk": "open-compute"
       },
       {
         "id": "DELETE /accounts/{account_id}/artifacts/namespaces/{namespace}/repos/{repository}",
@@ -1587,7 +2040,9 @@
         "source": "wrangler-4.143.0-artifacts",
         "constraint": "Artifacts repository deletion contract",
         "deviations": [],
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "artifacts",
+        "sdk": "open-compute"
       },
       {
         "id": "POST /accounts/{account_id}/artifacts/namespaces/{namespace}/repos/{repository}/fork",
@@ -1597,7 +2052,9 @@
         "source": "cloudflare-artifacts-rest-2026-08-13",
         "constraint": "Artifacts independent fork contract",
         "deviations": [],
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "artifacts",
+        "sdk": "open-compute"
       },
       {
         "id": "POST /accounts/{account_id}/artifacts/namespaces/{namespace}/repos/{repository}/import",
@@ -1607,7 +2064,9 @@
         "source": "cloudflare-artifacts-rest-2026-08-13",
         "constraint": "Artifacts public HTTPS import contract",
         "deviations": [],
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "artifacts",
+        "sdk": "open-compute"
       },
       {
         "id": "POST /accounts/{account_id}/artifacts/namespaces/{namespace}/tokens",
@@ -1617,7 +2076,9 @@
         "source": "wrangler-4.143.0-artifacts",
         "constraint": "Artifacts token issue contract",
         "deviations": [],
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "artifacts",
+        "sdk": "open-compute"
       },
       {
         "id": "GET /accounts/{account_id}/artifacts/namespaces/{namespace}/repos/{repository}/tokens",
@@ -1627,7 +2088,9 @@
         "source": "cloudflare-artifacts-rest-2026-08-13",
         "constraint": "Artifacts token list contract",
         "deviations": [],
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "artifacts",
+        "sdk": "open-compute"
       },
       {
         "id": "DELETE /accounts/{account_id}/artifacts/namespaces/{namespace}/tokens/{token}",
@@ -1637,7 +2100,9 @@
         "source": "cloudflare-artifacts-rest-2026-08-13",
         "constraint": "Artifacts token revocation contract",
         "deviations": [],
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "artifacts",
+        "sdk": "open-compute"
       },
       {
         "id": "GET /accounts/{account_id}/artifacts/namespaces/{namespace}/repos/{repository}/log",
@@ -1647,7 +2112,9 @@
         "source": "cloudflare-artifacts-rest-2026-08-13",
         "constraint": "Artifacts commit log contract",
         "deviations": [],
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "artifacts",
+        "sdk": "open-compute"
       },
       {
         "id": "GET /accounts/{account_id}/artifacts/namespaces/{namespace}/repos/{repository}/commit/{oid}",
@@ -1657,7 +2124,9 @@
         "source": "cloudflare-artifacts-rest-2026-08-13",
         "constraint": "Artifacts commit object contract",
         "deviations": [],
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "artifacts",
+        "sdk": "open-compute"
       },
       {
         "id": "GET /accounts/{account_id}/artifacts/namespaces/{namespace}/repos/{repository}/tree/{oid}",
@@ -1667,7 +2136,9 @@
         "source": "cloudflare-artifacts-rest-2026-08-13",
         "constraint": "Artifacts tree object contract",
         "deviations": [],
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "artifacts",
+        "sdk": "open-compute"
       },
       {
         "id": "GET /accounts/{account_id}/artifacts/namespaces/{namespace}/repos/{repository}/blob/{oid}",
@@ -1677,7 +2148,9 @@
         "source": "cloudflare-artifacts-rest-2026-08-13",
         "constraint": "Artifacts raw blob contract",
         "deviations": [],
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "artifacts",
+        "sdk": "open-compute"
       },
       {
         "id": "GET /accounts/{account_id}/artifacts/namespaces/{namespace}/repos/{repository}/file",
@@ -1687,7 +2160,9 @@
         "source": "cloudflare-artifacts-rest-2026-08-13",
         "constraint": "Artifacts file query contract",
         "deviations": [],
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "artifacts",
+        "sdk": "open-compute"
       },
       {
         "id": "GET /accounts/{account_id}/artifacts/namespaces/{namespace}/repos/{repository}/raw/{reference}/{path}",
@@ -1697,7 +2172,9 @@
         "source": "cloudflare-artifacts-rest-2026-08-13",
         "constraint": "Artifacts raw file contract",
         "deviations": [],
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "artifacts",
+        "sdk": "open-compute"
       },
       {
         "id": "GET /accounts/{account_id}/containers/applications",
@@ -1707,7 +2184,9 @@
         "source": "cf-1.0.0-beta.12-containers",
         "constraint": "Single-machine Container management subset; qualified operator-owned Broker required. See OC-CONTAINERS-MGMT-001 for rollout, observability and provider limits.",
         "deviations": ["OC-CONTAINERS-MGMT-001"],
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "containers",
+        "sdk": "not-found"
       },
       {
         "id": "POST /accounts/{account_id}/containers/applications",
@@ -1717,7 +2196,9 @@
         "source": "cf-1.0.0-beta.12-containers",
         "constraint": "Single-machine Container management subset; qualified operator-owned Broker required. See OC-CONTAINERS-MGMT-001 for rollout, observability and provider limits.",
         "deviations": ["OC-CONTAINERS-MGMT-001"],
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "containers",
+        "sdk": "not-found"
       },
       {
         "id": "GET /accounts/{account_id}/containers/me",
@@ -1727,7 +2208,9 @@
         "source": "cf-1.0.0-beta.12-containers",
         "constraint": "Single-machine Container management subset; qualified operator-owned Broker required. See OC-CONTAINERS-MGMT-001 for rollout, observability and provider limits.",
         "deviations": ["OC-CONTAINERS-MGMT-001"],
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "containers",
+        "sdk": "not-found"
       },
       {
         "id": "POST /accounts/{account_id}/containers/image-preparations",
@@ -1737,7 +2220,9 @@
         "source": "cf-1.0.0-beta.12-containers",
         "constraint": "Single-machine Container management subset; qualified operator-owned Broker required. See OC-CONTAINERS-MGMT-001 for rollout, observability and provider limits.",
         "deviations": ["OC-CONTAINERS-MGMT-001"],
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "containers",
+        "sdk": "not-found"
       },
       {
         "id": "POST /accounts/{account_id}/containers/registries/{domain}/credentials",
@@ -1747,7 +2232,9 @@
         "source": "cf-1.0.0-beta.12-containers",
         "constraint": "Single-machine Container management subset; qualified operator-owned Broker required. See OC-CONTAINERS-MGMT-001 for rollout, observability and provider limits.",
         "deviations": ["OC-CONTAINERS-MGMT-001"],
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "containers",
+        "sdk": "not-found"
       },
       {
         "id": "GET /accounts/{account_id}/containers/applications/{application_id}",
@@ -1757,7 +2244,9 @@
         "source": "cf-1.0.0-beta.12-containers",
         "constraint": "Single-machine Container management subset; qualified operator-owned Broker required. See OC-CONTAINERS-MGMT-001 for rollout, observability and provider limits.",
         "deviations": ["OC-CONTAINERS-MGMT-001"],
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "containers",
+        "sdk": "not-found"
       },
       {
         "id": "PATCH /accounts/{account_id}/containers/applications/{application_id}",
@@ -1767,7 +2256,9 @@
         "source": "cf-1.0.0-beta.12-containers",
         "constraint": "Single-machine Container management subset; qualified operator-owned Broker required. See OC-CONTAINERS-MGMT-001 for rollout, observability and provider limits.",
         "deviations": ["OC-CONTAINERS-MGMT-001"],
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "containers",
+        "sdk": "not-found"
       },
       {
         "id": "DELETE /accounts/{account_id}/containers/applications/{application_id}",
@@ -1777,7 +2268,9 @@
         "source": "cf-1.0.0-beta.12-containers",
         "constraint": "Single-machine Container management subset; qualified operator-owned Broker required. See OC-CONTAINERS-MGMT-001 for rollout, observability and provider limits.",
         "deviations": ["OC-CONTAINERS-MGMT-001"],
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "containers",
+        "sdk": "not-found"
       },
       {
         "id": "GET /accounts/{account_id}/containers/applications/{application_id}/rollouts",
@@ -1787,7 +2280,9 @@
         "source": "cf-1.0.0-beta.12-containers",
         "constraint": "Single-machine Container management subset; qualified operator-owned Broker required. See OC-CONTAINERS-MGMT-001 for rollout, observability and provider limits.",
         "deviations": ["OC-CONTAINERS-MGMT-001"],
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "containers",
+        "sdk": "not-found"
       },
       {
         "id": "POST /accounts/{account_id}/containers/applications/{application_id}/rollouts",
@@ -1797,7 +2292,9 @@
         "source": "cf-1.0.0-beta.12-containers",
         "constraint": "Single-machine Container management subset; qualified operator-owned Broker required. See OC-CONTAINERS-MGMT-001 for rollout, observability and provider limits.",
         "deviations": ["OC-CONTAINERS-MGMT-001"],
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "containers",
+        "sdk": "not-found"
       },
       {
         "id": "GET /accounts/{account_id}/containers/applications/{application_id}/rollouts/{rollout_id}",
@@ -1807,7 +2304,9 @@
         "source": "cf-1.0.0-beta.12-containers",
         "constraint": "Single-machine Container management subset; qualified operator-owned Broker required. See OC-CONTAINERS-MGMT-001 for rollout, observability and provider limits.",
         "deviations": ["OC-CONTAINERS-MGMT-001"],
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "containers",
+        "sdk": "not-found"
       },
       {
         "id": "GET /accounts/{account_id}/containers/applications/{application_id}/instances-v2",
@@ -1817,7 +2316,9 @@
         "source": "cf-1.0.0-beta.12-containers",
         "constraint": "Single-machine Container management subset; qualified operator-owned Broker required. See OC-CONTAINERS-MGMT-001 for rollout, observability and provider limits.",
         "deviations": ["OC-CONTAINERS-MGMT-001"],
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "containers",
+        "sdk": "not-found"
       },
       {
         "id": "GET /accounts/{account_id}/containers/applications/{application_id}/instances/{instance_id}",
@@ -1827,7 +2328,9 @@
         "source": "cf-1.0.0-beta.12-containers",
         "constraint": "Single-machine Container management subset; qualified operator-owned Broker required. See OC-CONTAINERS-MGMT-001 for rollout, observability and provider limits.",
         "deviations": ["OC-CONTAINERS-MGMT-001"],
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "containers",
+        "sdk": "not-found"
       },
       {
         "id": "GET /open-compute/capabilities",
@@ -1836,7 +2339,9 @@
         "operationId": "open-compute-get-open-compute-capabilities",
         "status": "supported",
         "source": "open-compute-extension",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "open-compute",
+        "sdk": "open-compute"
       },
       {
         "id": "GET /open-compute/system/status",
@@ -1845,7 +2350,9 @@
         "operationId": "open-compute-get-open-compute-system-status",
         "status": "supported",
         "source": "open-compute-extension",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "open-compute",
+        "sdk": "open-compute"
       },
       {
         "id": "GET /open-compute/scheduler",
@@ -1854,7 +2361,9 @@
         "operationId": "open-compute-get-open-compute-scheduler",
         "status": "supported",
         "source": "open-compute-extension",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "open-compute",
+        "sdk": "open-compute"
       },
       {
         "id": "POST /open-compute/scheduler/pause",
@@ -1863,7 +2372,9 @@
         "operationId": "open-compute-post-open-compute-scheduler-pause",
         "status": "supported",
         "source": "open-compute-extension",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "open-compute",
+        "sdk": "open-compute"
       },
       {
         "id": "POST /open-compute/scheduler/resume",
@@ -1872,7 +2383,9 @@
         "operationId": "open-compute-post-open-compute-scheduler-resume",
         "status": "supported",
         "source": "open-compute-extension",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "open-compute",
+        "sdk": "open-compute"
       },
       {
         "id": "POST /open-compute/scheduler/repair",
@@ -1881,7 +2394,9 @@
         "operationId": "open-compute-post-open-compute-scheduler-repair",
         "status": "supported",
         "source": "open-compute-extension",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "open-compute",
+        "sdk": "open-compute"
       },
       {
         "id": "GET /open-compute/cache",
@@ -1890,7 +2405,9 @@
         "operationId": "open-compute-get-open-compute-cache",
         "status": "supported",
         "source": "open-compute-extension",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "open-compute",
+        "sdk": "open-compute"
       },
       {
         "id": "POST /open-compute/cache/garbage-collection",
@@ -1899,7 +2416,9 @@
         "operationId": "open-compute-post-open-compute-cache-garbage-collection",
         "status": "supported",
         "source": "open-compute-extension",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "open-compute",
+        "sdk": "open-compute"
       },
       {
         "id": "GET /open-compute/images/capacity",
@@ -1908,7 +2427,9 @@
         "operationId": "open-compute-get-open-compute-images-capacity",
         "status": "supported",
         "source": "open-compute-extension",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "open-compute",
+        "sdk": "open-compute"
       },
       {
         "id": "GET /open-compute/upgrade/check",
@@ -1917,7 +2438,9 @@
         "operationId": "open-compute-get-open-compute-upgrade-check",
         "status": "supported",
         "source": "open-compute-extension",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "open-compute",
+        "sdk": "open-compute"
       },
       {
         "id": "GET /accounts/{account_id}/open-compute/capabilities",
@@ -1926,7 +2449,9 @@
         "operationId": "open-compute-get-accounts-account-id-open-compute-capabilities",
         "status": "supported",
         "source": "open-compute-extension",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "open-compute",
+        "sdk": "open-compute"
       },
       {
         "id": "GET /accounts/{account_id}/open-compute/system/status",
@@ -1935,7 +2460,9 @@
         "operationId": "open-compute-get-accounts-account-id-open-compute-system-status",
         "status": "supported",
         "source": "open-compute-extension",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "open-compute",
+        "sdk": "open-compute"
       },
       {
         "id": "GET /accounts/{account_id}/open-compute/scheduler",
@@ -1944,7 +2471,9 @@
         "operationId": "open-compute-get-accounts-account-id-open-compute-scheduler",
         "status": "supported",
         "source": "open-compute-extension",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "open-compute",
+        "sdk": "open-compute"
       },
       {
         "id": "POST /accounts/{account_id}/open-compute/scheduler/pause",
@@ -1953,7 +2482,9 @@
         "operationId": "open-compute-post-accounts-account-id-open-compute-scheduler-pause",
         "status": "supported",
         "source": "open-compute-extension",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "open-compute",
+        "sdk": "open-compute"
       },
       {
         "id": "POST /accounts/{account_id}/open-compute/scheduler/resume",
@@ -1962,7 +2493,9 @@
         "operationId": "open-compute-post-accounts-account-id-open-compute-scheduler-resume",
         "status": "supported",
         "source": "open-compute-extension",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "open-compute",
+        "sdk": "open-compute"
       },
       {
         "id": "POST /accounts/{account_id}/open-compute/scheduler/repair",
@@ -1971,7 +2504,9 @@
         "operationId": "open-compute-post-accounts-account-id-open-compute-scheduler-repair",
         "status": "supported",
         "source": "open-compute-extension",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "open-compute",
+        "sdk": "open-compute"
       },
       {
         "id": "GET /accounts/{account_id}/open-compute/cache",
@@ -1980,7 +2515,9 @@
         "operationId": "open-compute-get-accounts-account-id-open-compute-cache",
         "status": "supported",
         "source": "open-compute-extension",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "open-compute",
+        "sdk": "open-compute"
       },
       {
         "id": "POST /accounts/{account_id}/open-compute/cache/garbage-collection",
@@ -1989,7 +2526,9 @@
         "operationId": "open-compute-post-accounts-account-id-open-compute-cache-garbage-collection",
         "status": "supported",
         "source": "open-compute-extension",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "open-compute",
+        "sdk": "open-compute"
       },
       {
         "id": "GET /accounts/{account_id}/open-compute/images/capacity",
@@ -1998,7 +2537,9 @@
         "operationId": "open-compute-get-accounts-account-id-open-compute-images-capacity",
         "status": "supported",
         "source": "open-compute-extension",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "open-compute",
+        "sdk": "open-compute"
       },
       {
         "id": "GET /accounts/{account_id}/open-compute/upgrade/check",
@@ -2007,7 +2548,9 @@
         "operationId": "open-compute-get-accounts-account-id-open-compute-upgrade-check",
         "status": "supported",
         "source": "open-compute-extension",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "open-compute",
+        "sdk": "open-compute"
       },
       {
         "id": "GET /accounts/{account_id}/open-compute/workers/{script_name}/endpoints",
@@ -2016,7 +2559,9 @@
         "operationId": "open-compute-get-accounts-account-id-open-compute-workers-script-name-endpoints",
         "status": "supported",
         "source": "open-compute-extension",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "open-compute",
+        "sdk": "open-compute"
       },
       {
         "id": "GET /accounts/{account_id}/open-compute/workers/{script_name}/public-origin",
@@ -2025,7 +2570,9 @@
         "operationId": "open-compute-get-accounts-account-id-open-compute-workers-script-name-public-origin",
         "status": "supported",
         "source": "open-compute-extension",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "open-compute",
+        "sdk": "open-compute"
       },
       {
         "id": "PUT /accounts/{account_id}/open-compute/workers/{script_name}/public-origin",
@@ -2034,7 +2581,9 @@
         "operationId": "open-compute-put-accounts-account-id-open-compute-workers-script-name-public-origin",
         "status": "supported",
         "source": "open-compute-extension",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "open-compute",
+        "sdk": "open-compute"
       },
       {
         "id": "DELETE /accounts/{account_id}/open-compute/workers/{script_name}/public-origin",
@@ -2043,7 +2592,9 @@
         "operationId": "open-compute-delete-accounts-account-id-open-compute-workers-script-name-public-origin",
         "status": "supported",
         "source": "open-compute-extension",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "open-compute",
+        "sdk": "open-compute"
       },
       {
         "id": "GET /accounts/{account_id}/open-compute/durable-objects",
@@ -2052,7 +2603,9 @@
         "operationId": "open-compute-get-accounts-account-id-open-compute-durable-objects",
         "status": "supported",
         "source": "open-compute-extension",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "open-compute",
+        "sdk": "open-compute"
       },
       {
         "id": "GET /accounts/{account_id}/open-compute/durable-objects/{namespace_id}/objects",
@@ -2061,7 +2614,9 @@
         "operationId": "open-compute-get-accounts-account-id-open-compute-durable-objects-namespace-id-objects",
         "status": "supported",
         "source": "open-compute-extension",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "open-compute",
+        "sdk": "open-compute"
       },
       {
         "id": "POST /accounts/{account_id}/open-compute/kv/namespaces/{namespace_id}/backups",
@@ -2070,7 +2625,9 @@
         "operationId": "open-compute-post-accounts-account-id-open-compute-kv-namespaces-namespace-id-backups",
         "status": "supported",
         "source": "open-compute-extension",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "open-compute",
+        "sdk": "open-compute"
       },
       {
         "id": "GET /accounts/{account_id}/open-compute/kv/namespaces/{namespace_id}/backups",
@@ -2079,7 +2636,9 @@
         "operationId": "open-compute-get-accounts-account-id-open-compute-kv-namespaces-namespace-id-backups",
         "status": "supported",
         "source": "open-compute-extension",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "open-compute",
+        "sdk": "open-compute"
       },
       {
         "id": "POST /accounts/{account_id}/open-compute/kv/backups/{backup_id}/restore",
@@ -2088,7 +2647,9 @@
         "operationId": "open-compute-post-accounts-account-id-open-compute-kv-backups-backup-id-restore",
         "status": "supported",
         "source": "open-compute-extension",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "open-compute",
+        "sdk": "open-compute"
       },
       {
         "id": "POST /accounts/{account_id}/open-compute/d1/databases/{database_id}/backups",
@@ -2097,7 +2658,9 @@
         "operationId": "open-compute-post-accounts-account-id-open-compute-d1-databases-database-id-backups",
         "status": "supported",
         "source": "open-compute-extension",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "open-compute",
+        "sdk": "open-compute"
       },
       {
         "id": "GET /accounts/{account_id}/open-compute/d1/databases/{database_id}/backups",
@@ -2106,7 +2669,9 @@
         "operationId": "open-compute-get-accounts-account-id-open-compute-d1-databases-database-id-backups",
         "status": "supported",
         "source": "open-compute-extension",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "open-compute",
+        "sdk": "open-compute"
       },
       {
         "id": "POST /accounts/{account_id}/open-compute/d1/backups/{backup_id}/restore",
@@ -2115,7 +2680,9 @@
         "operationId": "open-compute-post-accounts-account-id-open-compute-d1-backups-backup-id-restore",
         "status": "supported",
         "source": "open-compute-extension",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "open-compute",
+        "sdk": "open-compute"
       },
       {
         "id": "GET /accounts/{account_id}/open-compute/d1/databases/{database_id}/migrations",
@@ -2124,7 +2691,9 @@
         "operationId": "open-compute-get-accounts-account-id-open-compute-d1-databases-database-id-migrations",
         "status": "supported",
         "source": "open-compute-extension",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "open-compute",
+        "sdk": "open-compute"
       },
       {
         "id": "PUT /accounts/{account_id}/open-compute/d1/databases/{database_id}/migrations",
@@ -2133,7 +2702,9 @@
         "operationId": "open-compute-put-accounts-account-id-open-compute-d1-databases-database-id-migrations",
         "status": "supported",
         "source": "open-compute-extension",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "open-compute",
+        "sdk": "open-compute"
       },
       {
         "id": "PATCH /accounts/{account_id}/open-compute/d1/databases/{database_id}/name",
@@ -2142,7 +2713,9 @@
         "operationId": "open-compute-patch-accounts-account-id-open-compute-d1-databases-database-id-name",
         "status": "supported",
         "source": "open-compute-extension",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "open-compute",
+        "sdk": "open-compute"
       },
       {
         "id": "GET /accounts/{account_id}/open-compute/d1/databases/{database_id}/time-travel/checkpoints",
@@ -2151,7 +2724,9 @@
         "operationId": "open-compute-get-accounts-account-id-open-compute-d1-databases-database-id-time-travel-checkpoints",
         "status": "supported",
         "source": "open-compute-extension",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "open-compute",
+        "sdk": "open-compute"
       },
       {
         "id": "GET /accounts/{account_id}/workers/services/{script_name}",
@@ -2160,7 +2735,11 @@
         "operationId": "open-compute-get-accounts-account-id-workers-services-script-name",
         "status": "supported",
         "source": "open-compute-extension",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "workers-scripts",
+        "sdk": "open-compute",
+        "docs": "https://developers.cloudflare.com/workers/wrangler/deprecations/#service-environments",
+        "cf": "emits"
       },
       {
         "id": "GET /accounts/{account_id}/workers/scripts/{script_name}/queue-consumers",
@@ -2169,7 +2748,11 @@
         "operationId": "open-compute-get-accounts-account-id-workers-scripts-script-name-queue-consumers",
         "status": "supported",
         "source": "open-compute-extension",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "workers-scripts",
+        "sdk": "open-compute",
+        "docs": "https://developers.cloudflare.com/queues/configuration/configure-queues/",
+        "cf": "not-found"
       },
       {
         "id": "GET /accounts/{account_id}/workers/observability/usage",
@@ -2178,7 +2761,11 @@
         "operationId": "open-compute-get-accounts-account-id-workers-observability-usage",
         "status": "supported",
         "source": "open-compute-extension",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "workers-observability",
+        "sdk": "open-compute",
+        "docs": "https://developers.cloudflare.com/workers/observability/",
+        "cf": "not-found"
       },
       {
         "id": "GET /accounts/{account_id}/workflows/settings",
@@ -2187,7 +2774,9 @@
         "operationId": "open-compute-get-accounts-account-id-workflows-settings",
         "status": "supported",
         "source": "open-compute-extension",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "workflows",
+        "sdk": "open-compute"
       },
       {
         "id": "GET /accounts/{account_id}/open-compute/queues/{queue_id}/consumers/{consumer_id}/runtime",
@@ -2196,7 +2785,9 @@
         "operationId": "open-compute-get-accounts-account-id-open-compute-queues-queue-id-consumers-consumer-id-runtime",
         "status": "supported",
         "source": "open-compute-extension",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "open-compute",
+        "sdk": "open-compute"
       },
       {
         "id": "GET /accounts/{account_id}/open-compute/r2/buckets/{bucket_name}/usage",
@@ -2205,7 +2796,9 @@
         "operationId": "open-compute-get-accounts-account-id-open-compute-r2-buckets-bucket-name-usage",
         "status": "supported",
         "source": "open-compute-extension",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "open-compute",
+        "sdk": "open-compute"
       },
       {
         "id": "POST /accounts/{account_id}/open-compute/r2/buckets/{bucket_name}/multipart-uploads",
@@ -2214,7 +2807,9 @@
         "operationId": "open-compute-post-accounts-account-id-open-compute-r2-buckets-bucket-name-multipart-uploads",
         "status": "supported",
         "source": "open-compute-extension",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "open-compute",
+        "sdk": "open-compute"
       },
       {
         "id": "PUT /accounts/{account_id}/open-compute/r2/buckets/{bucket_name}/multipart-uploads/{upload_id}/parts/{part_number}/{object_key}",
@@ -2223,7 +2818,9 @@
         "operationId": "open-compute-put-accounts-account-id-open-compute-r2-buckets-bucket-name-multipart-uploads-upload-id-parts-part-number-object-key",
         "status": "supported",
         "source": "open-compute-extension",
-        "requestMediaType": "binary"
+        "requestMediaType": "binary",
+        "group": "open-compute",
+        "sdk": "open-compute"
       },
       {
         "id": "POST /accounts/{account_id}/open-compute/r2/buckets/{bucket_name}/multipart-uploads/{upload_id}/complete/{object_key}",
@@ -2232,7 +2829,9 @@
         "operationId": "open-compute-post-accounts-account-id-open-compute-r2-buckets-bucket-name-multipart-uploads-upload-id-complete-object-key",
         "status": "supported",
         "source": "open-compute-extension",
-        "requestMediaType": "json"
+        "requestMediaType": "json",
+        "group": "open-compute",
+        "sdk": "open-compute"
       },
       {
         "id": "DELETE /accounts/{account_id}/open-compute/r2/buckets/{bucket_name}/multipart-uploads/{upload_id}/abort/{object_key}",
@@ -2241,7 +2840,9 @@
         "operationId": "open-compute-delete-accounts-account-id-open-compute-r2-buckets-bucket-name-multipart-uploads-upload-id-abort-object-key",
         "status": "supported",
         "source": "open-compute-extension",
-        "requestMediaType": "none"
+        "requestMediaType": "none",
+        "group": "open-compute",
+        "sdk": "open-compute"
       }
     ],
     "deviations": [

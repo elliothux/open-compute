@@ -247,6 +247,10 @@ test("memberEvidence parse and binding invariants use a synthetic fixture", () =
 
 test("generation is deterministic across two runs and matches the committed inventory", async () => {
   const { inventory, encoded, coverage } = await reportPromise;
+  assert.equal(Object.hasOwn(inventory.managementApi, "routeGroups"), false);
+  for (const route of inventory.managementApi.routes)
+    for (const field of ["group", "sdk", "docs", "cf"])
+      assert.equal(Object.hasOwn(route, field), false, `${route.id}: ${field}`);
   const second = encodeInventory(inventory);
   assert.equal(encoded, second);
   const committed = await readFile(COMMITTED, "utf8");

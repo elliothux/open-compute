@@ -122,6 +122,8 @@
 
 ### R4.7 删除兼容负担
 
+状态：**已完成**（2026-11-01）。已删除未协商使用的逐对象 Assets 上传端点，以及 Service/DO binding 已拒绝的 `environment` 字段接线；废弃上传字段仍由固定 cf 发出，因此保留，`ocd` 本身没有旧 compatibility date 行为分支可删。兼容面注解维护在 [`openapi/p6-capability-source.json`](../openapi/p6-capability-source.json)，文档链接、cf 使用情况和由 SDK surface 派生的使用情况随现有生成器进入 [`openapi/p6-capability.json`](../openapi/p6-capability.json)。
+
 - 按 cf 和官方 SDK 的实际请求盘点 `/client/v4`，删除只有旧客户端使用的端点、字段和上传格式。
 - 删除 wrangler 专用路径，例如 `target_http.rs` 的 remote Wrangler target 探测。
 - 删除 Cloudflare 已废弃的字段，例如 Service binding 的 `environment`（先对照 CF 文档确认）。

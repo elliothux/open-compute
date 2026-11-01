@@ -10,6 +10,8 @@
 [P6 实现与验证](../implemented/p6-cloudflare-v4-wrangler-compatibility.md)。当前账号权限不足以运行真实 Cloudflare
 Workflow 与完整 P6 management 对照，因此不声明这两部分的托管端一致性。
 
+管理路由的 CF 文档、固定 cf 的请求生成代码使用情况和由 [`packages/sdk/surface.json`](../../packages/sdk/surface.json) 派生的 SDK 来源（`official`、`open-compute`、`not-found`）维护在 [`openapi/p6-capability-source.json`](../../openapi/p6-capability-source.json)，经现有生成器投影到 [`openapi/p6-capability.json`](../../openapi/p6-capability.json)，支持状态沿用现有清单，运行时清单 [`share/cloudflare-capabilities.json`](../../share/cloudflare-capabilities.json) 不包含这些注解。
+
 固定契约输入见 [`baseline.json`](../../test/conformance/baseline.json)，正式 runtime 身份见
 [`workerd.lock.json`](../../packages/runtime/workerd.lock.json)。每个普通 Script/Version 持久化上传的
 `compatibility_date` 与 `compatibility_flags` 原值；正式 pinned workerd 以

@@ -11,6 +11,7 @@ const SUBSET_PATH = join(ROOT, "openapi/cloudflare-v4-subset.json");
 const CAPABILITY_PATH = join(ROOT, "openapi/p6-capability.json");
 const CAPABILITY_SOURCE_PATH = join(ROOT, "openapi/p6-capability-source.json");
 const EXTENSION_PATH = join(ROOT, "openapi/open-compute-extension.json");
+const SDK_SURFACE_PATH = join(ROOT, "packages/sdk/surface.json");
 
 function json(path) {
   return JSON.parse(readFileSync(path, "utf8"));
@@ -199,6 +200,54 @@ function requestMediaType(operation) {
   )
     return "json";
   return "raw";
+}
+
+function annotateRoutes(routes, { routeGroups, routeOverrides }) {
+  const validate = (id, annotation, vendor = false) => {
+    if (
+      !(vendor && annotation.docs === null) &&
+      !/^https:\/\/developers\.cloudflare\.com\/.+/.test(annotation.docs ?? "")
+    )
+      throw new Error(`invalid route annotation docs: ${id}`);
+    if (!["emits", "not-found"].includes(annotation.cf))
+      throw new Error(`invalid route annotation cf: ${id}`);
+  };
+  const prefixes = [];
+  for (const [id, group] of Object.entries(routeGroups)) {
+    validate(id, group, id === "open-compute");
+    for (const field of group.uploadFields ?? [])
+      validate(`${id}.${field.id}`, field);
+    for (const prefix of group.prefixes) prefixes.push({ id, prefix });
+  }
+  prefixes.sort((a, b) => b.prefix.length - a.prefix.length);
+  const routeIds = new Set(routes.map((route) => route.id));
+  for (const [id, annotation] of Object.entries(routeOverrides)) {
+    if (!routeIds.has(id)) throw new Error(`unknown route override: ${id}`);
+    validate(id, annotation);
+  }
+  const surface = json(SDK_SURFACE_PATH);
+  const sdk = new Map([
+    ...surface.operations.map((item) => [item.operation, "official"]),
+    ...[
+      ...surface.openComputeOperations,
+      ...surface.observedStandardOperations,
+    ].map((item) => [`${item.method} ${item.path}`, "open-compute"]),
+  ]);
+  return routes.map(({ group, sdk: sdkUse, docs, cf, ...route }) => {
+    // Match account-relative paths, preferring the most specific product group.
+    const path = route.path.replace(/^\/accounts\/\{account_id\}(?=\/)/, "");
+    const match = prefixes.find(
+      ({ prefix }) => path === prefix || path.startsWith(`${prefix}/`),
+    );
+    if (match === undefined)
+      throw new Error(`unannotated management route: ${route.id}`);
+    return {
+      ...route,
+      group: match.id,
+      sdk: sdk.get(route.id) ?? "not-found",
+      ...routeOverrides[route.id],
+    };
+  });
 }
 
 export function buildCapability(
@@ -390,7 +439,8 @@ export function buildCapability(
     schemaVersion: 1,
     managementApi: {
       root: source.managementApi.root,
-      routes,
+      routeGroups: source.managementApi.routeGroups,
+      routes: annotateRoutes(routes, source.managementApi),
       deviations: source.managementApi.deviations,
       legacyRoutes: source.managementApi.legacyRoutes.map((id) => ({
         id,
@@ -1567,6 +1617,17 @@ export function validateCommitted({ openapiPath, cfRoot, sdkRoot } = {}) {
   const capability = json(CAPABILITY_PATH);
   const extension = json(EXTENSION_PATH);
   const capabilitySource = json(CAPABILITY_SOURCE_PATH);
+  const annotatedRoutes = annotateRoutes(
+    capability.managementApi.routes,
+    capabilitySource.managementApi,
+  );
+  if (
+    JSON.stringify(capability.managementApi.routeGroups) !==
+      JSON.stringify(capabilitySource.managementApi.routeGroups) ||
+    JSON.stringify(capability.managementApi.routes) !==
+      JSON.stringify(annotatedRoutes)
+  )
+    throw new Error("management route annotation projection drift");
   const expectedExtension = prettierJson(
     `${JSON.stringify(buildExtension(capabilitySource), null, 2)}\n`,
   );

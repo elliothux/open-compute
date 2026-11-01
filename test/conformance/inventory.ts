@@ -435,6 +435,18 @@ export async function generateInventoryWithCoverage(): Promise<{
     JSON.parse(readFileSync(join(ROOT, "openapi/p6-capability.json"), "utf8")),
     "P6 capability",
   );
+  // The runtime decoder rejects documentation annotations as unknown fields.
+  const { routeGroups, ...managementApi } = record(
+    p6.managementApi,
+    "P6 managementApi",
+  );
+  managementApi.routes = (managementApi.routes as unknown[]).map((item) => {
+    const { group, sdk, docs, cf, ...route } = record(
+      item,
+      "P6 management route",
+    );
+    return route;
+  });
   return {
     inventory: {
       schema_version: 1,
@@ -445,7 +457,7 @@ export async function generateInventoryWithCoverage(): Promise<{
         index_sha256: sha256(sourceText),
         ast_sha256: fingerprint.sha256,
       },
-      managementApi: record(p6.managementApi, "P6 managementApi"),
+      managementApi,
       workersObservability: record(
         p6.workersObservability,
         "P6 workersObservability",
