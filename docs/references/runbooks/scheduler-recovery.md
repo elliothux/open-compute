@@ -29,8 +29,10 @@ gauge，restart/purge 可以降低它们；`workflow_event_intake_total` 和 `wo
 运行时未能确认 callback drain 时，当前 Workflow 执行路径会隔离当前 workerd generation。scheduler resume
 不能解除隔离；只有 supervisor 启动的新 generation 才能重新接纳 Workflow。已有 lease 保留给 Unknown recovery，不按业务 retry 增加 attempt。
 
-Scheduler 表与控制数据共用 `control.sqlite`。数据库损坏时，停止服务并恢复整机 snapshot。`scheduler recover-corrupt` 会拒绝替换文件，因为替换也会覆盖控制数据。
+允许的 mutation：无。Scheduler 表与控制数据共用 `control.sqlite`。数据库损坏时，停止服务并恢复整机 snapshot。`scheduler recover-corrupt` 会拒绝替换文件，因为替换也会覆盖控制数据。
 
 升级启动时，程序在一个事务中导入旧 `scheduler.sqlite`，并在 `platform_meta` 写入完成标记。程序将旧文件保留为 `scheduler.sqlite.imported`，同时保留仍存在的 WAL 和 SHM 文件。重启可继续未完成的导入或改名，不会重复导入。control 已有调度行但缺少标记时，启动失败，不合并数据。
+
+预期：恢复整机 snapshot 后，调度 projection 从 control 与 DO alarm authority 重建，不伪造已投递。停止条件：snapshot 也无法通过校验、未知 token 重复提交，或 backlog 不收敛。回滚：保留损坏的 `control.sqlite` 副本，改用更早的整机 snapshot。
 
 新 snapshot 仅通过 `control.sqlite` 保存调度表。恢复旧 snapshot 时，先使用来源版本恢复，再升级；启动程序会导入恢复的 scheduler 文件。验证升级后的实例和 snapshot 后，再决定旧副本的保留期限。

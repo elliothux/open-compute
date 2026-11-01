@@ -50,8 +50,7 @@
 ## 检查
 
 文档改动运行 `git diff --check` 和 `bun scripts/check-docs.ts`，并核对改动的链接和命令。`check-docs.ts`
-只检查网站文档和 README 中的站内链接。根 `AGENTS.md`、`docs/references/**` 和 `.agents/skills/**` 属于源码摘要输入，
-改动后按[测试说明](testing.md#按输入选择测试)同步 `sourceDigest`。
+只检查网站文档和 README 中的站内链接。源码摘要输入与更新方法见[测试说明](testing.md#按输入选择测试)。
 
 ## 参考资料
 

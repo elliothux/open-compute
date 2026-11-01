@@ -57,7 +57,7 @@ CARGO_TARGETS = {
     'p0-2': ('open-compute-service', 'p0_2_runtime_gate', True),
     'p0-3': ('open-compute-service', 'p0_3_resource_binding_gate', False),
     'p0-4': ('open-compute-service', 'p0_4_kv_gate', False),
-    # The 241 MB concurrent upload/readback matrix loses its HTTP stream under
+    # The concurrent upload/readback matrix loses its HTTP stream under
     # coverage when it contends with the service-library process.
     'p0-5': ('open-compute-service', 'p0_5_r2_gate', True),
     'p0-6': ('open-compute-service', 'p0_6_d1_gate', False),

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "sourceDigest": "3cb2343bb28483cfbe3b3198c3d559c50084162e1e5e1a1680c46aa36beb1372",
-  "sourceDigestScope": "git-visible production, test, toolchain, manifest, and maintained reference inputs; excludes generated Python caches, test/conformance/baseline.json, and non-reference docs",
+  "sourceDigest": "f90ecf2aa592383a9bcd1cd35cb8d9cff56a1d5072ff60b18030f4f49e9b0c4e",
+  "sourceDigestScope": "tracked production, test, toolchain, manifest, and embedded runbook inputs; excludes rule files, .agents/**, .claude/**, other docs, generated Python caches, and test/conformance/baseline.json",
   "workerdLockSha256": "d755339d9a60a3df06a9e43d874bc5a8c7035e73e5b31c8048b156ba38a189e6",
   "workerd": {
     "release": "v1.20260930.0-open-compute-r25.2ff33d645",

@@ -1,10 +1,19 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { sourceIdentityExcluded } from "./checks/context.ts";
 import { TYPE_ONLY_TARGET_SYMBOLS } from "./inventory-expand.ts";
 import {
   assertEvidenceBinding,
@@ -16,6 +25,73 @@ import {
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const COMMITTED = join(ROOT, "share/cloudflare-capabilities.json");
 const CATALOG = join(ROOT, "test/conformance/catalog.json");
+
+test("baseline digest excludes rules and prose but retains embedded runbooks and code", () => {
+  for (const path of [
+    "AGENTS.md",
+    "apps/dashboard/AGENTS.md",
+    "CLAUDE.md",
+    ".agents/skills/example/SKILL.md",
+    ".claude/settings.json",
+    "docs/references/testing.md",
+    "docs/references/p1-deviations.md",
+    "docs/plan.md",
+    "test/__pycache__/gate.pyc",
+    "test/conformance/baseline.json",
+  ]) {
+    assert.equal(sourceIdentityExcluded(path), true, path);
+  }
+  for (const path of [
+    "docs/references/runbooks/install-and-first-start.md",
+    "crates/service/src/resources.rs",
+    "test/conformance/checks/context.ts",
+    "packages/runtime/workerd.lock.json",
+    "Cargo.toml",
+    ".github/workflows/ci.yml",
+  ]) {
+    assert.equal(sourceIdentityExcluded(path), false, path);
+  }
+});
+
+test("baseline digest hashes tracked working-tree inputs and ignores untracked local files", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "oc-source-identity-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const context = join(root, "test/conformance/checks/context.ts");
+  mkdirSync(dirname(context), { recursive: true });
+  copyFileSync(join(ROOT, "test/conformance/checks/context.ts"), context);
+  const excluded = [
+    "AGENTS.md",
+    "nested/AGENTS.md",
+    ".agents/rules.md",
+    ".claude/settings.json",
+    "docs/references/testing.md",
+    "docs/references/p1-deviations.md",
+  ];
+  const included = ["source.ts", "docs/references/runbooks/fixture.md"];
+  for (const path of [...excluded, ...included]) {
+    mkdirSync(dirname(join(root, path)), { recursive: true });
+    writeFileSync(join(root, path), "original");
+  }
+  execFileSync("git", ["init", "-q"], { cwd: root });
+  execFileSync("git", ["add", "-f", "."], { cwd: root });
+  const { sourceIdentity } = await import(pathToFileURL(context).href);
+  const original = sourceIdentity();
+  for (const path of excluded) writeFileSync(join(root, path), "changed");
+  for (const path of [
+    "REVIEW.md",
+    "local.ts",
+    ".agents/local.md",
+    ".claude/local.json",
+  ])
+    writeFileSync(join(root, path), "untracked");
+  assert.equal(sourceIdentity(), original);
+  for (const path of included) {
+    writeFileSync(join(root, path), "changed");
+    assert.notEqual(sourceIdentity(), original, path);
+    writeFileSync(join(root, path), "original");
+  }
+  assert.equal(sourceIdentity(), original);
+});
 
 function hasCommit(repository, revision) {
   try {

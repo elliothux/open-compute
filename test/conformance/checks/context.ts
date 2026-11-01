@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { lstatSync, readFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { JsonRecord } from "../adapters/types.ts";
 
@@ -48,27 +48,18 @@ export function digest(path: string): string {
 export function sourceIdentityExcluded(name: string): boolean {
   return (
     name.split("/").includes("__pycache__") ||
+    ["AGENTS.md", "CLAUDE.md"].includes(basename(name)) ||
+    name.startsWith(".agents/") ||
+    name.startsWith(".claude/") ||
     name === "test/conformance/baseline.json" ||
-    (name.startsWith("docs/") && !name.startsWith("docs/references/"))
+    (name.startsWith("docs/") && !name.startsWith("docs/references/runbooks/"))
   );
 }
 
 export function sourceIdentity(): string {
-  const names = execFileSync(
-    "git",
-    [
-      "-c",
-      "core.excludesFile=/dev/null",
-      "ls-files",
-      "-z",
-      "--cached",
-      "--others",
-      "--exclude-standard",
-    ],
-    {
-      cwd: ROOT,
-    },
-  )
+  const names = execFileSync("git", ["ls-files", "-z", "--cached"], {
+    cwd: ROOT,
+  })
     .subarray(0, -1)
     .toString("utf8")
     .split("\0")

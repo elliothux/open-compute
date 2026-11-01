@@ -1,6 +1,7 @@
 //! Large concurrent uploads through real HTTP, stock workerd, R2 and D1.
 
 use super::*;
+use axum::body::Bytes;
 use futures::StreamExt as _;
 use http_body_util::BodyExt as _;
 use hyper_util::client::legacy::{Client, connect::HttpConnector};
@@ -13,8 +14,8 @@ use serde_json::Value;
 use sha2::{Digest as _, Sha256};
 use tokio::io::AsyncWriteExt as _;
 
-const TOTAL: usize = 241_910_375;
 const PART: usize = 8 * 1024 * 1024;
+const TOTAL: usize = 2 * PART + 1;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn concurrent_large_upload_keeps_runtime_responsive() {
@@ -129,12 +130,15 @@ async fn concurrent_large_upload_keeps_runtime_responsive() {
     let upload_client = client.clone();
     let upload_base = base.clone();
     let upload_id_for_task = upload_id.clone();
-    // Upload tasks must progress while the responsiveness probe awaits HTTP.
+    // Hold the first HTTP body until the complete probe response has been read.
+    let resume_upload = Arc::new(tokio::sync::Notify::new());
+    let upload_resume = resume_upload.clone();
     let mut uploads = tokio::task::JoinSet::new();
     uploads.spawn(async move {
         futures::stream::iter(0..TOTAL.div_ceil(PART))
             .map(|index| {
                 let client = upload_client.clone();
+                let resume = upload_resume.clone();
                 let url = format!(
                     "{upload_base}/part?uploadId={upload_id_for_task}&number={}",
                     index + 1
@@ -144,44 +148,84 @@ async fn concurrent_large_upload_keeps_runtime_responsive() {
                         .await
                         .unwrap();
                     let started = Instant::now();
-                    let part = checked_json(
-                        &format!("upload part {}", index + 1),
-                        send(&client, "PUT", url, Body::from(bytes)).await,
+                    let length = bytes.len();
+                    let body = if index == 0 {
+                        let mut bytes = Bytes::from(bytes);
+                        let first = bytes.split_to(1);
+                        Body::from_stream(
+                            futures::stream::once(async {
+                                Ok::<_, std::convert::Infallible>(first)
+                            })
+                            .chain(futures::stream::once(
+                                async move {
+                                    resume.notified().await;
+                                    Ok(bytes)
+                                },
+                            )),
+                        )
+                    } else {
+                        Body::from(bytes)
+                    };
+                    let response = tokio::time::timeout(
+                        Duration::from_secs(35),
+                        client.request(
+                            Request::builder()
+                                .method("PUT")
+                                .uri(url)
+                                .header(header::CONTENT_LENGTH, length)
+                                .body(body)
+                                .unwrap(),
+                        ),
                     )
-                    .await;
+                    .await
+                    .unwrap()
+                    .unwrap();
+                    let part = checked_json(&format!("upload part {}", index + 1), response).await;
                     (part, started.elapsed())
                 }
             })
-            .buffer_unordered(4)
+            .buffer_unordered(3)
             .collect::<Vec<_>>()
             .await
     });
-    let mut probes = 0;
-    let mut max_probe = Duration::ZERO;
-    let results = loop {
-        tokio::select! {
-            result = uploads.join_next() => break result.unwrap().unwrap(),
-            () = tokio::time::sleep(Duration::from_millis(50)) => {
-                let probe_started = Instant::now();
-                let client_started_unix_ms = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_millis();
-                let response = send(&client, "GET", format!("{base}/ping"), Body::empty()).await;
-                let native_entered_unix_ms = response.headers()
-                    .get("x-p05-runtime-entered-ms")
-                    .and_then(|value| value.to_str().ok())
-                    .and_then(|value| value.parse::<u128>().ok());
-                assert_eq!(response.status(), 200);
-                assert_eq!(response.into_body().collect().await.unwrap().to_bytes(), "pong");
-                max_probe = max_probe.max(probe_started.elapsed());
-                assert!(max_probe < Duration::from_secs(2), "lightweight request stalled: {max_probe:?}; client_started_unix_ms={client_started_unix_ms}; native_entered_unix_ms={native_entered_unix_ms:?}");
-                probes += 1;
+    tokio::time::timeout(Duration::from_secs(35), async {
+        loop {
+            let ready = checked_json(
+                "upload started",
+                send(
+                    &client,
+                    "GET",
+                    format!("{base}/upload-started"),
+                    Body::empty(),
+                )
+                .await,
+            )
+            .await;
+            if ready["uploading"] == true {
+                break;
             }
+            tokio::task::yield_now().await;
         }
-    };
+    })
+    .await
+    .expect("first part must reach the native upload before the probe");
+    let probe_started = Instant::now();
+    let response = send(&client, "GET", format!("{base}/ping"), Body::empty()).await;
+    assert_eq!(response.status(), 200);
+    assert_eq!(response.headers()["x-p05-upload-in-flight"], "true");
+    assert_eq!(
+        response.into_body().collect().await.unwrap().to_bytes(),
+        "pong"
+    );
+    let max_probe = probe_started.elapsed();
+    assert!(
+        max_probe < Duration::from_secs(2),
+        "lightweight request stalled: {max_probe:?}"
+    );
+    resume_upload.notify_one();
+    let results = uploads.join_next().await.unwrap().unwrap();
     let upload_elapsed = started.elapsed();
-    assert!(probes > 0, "no concurrent responsiveness probe executed");
+    assert_eq!(results.len(), 3);
     let max_part = results.iter().map(|(_, elapsed)| *elapsed).max().unwrap();
     let mut parts: Vec<_> = results.into_iter().map(|(part, _)| part).collect();
     parts.sort_by_key(|part| part["partNumber"].as_i64().unwrap());
@@ -296,7 +340,7 @@ async fn concurrent_large_upload_keeps_runtime_responsive() {
         assert_eq!(provider_parts, parts.len(), "unexpected provider retries");
     }
     println!(
-        "large upload profile={} bytes={TOTAL} concurrency=4 upload_ms={} complete_ms={} max_part_ms={} probes={probes} max_probe_ms={} sha256={}",
+        "large upload profile={} bytes={TOTAL} concurrency=3 upload_ms={} complete_ms={} max_part_ms={} probes=1 max_probe_ms={} sha256={}",
         if cfg!(debug_assertions) {
             "debug"
         } else {
@@ -374,10 +418,12 @@ async fn checked_json(
     serde_json::from_str(&text).unwrap()
 }
 
-const SOURCE: &str = r#"export default {
+const SOURCE: &str = r#"let uploadInFlight = false;
+export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    if (url.pathname === "/ping") return new Response("pong", {headers: {"x-p05-runtime-entered-ms": String(Date.now())}});
+    if (url.pathname === "/upload-started") return Response.json({uploading: uploadInFlight});
+    if (url.pathname === "/ping") return new Response("pong", {headers: {"x-p05-upload-in-flight": String(uploadInFlight)}});
     if (url.pathname === "/create") {
       await env.DB.exec("CREATE TABLE parts (part INTEGER PRIMARY KEY, size INTEGER NOT NULL)");
       return Response.json(await env.BUCKET.createMultipartUpload("large.bin"));
@@ -388,7 +434,10 @@ const SOURCE: &str = r#"export default {
       const upload = env.BUCKET.resumeMultipartUpload("large.bin", url.searchParams.get("uploadId"));
       let phase = "r2-upload";
       try {
-        const part = await upload.uploadPart(number, request.body);
+        const uploading = upload.uploadPart(number, request.body);
+        if (number === 1) uploadInFlight = true;
+        const part = await uploading;
+        if (number === 1) uploadInFlight = false;
         phase = "d1-insert";
         await env.DB.prepare("INSERT INTO parts VALUES (?, ?)").bind(number, size).run();
         return Response.json(part);

@@ -13,8 +13,7 @@
 
 SDK 消费者读取 `packages/sdk/dist/`。SDK 生成面变化时先运行 `bun run --filter @open-compute/sdk build`。
 
-除 `docs/`（`docs/references/` 除外）、`__pycache__` 和 `test/conformance/baseline.json` 外，所有被 Git 跟踪或未忽略的文件
-都是 `test/conformance/checks/context.ts` 中 `sourceIdentity()` 的输入。改动这些文件后更新 baseline 的 `sourceDigest`：
+`sourceIdentity()` 只计算 Git 跟踪的文件，排除规则文件、`.agents/**`、`.claude/**`、非嵌入文档（保留 `docs/references/runbooks/**`）、`__pycache__` 和 `test/conformance/baseline.json`；输入变化后更新 baseline 的 `sourceDigest`：
 
 ```sh
 bun -e 'import {sourceIdentity} from "./test/conformance/checks/context.ts"; console.log(sourceIdentity())'
