@@ -13,7 +13,6 @@ use std::path::Path;
 use url::Url;
 
 const SCHEMA_VERSION: u32 = 4;
-const TOKEN_PLACEHOLDER: &str = "__OPEN_COMPUTE_INTERNAL_TOKEN__";
 
 /// Pinned workerd release lock.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -263,12 +262,6 @@ impl RuntimeLock {
             )
         })?;
         Ok((name, target))
-    }
-
-    /// Token placeholder embedded in the packaged Cap'n Proto template.
-    #[must_use]
-    pub const fn token_placeholder() -> &'static str {
-        TOKEN_PLACEHOLDER
     }
 }
 

@@ -5,7 +5,6 @@ use axum::Router;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse as _, Response};
-use open_compute_runtime::GenerationAuthRegistry;
 use open_compute_service::workflow_backend::WorkflowBindingService;
 use open_compute_storage::scheduler::ClaimedWorkflowRun;
 use serde_json::{Value, json};
@@ -34,7 +33,7 @@ struct Trace {
 #[derive(Clone)]
 struct Backend {
     service: WorkflowBindingService,
-    auth: GenerationAuthRegistry,
+
     trace: Arc<Mutex<Trace>>,
 }
 
@@ -64,7 +63,7 @@ async fn handle(State(state): State<Backend>, request: Request<Body>) -> Respons
             .unwrap();
         return cut(fault.observation);
     }
-    let response = state.service.handle(request, state.auth).await;
+    let response = state.service.handle(request).await;
     if let Some(fault) = fault {
         assert_eq!(response.status(), StatusCode::OK, "{fault:?}");
         if fault.observation == Observation::Unknown {
@@ -137,18 +136,21 @@ async fn workflow_production_step_http_known_unknown_commit_matrix() {
                 config.clone(),
             )
             .unwrap(),
-            auth: harness.binding_auth.clone(),
+
             trace: trace.clone(),
         };
         let mut shutdown = harness.shutdown.subscribe();
-        let listener = harness.binding_listener.take().unwrap();
+        let mut listener = harness.binding_listener.take().unwrap();
         let server = tokio::spawn(async move {
-            axum::serve(listener, Router::new().fallback(handle).with_state(backend))
-                .with_graceful_shutdown(async move {
-                    let _ = shutdown.changed().await;
-                })
-                .await
-                .unwrap();
+            axum::serve(
+                listener.take_listener().unwrap(),
+                Router::new().fallback(handle).with_state(backend),
+            )
+            .with_graceful_shutdown(async move {
+                let _ = shutdown.changed().await;
+            })
+            .await
+            .unwrap();
         });
         let account = harness.storage.identity().instance_id;
         let definition = WorkflowRepository::new(harness.storage.db())

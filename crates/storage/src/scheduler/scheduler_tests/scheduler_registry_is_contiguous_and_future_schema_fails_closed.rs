@@ -18,7 +18,7 @@ fn refinery_history_is_current_and_future_schema_fails_closed() {
         history,
         (
             current_scheduler_schema_version(),
-            "drop_scheduler_claim_tokens".to_owned()
+            "workflow_retention_milliseconds".to_owned()
         )
     );
     connection

@@ -671,13 +671,8 @@ async fn worker_loader_native_binding_versions_delete_and_restart() {
         json!({ "kv": "kv-value", "d1": 42, "r2": "r2-value", "ordinary": "visible" })
     );
     drop(transfer_command);
-    // Existing admission retains executed Versions until the supervised generation exits:
-    // an HTTP response alone cannot prove that background tenant work has drained.
-    assert_eq!(
-        api(&client, &fixture, SCRIPT, "", "DELETE", None).await.0,
-        409
-    );
-    let (status, deleted) = api(&client, &fixture, SCRIPT, "?force=true", "DELETE", None).await;
+    // Completed responses release their Version pins, so delete matches Cloudflare.
+    let (status, deleted) = api(&client, &fixture, SCRIPT, "", "DELETE", None).await;
     assert_eq!(status, 200, "{deleted}");
     assert_eq!(invoke(&client, &fixture, SCRIPT, "").await.0, 404);
     let (status, _) = api(&client, &fixture, SCRIPT, "", "DELETE", None).await;

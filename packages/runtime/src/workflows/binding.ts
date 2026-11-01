@@ -1,6 +1,6 @@
 import { RpcTarget, WorkerEntrypoint } from "cloudflare:workers";
 import type { BindingEnv } from "../bindings/protocol.js";
-import { bindingError, currentStartupGeneration } from "../loader/shared.js";
+import { bindingError } from "../loader/shared.js";
 import type {
   WorkflowBindingProps,
   WorkflowCreateWire,
@@ -58,8 +58,7 @@ async function request(
         method: "POST",
         headers: {
           "content-type": "application/json",
-          "x-open-compute-binding-token": env.BINDING_BACKEND_TOKEN,
-          "x-open-compute-startup-generation": currentStartupGeneration(),
+
           "x-open-compute-version-id": props.versionId,
           "x-open-compute-descriptor-sha256": props.descriptorSha256,
           "x-open-compute-request-id": operationId ?? crypto.randomUUID(),

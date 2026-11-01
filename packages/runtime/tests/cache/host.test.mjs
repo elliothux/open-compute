@@ -7,7 +7,7 @@ import {
 } from "../compiled-runtime.mjs";
 
 const shared = moduleUrl(`
-  export const BINDING_TOKEN_HEADER = "x-open-compute-binding-token";
+
   export const INTERNAL_HEADERS = ["x-internal-fixture"];
   export const currentStartupGeneration = () => "generation";
   export function bindingError(code) {
@@ -48,10 +48,7 @@ const props = {
   crossVersionCache: false,
 };
 const host = (backend) =>
-  new CacheTransport(
-    { props },
-    { BINDING_BACKEND: backend, BINDING_BACKEND_TOKEN: "private-token" },
-  );
+  new CacheTransport({ props }, { BINDING_BACKEND: backend });
 const contextHeader = "x-open-compute-cache-write-context";
 const payload = (context) =>
   new Request("https://cache.test/key", {
@@ -66,13 +63,10 @@ test("Cache match preserves opaque encoding and strips every private response he
     async fetch(url, init) {
       assert.ok(url.endsWith("/match"));
       assert.equal(init.encodeResponseBody, "manual");
-      assert.equal(
-        init.headers["x-open-compute-binding-token"],
-        "private-token",
-      );
+      assert.equal(init.headers["x-open-compute-binding-token"], undefined);
       assert.equal(
         init.headers["x-open-compute-startup-generation"],
-        "generation",
+        undefined,
       );
       assert.equal(init.headers["x-open-compute-worker-id"], props.workerId);
       assert.equal(

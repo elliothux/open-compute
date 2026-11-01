@@ -25,7 +25,7 @@ sleep 30
     let runtime = verify_ok(&lock_path, &bin).await;
     let data = dir.path().join("data");
     fs::create_dir(&data).unwrap();
-    let token = SecretString::new(TOKEN);
+
     let redactor = redactor_with_token();
     let platform = platform_meta();
     // Barrier on written content, not existence: the shell creates each file with O_TRUNC
@@ -47,7 +47,6 @@ sleep 30
         dir.path(),
         &data,
         &platform,
-        &token,
         &redactor,
         deadline,
     ))

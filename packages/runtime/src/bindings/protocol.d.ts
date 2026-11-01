@@ -1,7 +1,6 @@
 /** Backend capability available only to platform-owned transport entrypoints. */
 export interface BindingEnv {
   BINDING_BACKEND: Fetcher;
-  BINDING_BACKEND_TOKEN: string;
 }
 
 /** Resource authority selected from the persisted version descriptor. */

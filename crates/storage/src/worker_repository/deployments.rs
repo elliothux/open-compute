@@ -612,6 +612,13 @@ impl<'a> WorkerRepository<'a> {
                 return Err(worker_not_found());
             }
             tx.execute(
+                "UPDATE workflow_definitions SET availability='unavailable',availability_code='WORKER_DELETED',updated_at_ms=?2
+                 WHERE state!='tombstoned' AND current_version_id IN
+                   (SELECT id FROM workflow_versions WHERE worker_id=?1)",
+                params![worker_id, now_ms],
+            )
+            .map_err(|_| db_error())?;
+            tx.execute(
                 "DELETE FROM resource_referrers
                  WHERE referrer_kind = 'version_binding'
                    AND referrer_id IN (

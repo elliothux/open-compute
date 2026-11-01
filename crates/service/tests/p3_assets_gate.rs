@@ -9,13 +9,13 @@ use open_compute_artifacts::{
     ArtifactCache, ArtifactStore, MapEnv, MockS3, ObjectBackend, resolve_s3_credentials_with,
 };
 use open_compute_core::{
-    CacheConfig, DataConfig, ErrorCode, PlatformConfig, Redactor, RequestId, RuntimeConfig,
-    StartupId, SystemClock,
+    CacheConfig, DataConfig, PlatformConfig, Redactor, RequestId, RuntimeConfig, StartupId,
+    SystemClock,
 };
 use open_compute_runtime::{
-    DirectoryServicePath, ExternalServiceAddress, GenerationAuthRegistry, OsJitter,
-    PlatformReleaseMeta, StaticConfigCompiler, SupervisorState, WorkerdSupervisor,
-    WorkerdSupervisorOptions, verify_runtime_binary,
+    DirectoryServicePath, ExternalServiceAddress, OsJitter, PlatformReleaseMeta,
+    StaticConfigCompiler, SupervisorState, WorkerdSupervisor, WorkerdSupervisorOptions,
+    verify_runtime_binary,
 };
 use open_compute_service::asset_backend::AssetBindingService;
 use open_compute_service::runtime_bridge::{
@@ -64,7 +64,7 @@ async fn p3_assets_real_runtime_routing_binding_immutability_and_lifecycle() {
     let root = repo_root();
     let lock = root.join("packages/runtime/workerd.lock.json");
     let runtime_assets = root.join("packages/runtime");
-    let temp = tempfile::tempdir().unwrap();
+    let temp = tempfile::tempdir_in("/tmp").unwrap();
     let storage = Arc::new(
         PlatformStorage::bootstrap(&storage_config(&temp.path().join("data")), &SystemClock)
             .unwrap(),
@@ -83,12 +83,17 @@ async fn p3_assets_real_runtime_routing_binding_immutability_and_lifecycle() {
         .await
         .expect("formal pinned runtime");
 
-    let source_auth = GenerationAuthRegistry::new();
-    let binding_auth = GenerationAuthRegistry::new();
-    let source_listener = bind_runtime_source().await.unwrap();
-    let source_addr = source_listener.local_addr().unwrap();
-    let binding_listener = bind_binding_backend().await.unwrap();
-    let binding_addr = binding_listener.local_addr().unwrap();
+    let source_listener =
+        bind_runtime_source(&storage.data_dir().runtime_dir().join("source.sock"))
+            .await
+            .unwrap();
+    let source_addr = source_listener.path().to_owned();
+
+    let binding_listener =
+        bind_binding_backend(&storage.data_dir().runtime_dir().join("binding.sock"))
+            .await
+            .unwrap();
+    let binding_addr = binding_listener.path().to_owned();
     let version_pins = VersionPins::new();
     let (shutdown, mut source_shutdown) = tokio::sync::watch::channel(false);
     let mut binding_shutdown = shutdown.subscribe();
@@ -100,9 +105,9 @@ async fn p3_assets_real_runtime_routing_binding_immutability_and_lifecycle() {
             open_compute_service::runtime_bridge::python_runtime_pin(&runtime),
         )
         .unwrap();
-        let auth = source_auth.clone();
+
         async move {
-            serve_runtime_source(source_listener, source, auth, None, async move {
+            serve_runtime_source(source_listener, source, None, async move {
                 let _ = source_shutdown.changed().await;
             })
             .await
@@ -110,7 +115,7 @@ async fn p3_assets_real_runtime_routing_binding_immutability_and_lifecycle() {
     });
     let binding_task = tokio::spawn({
         let storage = storage.clone();
-        let auth = binding_auth.clone();
+
         let pins = version_pins.clone();
         let asset_service = Arc::new(AssetBindingService::new(
             storage.clone(),
@@ -123,7 +128,6 @@ async fn p3_assets_real_runtime_routing_binding_immutability_and_lifecycle() {
             serve_binding_backend_with_assets(
                 binding_listener,
                 storage.clone(),
-                auth,
                 ResourcePins::new(),
                 Arc::new(SqliteKvBindingExecutor::new(
                     storage.clone(),
@@ -153,17 +157,16 @@ async fn p3_assets_real_runtime_routing_binding_immutability_and_lifecycle() {
         lock,
         runtime_assets,
         storage.data_dir().runtime_dir(),
+        storage.data_dir().runtime_dir().join("ingress.sock"),
         PlatformReleaseMeta {
             version: "p3-assets-gate".to_owned(),
         },
         Duration::from_secs(20),
         Redactor::new(),
-    )
-    .with_generation_auth(source_auth.clone())
-    .with_binding_generation_auth(binding_auth.clone());
+    );
     let supervisor_slot = Arc::new(Mutex::new(None));
-    let transport = WorkerdTransport::new(source_auth.clone(), supervisor_slot.clone())
-        .with_version_pins(version_pins.clone());
+    let transport =
+        WorkerdTransport::new(supervisor_slot.clone()).with_version_pins(version_pins.clone());
     let do_storage = storage
         .data_dir()
         .prepare_durable_object_storage(
@@ -186,12 +189,11 @@ async fn p3_assets_real_runtime_routing_binding_immutability_and_lifecycle() {
             ),
         },
         vec![
-            ExternalServiceAddress::loopback("runtime-source", source_addr).unwrap(),
-            ExternalServiceAddress::loopback("binding-backend", binding_addr).unwrap(),
-            ExternalServiceAddress::loopback("observability-backend", binding_addr).unwrap(),
+            ExternalServiceAddress::unix("runtime-source", &source_addr).unwrap(),
+            ExternalServiceAddress::unix("binding-backend", &binding_addr).unwrap(),
+            ExternalServiceAddress::unix("observability-backend", &binding_addr).unwrap(),
         ],
         vec![DirectoryServicePath::local("do-storage", &do_storage).unwrap()],
-        vec![source_auth, binding_auth],
     ));
     *supervisor_slot.lock().unwrap() = Some(supervisor.clone());
     supervisor.start();
@@ -308,6 +310,8 @@ async fn p3_assets_real_runtime_routing_binding_immutability_and_lifecycle() {
     .await;
     assert_eq!(redirect.status(), StatusCode::FOUND);
     assert_eq!(redirect.headers()[header::LOCATION], "/?source=gate");
+    // A live response body holds its Version pin.
+    drop(redirect);
     let missing = dispatch(
         &transport,
         dispatch_target(repo, account, static_worker.id, &static_version),
@@ -410,7 +414,7 @@ async fn p3_assets_real_runtime_routing_binding_immutability_and_lifecycle() {
         b"asset-v1",
         "binding headers: {binding_headers:?}"
     );
-    assert_eq!(version_pins.count(first.id), 1);
+    assert_eq!(version_pins.count(first.id), 0);
 
     let second = deploy_hybrid(
         &controller,
@@ -449,11 +453,11 @@ async fn p3_assets_real_runtime_routing_binding_immutability_and_lifecycle() {
     )
     .await;
     assert_eq!(response_body(new_asset).await.as_ref(), b"asset-v2");
-    let error = version_pins
+    // Completed responses release the old Version; nothing still references it.
+    version_pins
         .fence_and_wait(first.id, Duration::from_millis(50))
         .await
-        .unwrap_err();
-    assert_eq!(error.code(), ErrorCode::VersionReferenced);
+        .unwrap();
     version_pins.unfence(first.id);
 
     supervisor.shutdown().await;

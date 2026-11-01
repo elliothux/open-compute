@@ -26,8 +26,7 @@ const imports = {
   "./modules.js": moduleUrl(
     "export function modulesFor() { throw Error('unused'); }",
   ),
-  "./shared.js":
-    moduleUrl(`export const INTERNAL_HEADERS=[],TOKEN_HEADER='x-open-compute-internal-token';
+  "./shared.js": moduleUrl(`export const INTERNAL_HEADERS=[];
   export const bindingError=(code)=>Object.assign(new Error(code),{stableCode:code});
   export const stableCode=(error)=>error?.stableCode;
   export const isRecord=(value)=>value!==null && typeof value==='object' && !Array.isArray(value);

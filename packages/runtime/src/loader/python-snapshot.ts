@@ -4,11 +4,7 @@ import type {
   RuntimeSnapshot,
   RuntimeSourceScope,
 } from "./protocol.js";
-import {
-  bindingError,
-  currentStartupGeneration,
-  TOKEN_HEADER,
-} from "./shared.js";
+import { bindingError } from "./shared.js";
 
 const MAX_SNAPSHOT_BYTES = 128 * 1024 * 1024;
 
@@ -17,7 +13,6 @@ export async function resolvePythonSnapshot(
   env: LoaderEnv,
   snapshot: RuntimeSnapshot,
   scope: RuntimeSourceScope,
-  token: string,
 ): Promise<Uint8Array<ArrayBuffer>> {
   const response = await env.RUNTIME_SOURCE.fetch(
     "http://runtime-source/internal/runtime/v1/versions/python-snapshot",
@@ -25,8 +20,6 @@ export async function resolvePythonSnapshot(
       method: "POST",
       headers: {
         "content-type": "application/json",
-        [TOKEN_HEADER]: token,
-        "x-open-compute-startup-generation": currentStartupGeneration(token),
       },
       body: JSON.stringify({
         key: snapshot.loaderKey,

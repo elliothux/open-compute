@@ -578,16 +578,20 @@ pub async fn serve_until(
 }
 
 /// Private, mode-0600 Unix socket owned by the active platform process.
-pub(crate) struct PrivateUnixListener {
+pub struct PrivateUnixListener {
     listener: Option<tokio::net::UnixListener>,
     path: PathBuf,
 }
 
 impl PrivateUnixListener {
-    pub(crate) fn bind(path: PathBuf) -> Result<Self, PlatformError> {
+    pub fn bind(path: PathBuf) -> Result<Self, PlatformError> {
         if !crate::instance_control::unix_socket_path_is_valid(&path) {
             return Err(private_socket_error());
         }
+        let parent = path.parent().ok_or_else(private_socket_error)?;
+        std::fs::create_dir_all(parent).map_err(|_| private_socket_error())?;
+        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700))
+            .map_err(|_| private_socket_error())?;
         match std::fs::symlink_metadata(&path) {
             Ok(metadata) if metadata.file_type().is_socket() => {
                 std::fs::remove_file(&path).map_err(|_| private_socket_error())?;
@@ -607,7 +611,11 @@ impl PrivateUnixListener {
         })
     }
 
-    pub(crate) fn take_listener(&mut self) -> Result<tokio::net::UnixListener, PlatformError> {
+    pub fn path(&self) -> &std::path::Path {
+        &self.path
+    }
+
+    pub fn take_listener(&mut self) -> Result<tokio::net::UnixListener, PlatformError> {
         self.listener.take().ok_or_else(private_socket_error)
     }
 

@@ -1,19 +1,18 @@
 //! Functional liveness watchdog for the running workerd generation.
 //!
 //! Readiness (`/internal/ready`) gates admission at startup. Liveness (`/internal/live`)
-//! proves that a Running generation's event loop, system Worker dispatch, and generation
-//! credential can still complete one minimal request/response. It never reads SQLite, S3, or
+//! proves that a Running generation's event loop and system Worker dispatch can complete
+//! one minimal request/response. It never reads SQLite, S3, or
 //! any external dependency, so an outage of those cannot manufacture a runtime restart loop.
 //!
 //! All commands reaching the supervisor actor are generation-fenced by [`StartupId`]; a late
 //! probe or suspicion from a superseded generation is dropped before it can affect the
 //! current child.
 
-use super::probe::probe_authenticated;
+use super::probe::probe_path;
 use super::*;
-use open_compute_core::SecretString;
 
-/// Authenticated liveness path served by the system gateway Worker.
+/// Private liveness path served by the system gateway Worker.
 pub const LIVE_PATH: &str = "/internal/live";
 
 /// Fixed product constants for the functional watchdog. Not operator-tunable; tests inject
@@ -45,9 +44,9 @@ impl Default for WatchdogConfig {
 pub enum RuntimeFailureEvidence {
     /// A bounded internal request timed out waiting for its response headers.
     ResponseHeaderTimeout,
-    /// A loopback connection to the runtime could not be established.
+    /// A Unix socket connection to the runtime could not be established.
     ConnectFailed,
-    /// An authenticated internal response could not be parsed or was rejected.
+    /// A private internal response could not be parsed or was rejected.
     MalformedInternalResponse,
     /// The periodic functional probe failed.
     PeriodicProbeFailed,
@@ -69,19 +68,14 @@ impl RuntimeFailureEvidence {
     }
 }
 
-/// One authenticated liveness probe against the Running generation.
-pub(crate) async fn probe_live(
-    port: u16,
-    token: &SecretString,
-    config: WatchdogConfig,
-) -> Result<(), PlatformError> {
-    probe_authenticated(port, token.expose(), LIVE_PATH, config.probe_timeout).await
+/// One private liveness probe against the Running generation.
+pub(crate) async fn probe_live(socket: &Path, config: WatchdogConfig) -> Result<(), PlatformError> {
+    probe_path(socket, LIVE_PATH, config.probe_timeout).await
 }
 
 impl Actor {
-    /// Bind the attempt's probe token and reset all per-generation watchdog state.
-    pub(super) fn begin_generation_watchdog_state(&mut self, token: SecretString) {
-        self.live_token = Some(token);
+    /// Reset all per-generation watchdog state.
+    pub(super) fn begin_generation_watchdog_state(&mut self) {
         self.probe_failures = 0;
         self.probe_flight = None;
         self.next_periodic_probe_at = None;
@@ -90,7 +84,6 @@ impl Actor {
 
     /// Clear all per-generation watchdog state during teardown.
     pub(super) fn clear_generation_watchdog_state(&mut self) {
-        self.live_token = None;
         self.probe_flight = None;
         self.probe_failures = 0;
         self.next_periodic_probe_at = None;
@@ -171,7 +164,7 @@ impl Actor {
             // Single-flight per generation: concurrent suspicions merge into one probe.
             return;
         }
-        let (Some(port), Some(token)) = (self.snap.listen_port, self.live_token.clone()) else {
+        let Some(socket) = self.snap.ingress_socket.clone() else {
             return;
         };
         self.probe_flight = Some(startup_id);
@@ -181,7 +174,7 @@ impl Actor {
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         tokio::spawn(async move {
-            let healthy = probe_live(port, &token, config).await.is_ok();
+            let healthy = probe_live(&socket, config).await.is_ok();
             let _ = tx.send(Command::FunctionalProbeResult {
                 startup_id,
                 healthy,

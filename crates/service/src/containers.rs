@@ -6,7 +6,6 @@ use open_compute_core::{
     DurableObjectId, ErrorCode, InstanceId, PlatformError, ResourceId,
     containers::ContainerLeaseState,
 };
-use open_compute_runtime::{GenerationAuthRegistry, GenerationCredential};
 use open_compute_storage::{
     PlatformStorage,
     containers::{
@@ -98,8 +97,7 @@ impl ContainerService {
         &self,
         body: ResolveRequest,
         now_ms: i64,
-        auth: &GenerationAuthRegistry,
-        credential: &GenerationCredential,
+        generation: &str,
     ) -> Result<ResolveResponse, PlatformError> {
         if body.instance_id != self.instance_id()
             || (body.for_monitor && (body.start || body.for_stop || body.startup.is_some()))
@@ -145,16 +143,13 @@ impl ContainerService {
             None
         };
         let lease = if body.start {
-            auth.with_current(credential, || {
-                repo.reserve(
-                    &authority,
-                    &engine_key,
-                    execution.as_ref().ok_or_else(unavailable)?,
-                    self.provider.max_instances(),
-                    now_ms,
-                )
-            })
-            .ok_or_else(unavailable)?
+            repo.reserve(
+                &authority,
+                &engine_key,
+                execution.as_ref().ok_or_else(unavailable)?,
+                self.provider.max_instances(),
+                now_ms,
+            )
             .map(Some)?
         } else {
             repo.existing_lease(&authority)?
@@ -201,7 +196,7 @@ impl ContainerService {
                 lease_generation: lease.identity.lease_generation,
                 opaque_engine_key: lease.opaque_engine_key,
             };
-            self.stop(&request, now_ms, auth, credential).await?;
+            self.stop(&request, now_ms).await?;
             return Ok(ResolveResponse { lease: None });
         }
         let target = repo.target(body.instance_id, app.id, lease.target_generation)?;
@@ -218,10 +213,7 @@ impl ContainerService {
                 .await?;
             let registration = self.registration(&lease)?;
             if lease.state == ContainerLeaseState::Admitting {
-                auth.with_current(credential, || {
-                    repo.mark_starting(lease.identity, &lease.opaque_engine_key, now_ms)
-                })
-                .ok_or_else(unavailable)??;
+                repo.mark_starting(lease.identity, &lease.opaque_engine_key, now_ms)?;
             }
             if self
                 .provider
@@ -237,7 +229,7 @@ impl ContainerService {
                 })
                 .is_err()
                 || self
-                    .prepare_directories(&authority, &lease, &registration, auth, credential)
+                    .prepare_directories(&authority, &lease, &registration)
                     .await
                     .inspect_err(|error| {
                         tracing::warn!(
@@ -249,10 +241,7 @@ impl ContainerService {
                     })
                     .is_err()
             {
-                auth.with_current(credential, || {
-                    repo.mark_lost(lease.identity, &lease.opaque_engine_key, now_ms)
-                })
-                .ok_or_else(unavailable)??;
+                repo.mark_lost(lease.identity, &lease.opaque_engine_key, now_ms)?;
                 return Err(unavailable());
             }
         }
@@ -276,39 +265,29 @@ impl ContainerService {
                         && observed.provider_contract_sha256 == self.provider.contract_sha256() =>
                 {
                     digest(&observed.start_identity)?;
-                    let commit = auth
-                        .with_current(credential, || {
-                            repo.observe_running(
-                                lease.identity,
-                                &ContainerRunningObservation {
-                                    opaque_engine_key: &lease.opaque_engine_key,
-                                    start_identity: &observed.start_identity,
-                                    image_sha256: &lease.effective_image_sha256,
-                                    provider_contract_sha256: &target.spec.provider_contract_sha256,
-                                },
-                                now_ms,
-                            )
-                        })
-                        .ok_or_else(unavailable)?;
+                    let commit = repo.observe_running(
+                        lease.identity,
+                        &ContainerRunningObservation {
+                            opaque_engine_key: &lease.opaque_engine_key,
+                            start_identity: &observed.start_identity,
+                            image_sha256: &lease.effective_image_sha256,
+                            provider_contract_sha256: &target.spec.provider_contract_sha256,
+                        },
+                        now_ms,
+                    );
                     if commit.is_err() {
-                        auth.with_current(credential, || {
-                            repo.mark_lost(lease.identity, &lease.opaque_engine_key, now_ms)
-                        })
-                        .ok_or_else(unavailable)??;
+                        repo.mark_lost(lease.identity, &lease.opaque_engine_key, now_ms)?;
                         return Err(unavailable());
                     }
                 }
                 _ => {
-                    auth.with_current(credential, || {
-                        repo.mark_lost(lease.identity, &lease.opaque_engine_key, now_ms)
-                    })
-                    .ok_or_else(unavailable)??;
+                    repo.mark_lost(lease.identity, &lease.opaque_engine_key, now_ms)?;
                 }
             }
         }
         let lease = repo.lease(body.instance_id, lease.identity)?;
         let credentials = self
-            .credentials_for_generation(&lease.opaque_engine_key, auth, credential)
+            .credentials_for_generation(&lease.opaque_engine_key, generation)
             .await?;
         let options = self.start_options(&lease)?;
         let inspection = ContainerInspection {
@@ -355,8 +334,6 @@ impl ContainerService {
         &self,
         request: &StopRequest,
         now_ms: i64,
-        auth: &GenerationAuthRegistry,
-        credential: &GenerationCredential,
     ) -> Result<(), PlatformError> {
         let repo = ContainerAuthority::new(self.storage.db());
         let lease = repo.lease(self.instance_id(), request.identity())?;
@@ -364,10 +341,7 @@ impl ContainerService {
             return Err(unavailable());
         }
         let authority = self.request_authority(request)?;
-        auth.with_current(credential, || {
-            repo.begin_authorized_stop(&authority, lease.identity, &lease.opaque_engine_key, now_ms)
-        })
-        .ok_or_else(unavailable)?
+        repo.begin_authorized_stop(&authority, lease.identity, &lease.opaque_engine_key, now_ms)
     }
 
     fn request_authority(
@@ -407,36 +381,28 @@ impl ContainerService {
         &self,
         request: &StopRequest,
         now_ms: i64,
-        auth: &GenerationAuthRegistry,
-        credential: &GenerationCredential,
     ) -> Result<(), PlatformError> {
         let repo = ContainerAuthority::new(self.storage.db());
-        self.begin_stop(request, now_ms, auth, credential)?;
+        self.begin_stop(request, now_ms)?;
         let lease = repo.lease(self.instance_id(), request.identity())?;
         if lease.state == ContainerLeaseState::Stopped {
             return Ok(());
         }
         if self.terminate_lease(&lease, None).await.is_err() {
-            auth.with_current(credential, || {
-                repo.mark_lost(lease.identity, &lease.opaque_engine_key, now_ms)
-            })
-            .ok_or_else(unavailable)??;
+            repo.mark_lost(lease.identity, &lease.opaque_engine_key, now_ms)?;
             return Err(unavailable());
         }
-        auth.with_current(credential, || {
-            repo.finish_stopped(
-                lease.identity,
-                &ContainerTermination {
-                    opaque_engine_key: &lease.opaque_engine_key,
-                    start_identity: lease.start_identity.as_deref(),
-                    terminated: true,
-                    cleanup_complete: true,
-                    late_operations_fenced: true,
-                },
-                now_ms,
-            )
-        })
-        .ok_or_else(unavailable)?
+        repo.finish_stopped(
+            lease.identity,
+            &ContainerTermination {
+                opaque_engine_key: &lease.opaque_engine_key,
+                start_identity: lease.start_identity.as_deref(),
+                terminated: true,
+                cleanup_complete: true,
+                late_operations_fenced: true,
+            },
+            now_ms,
+        )
     }
 }
 

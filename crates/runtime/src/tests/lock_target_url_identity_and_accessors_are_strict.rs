@@ -42,10 +42,6 @@ fn lock_target_url_identity_and_accessors_are_strict() {
     assert_eq!(name, host_target());
     let debug = format!("{target:?}");
     assert!(debug.contains(&target.archive_name));
-    assert_eq!(
-        RuntimeLock::token_placeholder(),
-        "__OPEN_COMPUTE_INTERNAL_TOKEN__"
-    );
 
     let dir = TempDir::new().unwrap();
     assert_eq!(

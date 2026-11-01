@@ -564,6 +564,31 @@ export default {
       }),
     );
     const unreachable = unreachableResults.filter(Boolean).length;
+    const unixResults = await Promise.all(
+      JSON.parse(env.INTERNAL_SOCKETS_JSON).flatMap((path) => [
+        (async () => {
+          try {
+            await fetch(`unix:${path}`, { signal: AbortSignal.timeout(1000) });
+            return false;
+          } catch {
+            return true;
+          }
+        })(),
+        (async () => {
+          let socket;
+          try {
+            socket = socketConnect(`unix:${path}`);
+            await deadline(socket.opened, "tenant Unix socket", 1000);
+            return false;
+          } catch {
+            return true;
+          } finally {
+            await socket?.close().catch(() => undefined);
+          }
+        })(),
+      ]),
+    );
+    const unixDenied = unixResults.filter(Boolean).length;
     const ctxExports = await loopbackProbe(
       ctx.exports.SocketService,
       "ctx.exports",
@@ -571,7 +596,13 @@ export default {
     const rawTcp = env.RAW_TCP_CONFIG_JSON
       ? await rawTcpMatrix(JSON.parse(env.RAW_TCP_CONFIG_JSON))
       : null;
-    return Response.json({ allowed, unreachable, ctxExports, rawTcp });
+    return Response.json({
+      allowed,
+      unreachable,
+      unixDenied,
+      ctxExports,
+      rawTcp,
+    });
   },
 
   async queue(batch, env) {

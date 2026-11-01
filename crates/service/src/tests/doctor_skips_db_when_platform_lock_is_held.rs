@@ -10,7 +10,13 @@ async fn doctor_skips_db_when_platform_lock_is_held() {
     )
     .expect("hold lock");
     let before = content_snapshot(&loaded.config.data.path);
-    let report = doctor_report(&loaded, DoctorMode::Full, None).await;
+    let report = doctor_report(
+        &loaded,
+        DoctorMode::Full,
+        crate::instance_registry::ServiceScope::User,
+        None,
+    )
+    .await;
     assert_eq!(check(&report, "lock").status, CheckStatus::Failed);
     assert_eq!(check(&report, "lock").code, Some("DATA_DIR_IN_USE"));
     assert_eq!(check(&report, "sqlite").status, CheckStatus::Skipped);

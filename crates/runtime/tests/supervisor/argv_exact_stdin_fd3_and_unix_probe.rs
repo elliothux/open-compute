@@ -1,7 +1,7 @@
 use super::*;
 
 pub(super) async fn run() {
-    let dir = TempDir::new().unwrap();
+    let dir = TempDir::new_in("/tmp").unwrap();
     let runtime = verified(dir.path()).await;
     let argv_path = dir.path().join("argv.json");
     let stdin_path = dir.path().join("stdin.bin");
@@ -20,7 +20,6 @@ pub(super) async fn run() {
         },
         Vec::new(),
         Vec::new(),
-        Vec::new(),
     );
     sup.start();
     let snap = wait_state(&sup, SupervisorState::Running).await;
@@ -31,13 +30,9 @@ pub(super) async fn run() {
     let joined = argv.join(" ");
     assert!(!joined.contains("token"));
     let stdin = fs::read(&stdin_path).unwrap();
-    assert!(stdin.windows(5).any(|w| w == b"token"));
-    let port = snap.listen_port.expect("port");
-    probe_ready_with_raw_token(port, "00".repeat(32).as_str(), Duration::from_secs(1))
-        .await
-        .expect_err("wrong token must fail closed");
-    let fp = snap.token_fingerprint.clone().unwrap();
-    assert_eq!(fp.len(), 16);
+    assert!(!stdin.windows(5).any(|w| w == b"token"));
+    let socket = snap.ingress_socket.as_ref().expect("socket");
+    probe_ready(socket, Duration::from_secs(1)).await.unwrap();
     sup.shutdown().await;
     wait_reaped(snap.pid.unwrap(), Duration::from_secs(2)).unwrap();
 }

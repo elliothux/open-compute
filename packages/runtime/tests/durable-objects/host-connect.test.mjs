@@ -13,7 +13,7 @@ const shared = moduleUrl(`
   export const snapshotWorkerCode = () => ({});
   export const tenantGlobalOutbound = () => null;
   export const currentStartupGeneration = () => 'generation';
-  export const TOKEN_HEADER = 'x-open-compute-internal-token';
+
 `);
 const protocol = moduleUrl(
   await compileRuntime("durable-objects/host-protocol.ts", {

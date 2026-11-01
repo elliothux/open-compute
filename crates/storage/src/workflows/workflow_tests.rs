@@ -523,7 +523,10 @@ fn workflow_binding_namespace_hash_and_catalog_reachability() {
         .code(),
         ErrorCode::WorkflowBindingStale
     );
+    repo.verify_catalog().unwrap();
     repo.delete(account, definition.id, 5).unwrap();
+    repo.verify_catalog().unwrap();
+    storage.db().migrate(&SystemClock).unwrap();
 }
 
 #[test]
@@ -560,4 +563,91 @@ fn workflow_rejection_does_not_replace_current_version_or_enable_unvalidated_def
     );
     assert_eq!(repo.retire_unused_versions(1, 4).unwrap(), 1);
     repo.delete(account, definition.id, 5).unwrap();
+}
+
+#[test]
+fn deleting_workflow_owner_leaves_an_inactive_valid_definition() {
+    let (_temp, storage, version) = setup();
+    let repository = WorkflowRepository::new(storage.db());
+    let account = storage.identity().instance_id;
+    let definition = ready(&storage, version);
+    let target = repository
+        .version(account, definition.current_version_id.unwrap())
+        .unwrap()
+        .target;
+    WorkerRepository::new(storage.db())
+        .delete_worker(
+            account,
+            target.worker_id,
+            &[version],
+            RequestId::generate(),
+            4,
+        )
+        .unwrap();
+    let inactive = repository.definition(account, definition.id).unwrap();
+    assert_eq!(inactive.availability, ResourceAvailability::Unavailable);
+    assert_eq!(
+        inactive.availability_code.as_deref(),
+        Some("WORKER_DELETED")
+    );
+    assert_eq!(
+        repository
+            .reserve_instance(
+                account,
+                definition.id,
+                WorkflowOperationId::generate(),
+                Some("new"),
+                &WorkflowsConfig::default(),
+                5
+            )
+            .unwrap_err()
+            .code(),
+        ErrorCode::WorkflowNotReady
+    );
+    repository.verify_catalog().unwrap();
+    storage.db().migrate(&SystemClock).unwrap();
+    let replacement = WorkerRepository::new(storage.db())
+        .create_worker(
+            account,
+            "replacement-workflow-owner",
+            RequestId::generate(),
+            5,
+            1_000_000,
+        )
+        .unwrap()
+        .0;
+    let replacement_version = staging(&storage, replacement.id);
+    let workers = WorkerRepository::new(storage.db());
+    workers.begin_validation(replacement_version).unwrap();
+    workers.mark_ready(replacement_version, 6).unwrap();
+    let rebound = repository
+        .stage_version(account, definition.id, replacement_version, "Orders", 7)
+        .unwrap();
+    repository
+        .finish_version(account, rebound.target.workflow_version_id, true, 8)
+        .unwrap();
+    repository.verify_catalog().unwrap();
+    assert_eq!(
+        repository
+            .definition(account, definition.id)
+            .unwrap()
+            .availability,
+        ResourceAvailability::Healthy
+    );
+    repository
+        .begin_definition_delete(account, &definition.name, 9)
+        .unwrap();
+    workers
+        .delete_worker(
+            account,
+            replacement.id,
+            &[replacement_version],
+            RequestId::generate(),
+            10,
+        )
+        .unwrap();
+    repository.verify_catalog().unwrap();
+    storage.db().migrate(&SystemClock).unwrap();
+    repository.delete(account, definition.id, 11).unwrap();
+    repository.verify_catalog().unwrap();
 }

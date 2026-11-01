@@ -1,4 +1,4 @@
-//! Authenticated, bounded native custom-event HTTP transport.
+//! Bounded native custom-event HTTP transport over the private Unix socket.
 
 use super::*;
 
@@ -65,12 +65,10 @@ impl WorkerdTransport {
         target: &DispatchTarget,
         body: &impl Serialize,
         max_response: usize,
-        expected_generation: Option<&open_compute_runtime::GenerationCredential>,
-    ) -> Result<(T, open_compute_runtime::GenerationCredential), PlatformError> {
+        expected_generation: Option<&open_compute_core::StartupId>,
+    ) -> Result<(T, open_compute_core::StartupId), PlatformError> {
         let endpoint = self.endpoint()?;
-        let (port, credential) = (endpoint.port, endpoint.credential);
-        if expected_generation
-            .is_some_and(|expected| self.auth.with_current(expected, || ()).is_none())
+        if expected_generation.is_some_and(|expected| self.current_generation() != Some(*expected))
         {
             return Err(runtime_unavailable());
         }
@@ -80,8 +78,7 @@ impl WorkerdTransport {
         let bytes = serde_json::to_vec(body).map_err(|_| custom_event_protocol_error())?;
         let mut request = hyper::Request::builder()
             .method(Method::POST)
-            .uri(format!("http://127.0.0.1:{port}{path}"))
-            .header(TOKEN_HEADER, credential.expose())
+            .uri(format!("http://runtime{path}"))
             .header(header::CONTENT_TYPE, "application/json")
             .header("x-open-compute-instance-id", target.instance_id.to_string())
             .header("x-open-compute-worker-id", target.worker_id.to_string())
@@ -102,14 +99,17 @@ impl WorkerdTransport {
         let request = request
             .body(Body::from(bytes))
             .map_err(|_| custom_event_protocol_error())?;
-        if !matches!(path, "/internal/validate-workflow")
-            && let Some(pins) = &self.version_pins
-        {
-            pins.retain_until_restart(target.version_id)?;
+        if let Some(pins) = &self.version_pins {
+            match path {
+                "/internal/workflow" => {
+                    pins.retain_until_drain(target.version_id, target.request_id)?;
+                }
+                "/internal/validate-workflow" => {}
+                _ => pins.retain_until_restart(target.version_id)?,
+            }
         }
         let response = self
-            .body_client
-            .request(request)
+            .request(&endpoint.socket_path, request)
             .await
             .map_err(|_| runtime_unavailable())?;
         if !response.status().is_success() {
@@ -144,9 +144,9 @@ impl WorkerdTransport {
             .await
             .map_err(|_| custom_event_protocol_error())?;
         let value = serde_json::from_slice(&bytes).map_err(|_| custom_event_protocol_error())?;
-        if self.auth.with_current(&credential, || ()).is_none() {
+        if self.current_generation() != endpoint.startup_id {
             return Err(runtime_unavailable());
         }
-        Ok((value, credential))
+        Ok((value, endpoint.startup_id.ok_or_else(runtime_unavailable)?))
     }
 }

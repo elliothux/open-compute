@@ -1,10 +1,6 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
 import type { BindingEnv } from "../bindings/protocol.js";
-import {
-  BINDING_TOKEN_HEADER,
-  bindingError,
-  currentStartupGeneration,
-} from "../loader/shared.js";
+import { bindingError } from "../loader/shared.js";
 
 /** Immutable Browser binding identity; internal backend credentials remain in BindingEnv. */
 export interface BrowserTransportProps {
@@ -39,11 +35,7 @@ export class BrowserTransport extends WorkerEntrypoint<
     for (const name of ["content-type", "upgrade", "sec-websocket-protocol"])
       if (request.headers.has(name))
         headers.set(name, request.headers.get(name)!);
-    headers.set(BINDING_TOKEN_HEADER, this.env.BINDING_BACKEND_TOKEN);
-    headers.set(
-      "x-open-compute-startup-generation",
-      currentStartupGeneration(),
-    );
+
     headers.set("x-open-compute-instance-id", props.instanceId);
     headers.set("x-open-compute-worker-id", props.workerId);
     headers.set("x-open-compute-version-id", props.versionId);

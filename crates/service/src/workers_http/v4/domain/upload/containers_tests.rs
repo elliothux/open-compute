@@ -5,7 +5,6 @@ use crate::workers_http::v4::multipart::parse_worker_upload;
 use axum::body::Body;
 use axum::extract::{FromRequest as _, Multipart};
 use axum::http::{Request, header};
-use open_compute_runtime::GenerationAuthRegistry;
 use open_compute_workers::{BundleLimits, CanonicalBundle, ModuleInput, ModuleType, VersionPins};
 use serde_json::{Value, json};
 use std::time::Duration;
@@ -19,7 +18,7 @@ fn api(fixture: &Fixture) -> WorkerApiState {
     WorkerApiState::new(
         Arc::clone(&fixture.service.storage),
         fixture.service.artifacts.clone(),
-        WorkerdTransport::for_test_endpoint(GenerationAuthRegistry::new(), 9),
+        WorkerdTransport::for_test_endpoint(std::path::Path::new("/tmp/missing.sock")),
         VersionPins::new(),
         BundleLimits::default(),
         Duration::from_millis(10),

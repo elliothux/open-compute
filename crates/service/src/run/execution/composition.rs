@@ -15,15 +15,12 @@ pub(super) struct ComposedPlatform {
     pub(super) images: Arc<ImageBindingService>,
     pub(super) browser: Option<Arc<crate::browser::BrowserService>>,
     pub(super) document_parser: Arc<DocumentParserBindingService>,
-    pub(super) generation_auth: GenerationAuthRegistry,
-    pub(super) binding_generation_auth: GenerationAuthRegistry,
-    pub(super) observability_generation_auth: GenerationAuthRegistry,
-    pub(super) runtime_source_listener: tokio::net::TcpListener,
-    pub(super) runtime_source_addr: SocketAddr,
-    pub(super) binding_backend_listener: tokio::net::TcpListener,
-    pub(super) binding_backend_addr: SocketAddr,
-    pub(super) observability_backend_listener: tokio::net::TcpListener,
-    pub(super) observability_backend_addr: SocketAddr,
+    pub(super) runtime_source_listener: http::PrivateUnixListener,
+    pub(super) runtime_source_addr: std::path::PathBuf,
+    pub(super) binding_backend_listener: http::PrivateUnixListener,
+    pub(super) binding_backend_addr: std::path::PathBuf,
+    pub(super) observability_backend_listener: http::PrivateUnixListener,
+    pub(super) observability_backend_addr: std::path::PathBuf,
     pub(super) compiler: StaticConfigCompiler,
     pub(super) maintenance_backend: open_compute_artifacts::ObjectBackend,
     pub(super) maintenance_object_storage: open_compute_core::ObjectStorageConfig,
@@ -279,9 +276,6 @@ pub(super) async fn compose(prepared: PreparedPlatform) -> Result<ComposedPlatfo
         response_cache_manager,
         images,
         document_parser,
-        generation_auth,
-        binding_generation_auth,
-        observability_generation_auth,
         runtime_source_listener,
         runtime_source_addr,
         binding_backend_listener,
@@ -333,7 +327,7 @@ pub(super) async fn compose(prepared: PreparedPlatform) -> Result<ComposedPlatfo
         redactor.clone(),
     )?;
     let supervisor_handle: Arc<Mutex<Option<Arc<WorkerdSupervisor>>>> = Arc::new(Mutex::new(None));
-    let transport = WorkerdTransport::new(generation_auth.clone(), supervisor_handle.clone())
+    let transport = WorkerdTransport::new(supervisor_handle.clone())
         .with_version_pins(version_pins.clone())
         .with_service_invocations(service_invocations.as_ref().clone());
     let browser = compose_browser(
@@ -514,9 +508,6 @@ pub(super) async fn compose(prepared: PreparedPlatform) -> Result<ComposedPlatfo
         response_cache_manager,
         images,
         document_parser,
-        generation_auth,
-        binding_generation_auth,
-        observability_generation_auth,
         runtime_source_listener,
         runtime_source_addr,
         binding_backend_listener,

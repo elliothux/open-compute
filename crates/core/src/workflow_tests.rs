@@ -305,7 +305,7 @@ fn workflow_retention_freezes_defaults_and_checked_expiry() {
     for invalid in [
         json!(null),
         json!({"ttl":"1 hour"}),
-        json!({"successRetention":3599999}),
+        json!({"successRetention":-1}),
         json!({"errorRetention":"366 days"}),
     ] {
         assert!(
@@ -332,6 +332,9 @@ fn workflow_retention_freezes_defaults_and_checked_expiry() {
         serde_json::from_value::<WorkflowsConfig>(encoded).unwrap(),
         config
     );
-    config.default_retention.success_retention_ms = 1;
+    // Cloudflare documents no retention minimum.
+    config.default_retention.success_retention_ms = 3_600;
+    config.validate().unwrap();
+    config.default_retention.success_retention_ms = WORKFLOW_MAX_DURATION_MS + 1;
     assert!(config.validate().is_err());
 }

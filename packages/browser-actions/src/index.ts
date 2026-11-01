@@ -13,8 +13,6 @@ function failure(message: string, status: number): Response {
 
 interface Env {
   BINDING_BACKEND: BrowserWorker;
-  BINDING_BACKEND_TOKEN: string;
-  INTERNAL_TOKEN: string;
 }
 
 function backend(env: Env, sessionId: string): BrowserWorker {
@@ -27,8 +25,6 @@ function backend(env: Env, sessionId: string): BrowserWorker {
       const headers = new Headers();
       if (request.headers.get("upgrade")?.toLowerCase() === "websocket")
         headers.set("upgrade", "websocket");
-      headers.set("x-open-compute-binding-token", env.BINDING_BACKEND_TOKEN);
-      headers.set("x-open-compute-startup-generation", requestGeneration);
       return env.BINDING_BACKEND.fetch(
         new Request(
           `http://binding-backend/internal/browser-actions/v1/${sessionId}`,
@@ -43,8 +39,6 @@ function backend(env: Env, sessionId: string): BrowserWorker {
     },
   };
 }
-// The system Worker has one immutable startup generation, set from trusted ingress only.
-let requestGeneration = "";
 
 async function accessibility(page: Page, request: ActionRequest) {
   const root = request.options.root
@@ -71,8 +65,6 @@ async function markdown(page: Page, env: Env, sessionId: string) {
       method: "POST",
       headers: {
         "content-type": "text/html",
-        "x-open-compute-binding-token": env.BINDING_BACKEND_TOKEN,
-        "x-open-compute-startup-generation": requestGeneration,
       },
       body: await page.content(),
     },
@@ -194,8 +186,6 @@ async function output(
           method: "POST",
           headers: {
             "content-type": "application/json",
-            "x-open-compute-binding-token": env.BINDING_BACKEND_TOKEN,
-            "x-open-compute-startup-generation": requestGeneration,
           },
           body: JSON.stringify({
             html: await page.content(),
@@ -244,12 +234,7 @@ async function output(
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    if (
-      request.method !== "POST" ||
-      request.headers.get("x-open-compute-internal-token") !==
-        env.INTERNAL_TOKEN
-    )
-      return new Response(null, { status: 404 });
+    if (request.method !== "POST") return new Response(null, { status: 404 });
     const started = performance.now();
     let payload: unknown;
     try {
@@ -258,14 +243,7 @@ export default {
       return failure("BROWSER_INPUT_INVALID", 400);
     }
     const parsed = actionRequest.safeParse(payload);
-    const generation = request.headers.get("x-open-compute-startup-generation");
-    if (
-      !parsed.success ||
-      generation !== env.INTERNAL_TOKEN ||
-      (requestGeneration && requestGeneration !== generation)
-    )
-      return failure("BROWSER_INPUT_INVALID", 400);
-    requestGeneration = generation;
+    if (!parsed.success) return failure("BROWSER_INPUT_INVALID", 400);
     const action = parsed.data;
     if (action.validateOnly) return new Response(null, { status: 204 });
     const ttl = action.options.cacheTTL ?? 5;

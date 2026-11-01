@@ -33,7 +33,6 @@ use open_compute_core::{
     ComponentName, ComponentState, ErrorCode, MetricsConfig, PlatformStatus, ReadinessReason,
     SchedulerKind, SchedulerPoolState, SecretString,
 };
-use open_compute_runtime::GenerationAuthRegistry;
 use open_compute_runtime::supervisor::{SupervisorSnapshot, SupervisorState};
 use open_compute_storage::data_dir::DataDir;
 use open_compute_storage::scheduler::{SchedulerStore, SchedulerSummary, inspect_scheduler_db};
@@ -197,8 +196,8 @@ impl SnapInit for SupervisorSnapshot {
             config_digest: String::new(),
             startup_id: None,
             last_suspicion: None,
-            token_fingerprint: None,
-            listen_port: None,
+
+            ingress_socket: None,
         }
     }
 }
@@ -407,8 +406,7 @@ pub(crate) async fn initialized_worker_http_fixture() -> (
         loaded.config.cache.max_artifact_bytes,
     )
     .unwrap();
-    let transport =
-        WorkerdTransport::new(GenerationAuthRegistry::new(), Arc::new(Mutex::new(None)));
+    let transport = WorkerdTransport::new(Arc::new(Mutex::new(None)));
     let observability_store = Arc::new(
         open_compute_storage::observability::ObservabilityStore::open(
             &storage.data_dir().ensure_observability_db().unwrap(),

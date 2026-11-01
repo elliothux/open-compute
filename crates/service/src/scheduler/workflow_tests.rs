@@ -1,8 +1,7 @@
 use super::*;
 use crate::workflow_http::tests::fixture;
 use axum::{Json, Router, routing::post};
-use open_compute_core::SecretString;
-use open_compute_runtime::GenerationAuthRegistry;
+
 use open_compute_storage::scheduler::WorkflowState;
 use serde_json::json;
 
@@ -19,8 +18,10 @@ async fn workflow_metrics_follow_durable_replay_verdict_not_transport_success() 
     repository
         .finish_version(f.account, version.target.workflow_version_id, true, 2)
         .unwrap();
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = listener.local_addr().unwrap().port();
+    let listener_dir = tempfile::tempdir_in("/tmp").unwrap();
+    let listener_path = listener_dir.path().join("runtime.sock");
+    let listener = tokio::net::UnixListener::bind(&listener_path).unwrap();
+    let port = listener_path.clone();
     let (stop, stopped) = tokio::sync::oneshot::channel();
     let server = tokio::spawn(async move {
         axum::serve(
@@ -40,8 +41,7 @@ async fn workflow_metrics_follow_durable_replay_verdict_not_transport_success() 
         .await
         .unwrap();
     });
-    let auth = GenerationAuthRegistry::new();
-    auth.activate_for_test(SecretString::new("aa".repeat(32)));
+
     let config = open_compute_core::WorkflowsConfig::default();
     let controller = WorkflowController::new(&f.storage, &f.scheduler, &config);
     controller
@@ -67,7 +67,7 @@ async fn workflow_metrics_follow_durable_replay_verdict_not_transport_success() 
         SchedulerService::new(
             f.scheduler.clone(),
             f.storage.clone(),
-            WorkerdTransport::for_test_endpoint(auth, port),
+            WorkerdTransport::for_test_endpoint(&port),
             Default::default(),
             config,
             Arc::new(open_compute_core::DeterministicSchedulerClock::new(12)),
@@ -126,20 +126,21 @@ async fn quarantined_generation_stops_claims_even_after_operator_resume() {
             )
             .unwrap();
     }
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = listener.local_addr().unwrap().port();
+    let listener_dir = tempfile::tempdir_in("/tmp").unwrap();
+    let listener_path = listener_dir.path().join("runtime.sock");
+    let listener = tokio::net::UnixListener::bind(&listener_path).unwrap();
+    let port = listener_path.clone();
     let (stop, stopped) = tokio::sync::oneshot::channel();
     let server = tokio::spawn(async move {
         axum::serve(listener, Router::new().route("/internal/workflow", post(|| async {
             Json(json!({"result":{"outcome":"unknown","finalOrdinal":0},"loaderOutcome":"warm","drainIncomplete":true}))
         }))).with_graceful_shutdown(async {let _ = stopped.await;}).await.unwrap();
     });
-    let auth = GenerationAuthRegistry::new();
-    auth.activate_for_test(SecretString::new("11".repeat(32)));
+
     let service = Arc::new(SchedulerService::new(
         f.scheduler.clone(),
         f.storage.clone(),
-        WorkerdTransport::for_test_endpoint(auth.clone(), port),
+        WorkerdTransport::for_test_endpoint(&port),
         Default::default(),
         config,
         Arc::new(open_compute_core::DeterministicSchedulerClock::new(12)),
@@ -160,7 +161,12 @@ async fn quarantined_generation_stops_claims_even_after_operator_resume() {
         );
         assert_eq!(f.scheduler.inspect_workflows(12).unwrap().queued, 1);
     }
-    auth.activate_for_test(SecretString::new("22".repeat(32)));
+
+    let mut rotated = service.transport.clone();
+    rotated.test_generation = Some(open_compute_core::StartupId::generate());
+    rotated.ensure_workflow_admission().unwrap();
+    let mut service = Arc::try_unwrap(service).ok().unwrap();
+    service.transport = rotated;
     assert_eq!(service.claim_workflows(1).await.unwrap().len(), 1);
     stop.send(()).unwrap();
     server.await.unwrap();

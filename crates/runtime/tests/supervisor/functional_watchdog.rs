@@ -5,7 +5,7 @@ use super::*;
 pub(crate) mod suspicion_healthy_probe_does_not_restart {
     use super::*;
     pub(crate) async fn run() {
-        let dir = TempDir::new().unwrap();
+        let dir = TempDir::new_in("/tmp").unwrap();
         let runtime = verified(dir.path()).await;
         let data = dir.path().join("d");
         fs::create_dir(&data).unwrap();
@@ -20,7 +20,6 @@ pub(crate) mod suspicion_healthy_probe_does_not_restart {
                 jitter: Arc::new(SequenceJitter::new(vec![0])),
                 lease_path: None,
             },
-            Vec::new(),
             Vec::new(),
             Vec::new(),
         );
@@ -58,7 +57,7 @@ pub(crate) mod suspicion_healthy_probe_does_not_restart {
 pub(crate) mod stalled_event_loop_restarts_once {
     use super::*;
     pub(crate) async fn run() {
-        let dir = TempDir::new().unwrap();
+        let dir = TempDir::new_in("/tmp").unwrap();
         let runtime = verified(dir.path()).await;
         let data = dir.path().join("d");
         fs::create_dir(&data).unwrap();
@@ -73,7 +72,6 @@ pub(crate) mod stalled_event_loop_restarts_once {
                 jitter: Arc::new(SequenceJitter::new(vec![0, 0])),
                 lease_path: None,
             },
-            Vec::new(),
             Vec::new(),
             Vec::new(),
         );
@@ -130,7 +128,7 @@ pub(crate) mod stalled_event_loop_restarts_once {
 pub(crate) mod stale_suspicion_is_dropped {
     use super::*;
     pub(crate) async fn run() {
-        let dir = TempDir::new().unwrap();
+        let dir = TempDir::new_in("/tmp").unwrap();
         let runtime = verified(dir.path()).await;
         let data = dir.path().join("d");
         fs::create_dir(&data).unwrap();
@@ -145,7 +143,6 @@ pub(crate) mod stale_suspicion_is_dropped {
                 jitter: Arc::new(SequenceJitter::new(vec![0])),
                 lease_path: None,
             },
-            Vec::new(),
             Vec::new(),
             Vec::new(),
         );
@@ -173,7 +170,7 @@ pub(crate) mod drain_lifecycle {
     use super::*;
 
     pub(crate) async fn run() {
-        let dir = TempDir::new().unwrap();
+        let dir = TempDir::new_in("/tmp").unwrap();
         let runtime = verified(dir.path()).await;
         let data = dir.path().join("d");
         fs::create_dir(&data).unwrap();
@@ -188,7 +185,6 @@ pub(crate) mod drain_lifecycle {
                 jitter: Arc::new(SequenceJitter::new(vec![0])),
                 lease_path: None,
             },
-            Vec::new(),
             Vec::new(),
             Vec::new(),
         );
@@ -209,7 +205,7 @@ pub(crate) mod drain_lifecycle {
     }
 
     pub(crate) async fn run_during_startup() {
-        let dir = TempDir::new().unwrap();
+        let dir = TempDir::new_in("/tmp").unwrap();
         let runtime = verified(dir.path()).await;
         let data = dir.path().join("d");
         fs::create_dir(&data).unwrap();
@@ -225,7 +221,6 @@ pub(crate) mod drain_lifecycle {
                 jitter: Arc::new(SequenceJitter::new(vec![0])),
                 lease_path: None,
             },
-            Vec::new(),
             Vec::new(),
             Vec::new(),
         );

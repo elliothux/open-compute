@@ -1,6 +1,6 @@
 //! Static workerd config compiler and on-disk cache.
 
-use crate::digest::digest_for_with_tokens_and_policy;
+use crate::digest::digest_for_with_policy;
 use crate::fsutil::{
     FILE_MODE, MAX_LOCK_BYTES, WorkDir, chmod, contained_in, create_dir_secure, fsync_dir,
     hex_sha256, open_dir, open_file, read_regular_file_bounded, remove_file_nofollow,
@@ -8,7 +8,7 @@ use crate::fsutil::{
 };
 use crate::process::assert_reaped;
 use crate::verify::VerifiedRuntime;
-use open_compute_core::{DurableObjectsConfig, ErrorCode, PlatformError, Redactor, SecretString};
+use open_compute_core::{DurableObjectsConfig, ErrorCode, PlatformError, Redactor};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
@@ -111,19 +111,15 @@ pub struct CompileRequest<'a> {
     pub runtime_data_dir: &'a Path,
     /// Platform release metadata mixed into the digest.
     pub platform: &'a PlatformReleaseMeta,
-    /// Fresh 256-bit hex internal token.
-    pub token: &'a SecretString,
-    /// Distinct fresh token scoped only to the private binding backend.
-    pub binding_token: &'a SecretString,
-    /// Distinct fresh token scoped only to the observability ingestion backend.
-    pub observability_token: &'a SecretString,
+    /// Absolute private Unix socket served by this config.
+    pub ingress_socket: &'a Path,
     /// Validated Durable Object policy rendered into private system-Worker bindings.
     pub durable_objects: DurableObjectsConfig,
     /// Qualified native Container provider, scoped to the runtime `DoHost` Worker.
     pub container_provider: Option<&'a crate::ContainerProviderConfig>,
     /// Compile deadline.
     pub deadline: Duration,
-    /// Redactor that already includes the token.
+    /// Redactor for compiler diagnostics.
     pub redactor: &'a Redactor,
 }
 
@@ -133,7 +129,6 @@ impl Debug for CompileRequest<'_> {
             .field("role", &self.role)
             .field("runtime", &self.runtime)
             .field("platform", &self.platform)
-            .field("token", &self.token)
             .finish_non_exhaustive()
     }
 }
@@ -144,6 +139,7 @@ pub struct CompiledConfig {
     digest: String,
     path: PathBuf,
     content_sha256: String,
+    ingress_socket: PathBuf,
 }
 
 impl Debug for CompiledConfig {
@@ -177,6 +173,11 @@ impl CompiledConfig {
     #[must_use]
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// Private ingress endpoint rendered into this config.
+    pub fn ingress_socket(&self) -> &Path {
+        &self.ingress_socket
     }
 
     /// Open the compiled config and check its content digest.
@@ -234,6 +235,7 @@ impl CompiledConfig {
             digest: digest.to_owned(),
             path,
             content_sha256,
+            ingress_socket: dir.join("ingress.sock"),
         })
     }
 }
@@ -253,14 +255,12 @@ pub async fn compile_static_config(
             "lock path contents do not match the verified lock identity",
         ));
     }
-    let (digest, rendered, workers) = digest_for_with_tokens_and_policy(
+    let (digest, rendered, workers) = digest_for_with_policy(
         request.assets_dir,
         &lock_bytes,
         request.runtime,
         request.platform,
-        request.token,
-        request.binding_token,
-        request.observability_token,
+        request.ingress_socket,
         &request.durable_objects,
         request.container_provider,
         request.role,
@@ -281,6 +281,7 @@ pub async fn compile_static_config(
                 digest,
                 path: dest,
                 content_sha256,
+                ingress_socket: request.ingress_socket.to_owned(),
             });
         }
     }
@@ -395,6 +396,7 @@ async fn compile_into(
             digest: digest.to_owned(),
             path: dest.to_path_buf(),
             content_sha256: existing,
+            ingress_socket: request.ingress_socket.to_owned(),
         });
     }
 
@@ -409,6 +411,7 @@ async fn compile_into(
                 digest: digest.to_owned(),
                 path: dest.to_path_buf(),
                 content_sha256: content_hash,
+                ingress_socket: request.ingress_socket.to_owned(),
             })
         }
         Err(_) => match wait_reuse_winner(dest, digest).await {
@@ -417,6 +420,7 @@ async fn compile_into(
                 digest: digest.to_owned(),
                 path: dest.to_path_buf(),
                 content_sha256: existing,
+                ingress_socket: request.ingress_socket.to_owned(),
             }),
             Err(err) => Err(err),
         },

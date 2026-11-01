@@ -2,8 +2,10 @@ use super::*;
 
 #[tokio::test]
 async fn tenant_body_limits_reject_declared_and_streamed_overflow_as_413() {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = listener.local_addr().unwrap().port();
+    let listener_dir = tempfile::tempdir_in("/tmp").unwrap();
+    let listener_path = listener_dir.path().join("runtime.sock");
+    let listener = tokio::net::UnixListener::bind(&listener_path).unwrap();
+    let port = listener_path.clone();
     let app = Router::new().fallback(|request: Request| async move {
         match to_bytes(request.into_body(), 1024).await {
             Ok(bytes) => bytes.into_response(),
@@ -19,9 +21,8 @@ async fn tenant_body_limits_reject_declared_and_streamed_overflow_as_413() {
             .await
             .unwrap();
     });
-    let auth = GenerationAuthRegistry::new();
-    auth.activate_for_test(open_compute_core::SecretString::new("aa".repeat(32)));
-    let transport = WorkerdTransport::for_test_endpoint(auth, port);
+
+    let transport = WorkerdTransport::for_test_endpoint(&port);
     assert_eq!(transport.max_request_body, 100_000_000);
     let transport = transport.with_test_request_body_limit(16);
     let target = DispatchTarget {
@@ -76,27 +77,30 @@ async fn tenant_body_limits_reject_declared_and_streamed_overflow_as_413() {
 
 #[tokio::test]
 async fn body_dispatch_does_not_reuse_connections_or_buffer_input() {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = listener.local_addr().unwrap().port();
-    let app = Router::new().fallback(
-        |axum::extract::ConnectInfo(peer): axum::extract::ConnectInfo<SocketAddr>,
-         _request: Request| async move { peer.to_string() },
-    );
+    let listener_dir = tempfile::tempdir_in("/tmp").unwrap();
+    let listener_path = listener_dir.path().join("runtime.sock");
+    let listener = tokio::net::UnixListener::bind(&listener_path).unwrap();
+    let port = listener_path.clone();
+    let connections = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let app = Router::new().fallback(move || {
+        let connections = connections.clone();
+        async move {
+            connections
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                .to_string()
+        }
+    });
     let (shutdown, receiver) = tokio::sync::oneshot::channel();
     let server = tokio::spawn(async move {
-        axum::serve(
-            listener,
-            app.into_make_service_with_connect_info::<SocketAddr>(),
-        )
-        .with_graceful_shutdown(async move {
-            let _ = receiver.await;
-        })
-        .await
-        .unwrap();
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                let _ = receiver.await;
+            })
+            .await
+            .unwrap();
     });
-    let auth = GenerationAuthRegistry::new();
-    auth.activate_for_test(open_compute_core::SecretString::new("aa".repeat(32)));
-    let transport = WorkerdTransport::for_test_endpoint(auth, port);
+
+    let transport = WorkerdTransport::for_test_endpoint(&port);
     let target = DispatchTarget {
         instance_id: InstanceId::generate(),
         worker_id: WorkerId::generate(),
@@ -377,8 +381,7 @@ fn queue_and_scheduled_custom_event_protocols_are_bounded_and_strict() {
 #[tokio::test]
 async fn transport_and_source_helpers_fail_closed_without_a_generation() {
     let transport =
-        WorkerdTransport::new(GenerationAuthRegistry::new(), Arc::new(Mutex::new(None)))
-            .with_test_request_body_limit(0);
+        WorkerdTransport::new(Arc::new(Mutex::new(None))).with_test_request_body_limit(0);
     assert!(format!("{transport:?}").contains("WorkerdTransport"));
     let candidate = ValidationCandidate {
         instance_id: InstanceId::generate(),
@@ -478,6 +481,10 @@ async fn transport_and_source_helpers_fail_closed_without_a_generation() {
         assert_eq!(response.headers().get(ERROR_HEADER).unwrap(), code.as_str());
     }
 
-    let listener = bind_runtime_source().await.unwrap();
-    assert!(listener.local_addr().unwrap().ip().is_loopback());
+    let listener_dir = tempfile::tempdir_in("/tmp").unwrap();
+
+    let listener = bind_runtime_source(&listener_dir.path().join("backend.sock"))
+        .await
+        .unwrap();
+    assert!(listener.path().is_absolute());
 }

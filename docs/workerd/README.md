@@ -1,6 +1,6 @@
 # workerd 原生运行时方案
 
-当前待实施：[W4：workerd fork 收薄](w4-thin-fork.md)。该方案复核 W1/W2/W3、R3 与 P21 候选的全部差异，区分必要原生接口和可替代的平台策略；W4 尚未实施；当前 R24 formal pin 记录见下文。下文已有资格记录保留其原始输入与适用范围。
+当前待实施：[W4：workerd fork 收薄](w4-thin-fork.md)。该方案复核 W1/W2/W3、R3 与 P21 候选的全部差异，区分必要原生接口和可替代的平台策略；W4 尚未实施；当前 R25 formal pin 记录见下文。下文已有资格记录保留其原始输入与适用范围。
 
 W1 的逐 surface 复核见[兼容审查记录](../implemented/w1-worker-loader-compatibility-review.md)。
 
@@ -25,7 +25,10 @@ W2 通过请求限额、isolate 摘除和执行器自恢复三层机制消除失
 不要另建一份 workerd 实现、复制到其他目录，
 或为了匹配旧的测试二进制而重置这个 checkout。
 
-2026-10-30（UTC），正式 binary source 与源码 checkout 均固定 R24 `9de631551791218aed0c4cd570163cece3c00590`。
+2026-11-01（UTC），正式 binary source 与源码 checkout 均固定 R25 `2ff33d645813e1d6253f44ec312d75ee70153912`。
+R25 在 R24 上只增加一个补丁：macOS 上 Unix 对端在 accept 前已关闭时，`getsockopt` 返回 ENOTCONN；
+accept 改为报告未知对端凭据，不再让 listener 失败。固定源码的 owning 回归覆盖这一情形。
+删除条件：上游 kj-rs-io 的 `peer_credentials()` 容忍已断开对端的 ENOTCONN（[cloudflare/workerd#8122](https://github.com/cloudflare/workerd/issues/8122)）。
 R24 修复 KJ 对 HTTP/1.0 响应的默认连接关闭语义。
 没有显式 `Connection: keep-alive` 时，客户端不复用该连接。
 HTTP/1.1 和显式 keep-alive 的既有路径保留。
@@ -39,13 +42,13 @@ HTTP/1.1 和显式 keep-alive 的既有路径保留。
 | [workerd 上游 issue / PR 核验](../references/workerd-upstream.md) | 已合并能力、standalone 缺口、补丁范围与升级回归重点                                                                         |
 | fork origin                                                       | <https://github.com/elliothux/workerd>                                                                                      |
 | upstream 项目                                                     | <https://github.com/cloudflare/workerd>                                                                                     |
-| fork checkout HEAD                                                | `9de631551791218aed0c4cd570163cece3c00590`                                                                                  |
+| fork checkout HEAD                                                | `2ff33d645813e1d6253f44ec312d75ee70153912`                                                                                  |
 | upstream base                                                     | `d99bc6b777e35d72d71c2f1fe2fd1db53284528a`（上游 `main`，日期为 2026-09-30）                                                |
-| HEAD 提交说明                                                     | Honor HTTP/1.0 connection persistence in container tunnels                                                                  |
-| fork working tree                                                 | HEAD 相对上述上游基线领先 54 个提交；工作区干净                                                                             |
-| formal binary source tree                                         | `ce9a3090aeb254113c97a69795f69d5a2b01b370bac7ac066fec10ff594c44e6`（`sha256(git ls-tree -r <revision>)`，不是 Git tree ID） |
+| HEAD 提交说明                                                     | fix: report unknown credentials for a Unix peer gone before accept                                                          |
+| fork working tree                                                 | HEAD 相对上述上游基线领先 55 个提交；工作区干净                                                                             |
+| formal binary source tree                                         | `0bbd31dac02b63290a0cbe43eb140158ac69dfe7983fcd062bf81ae5121e32ab`（`sha256(git ls-tree -r <revision>)`，不是 Git tree ID） |
 | W3 runtime                                                        | `workerd 2026-09-30`；版本文本未变，摘要和 pin 已变                                                                         |
-| open-compute 当前正式 pin                                         | `v1.20260930.0-open-compute-r24.9de631551` / `9de631551791218aed0c4cd570163cece3c00590`                                     |
+| open-compute 当前正式 pin                                         | `v1.20260930.0-open-compute-r25.2ff33d645` / `2ff33d645813e1d6253f44ec312d75ee70153912`                                     |
 | 正式 pin authority                                                | [`packages/runtime/workerd.lock.json`](../../packages/runtime/workerd.lock.json)                                            |
 
 R24 保留 R23 的 Tokio readiness 修补、私有 Container 协议 v4 和原有 compatibility catalog。
@@ -86,6 +89,12 @@ git clone --recurse-submodules https://github.com/elliothux/open-compute.git
 
 P21 历史资格的运行时为正式 R4 pin，包含部署时原生 preparation、语言无关 binding construction/policy、Python Queue 单 batch 参数与 scheduled class handler 参数。内部 waitUntil observer 通过既有 IoContext/AsyncContextFrame 登记原 promise；原生 DO state 与 handler 继续使用官方 Python helper，不修改 SDK 文件。普通 Main、三框架、Service、Queue、DO、Workflow、Runtime 及现有产品 Gate 已通过完整 workspace coverage 和最终单轮 Gate，输入与已知限制见 [P21 Python Workers 实现](../implemented/p21-python-workers.md)。历史候选 probe 和 R4 产品结果不能替代当前 formal pin 的验收。P21 当次发布复用了已有四平台产物。
 
+## R25 发布与输入校验（2026-11-01）
+
+[R25 四平台 CI](https://github.com/elliothux/workerd/actions/runs/41271234399) 的四个 build 和 publish 均成功；darwin-x64 首次因 `static.crates.io` 解析失败重跑一次。
+R4.4b 把 ocd 与 workerd 的内部通道改为 Unix socket 后，macOS 上出现对端在 accept 前关闭导致的 ENOTCONN 崩溃；R25 只修补这一点。
+十项资产通过 `SHA256SUMS` 和 `gh release verify`；四目标 archive／binary 摘要、build-inputs 与 catalog 已写入正式 lock，catalog 摘要与 R24 相同。
+
 ## R24 发布与输入校验（2026-10-30）
 
 [R24 四平台 CI](https://github.com/elliothux/workerd/actions/runs/41025742244) 的四个 build 和 publish 均成功。
@@ -104,7 +113,7 @@ Container owning 测试覆盖 EOF 到达前的连接复用和显式 keep-alive�
 校验只在内存中下载和解压，没有在高水位宿主写入原生 archive 或 executable。
 资产证据为 `.temp/release-0.4.0-actual/workerd-release-r23/formal-current-release-40902084555/native-r24-verified-assets.json`。
 证据 SHA-256 为 `f44d73a7dc087a3e09816e164d2bcb1afd9700363681a7f06769b14022c3de13`。
-正式 lock 与父仓库 gitlink 同步到 R24；当前产品、coverage、Final 和发行包仍待验收。
+R24 的正式 lock 与父仓库 gitlink 已由 R25 取代；当前产品、coverage、Final 和发行包仍待验收。
 
 ## R23 发布与输入校验（2026-10-26）
 

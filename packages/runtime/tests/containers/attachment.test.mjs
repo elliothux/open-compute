@@ -5,7 +5,7 @@ import { importRuntime, moduleUrl } from "../compiled-runtime.mjs";
 const shared = moduleUrl(`
   export function bindingError(code) { return new Error(code); }
   export function currentStartupGeneration() { return 'generation'; }
-  export const TOKEN_HEADER = 'x-open-compute-internal-token';
+
 `);
 const {
   containerAttachment,
@@ -105,7 +105,6 @@ test("snapshot capture binds the current running lease and frozen facet authorit
   let current = lease;
   const snapshot = { id: "opaque-snapshot", size: 128, name: "checkpoint" };
   const env = {
-    INTERNAL_TOKEN: "token",
     WORKER_LOADER_FACTORY: {
       getContainer(_facets, _class, _resolve, callback) {
         capture = callback;
@@ -142,7 +141,7 @@ test("snapshot capture binds the current running lease and frozen facet authorit
   assert.equal(requests.at(-1).body.name, "checkpoint");
   assert.equal(
     requests.at(-1).headers["x-open-compute-internal-token"],
-    "token",
+    undefined,
   );
   await capture(lease.opaqueEngineKey, undefined);
   assert.equal(Object.hasOwn(requests.at(-1).body, "name"), false);
@@ -268,7 +267,6 @@ test("class attachment freezes authority and persists stop intent before final c
   const grant = { revoke() {} };
   const facets = {};
   const env = {
-    INTERNAL_TOKEN: "token",
     WORKER_LOADER_FACTORY: {
       getContainer(actualFacets, className, callback) {
         assert.equal(actualFacets, facets);
@@ -315,7 +313,7 @@ test("class attachment freezes authority and persists stop intent before final c
     requests[0].headers["x-open-compute-startup-generation"],
     "generation",
   );
-  assert.equal(requests[0].headers["x-open-compute-internal-token"], "token");
+  assert.equal(requests[0].headers["x-open-compute-internal-token"], undefined);
   await resolve(false, false, true);
   assert.equal(requests.at(-1).body.start, false);
   await resolve(false, true, false);
@@ -341,7 +339,6 @@ test("class attachment freezes authority and persists stop intent before final c
 test("attachment rejects class substitution and never masks private authority failures", async () => {
   const callbacks = [];
   const env = {
-    INTERNAL_TOKEN: "token",
     WORKER_LOADER_FACTORY: {
       getContainer(_f, _c, resolve) {
         callbacks.push(
@@ -397,7 +394,6 @@ test("normal operations require positive Running evidence while stop can clean L
   let stopRequestedAtMs = null;
   const requests = [];
   const env = {
-    INTERNAL_TOKEN: "token",
     WORKER_LOADER_FACTORY: {
       getContainer(_f, _c, callback) {
         resolve = (
@@ -446,7 +442,6 @@ test("old monitor cleanup cannot stop a replacement lease after destroy and rest
   let wireLease = lease;
   const requests = [];
   const env = {
-    INTERNAL_TOKEN: "token",
     WORKER_LOADER_FACTORY: {
       getContainer(_f, _c, callback) {
         resolve = (
@@ -618,7 +613,6 @@ test("monitor lookup preserves exact exited lease while ordinary operations requ
   let current = { ...lease };
   const requests = [];
   const env = {
-    INTERNAL_TOKEN: "token",
     WORKER_LOADER_FACTORY: {
       getContainer(_facets, _class, callback) {
         resolve = callback;
@@ -729,7 +723,6 @@ test("directory snapshot capture keeps current lease fencing and normalizes only
   });
   const requests = [];
   const env = {
-    INTERNAL_TOKEN: "token",
     WORKER_LOADER_FACTORY: {
       getContainer(_facets, _class, _resolve, callback) {
         capture = callback;

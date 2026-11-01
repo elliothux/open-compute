@@ -1,7 +1,7 @@
 use super::*;
 
 #[tokio::test]
-async fn container_start_control_is_authenticated_closed_and_bounded() {
+async fn container_start_control_is_private_closed_and_bounded() {
     use std::os::unix::fs::OpenOptionsExt as _;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tracing::instrument::WithSubscriber as _;
@@ -40,27 +40,17 @@ async fn container_start_control_is_authenticated_closed_and_bounded() {
     });
     let calls = Arc::new(AtomicUsize::new(0));
     let observed = calls.clone();
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = listener.local_addr().unwrap().port();
-    let auth = GenerationAuthRegistry::new();
-    auth.activate_for_test(open_compute_core::SecretString::new("ab".repeat(32)));
-    let server_auth = auth.clone();
+    let listener_dir = tempfile::tempdir_in("/tmp").unwrap();
+    let listener_path = listener_dir.path().join("runtime.sock");
+    let listener = tokio::net::UnixListener::bind(&listener_path).unwrap();
+    let port = listener_path.clone();
+
     let app = Router::new().fallback(move |request: Request| {
         let expected = expected.clone();
         let calls = calls.clone();
-        let auth = server_auth.clone();
         async move {
             assert_eq!(request.method(), Method::POST);
             assert_eq!(request.uri().path(), "/internal/container-start");
-            assert_eq!(
-                request
-                    .headers()
-                    .get(TOKEN_HEADER)
-                    .unwrap()
-                    .to_str()
-                    .unwrap(),
-                auth.credential().unwrap().expose()
-            );
             let bytes = to_bytes(request.into_body(), 4096).await.unwrap();
             assert_eq!(
                 serde_json::from_slice::<serde_json::Value>(&bytes).unwrap(),
@@ -95,12 +85,12 @@ async fn container_start_control_is_authenticated_closed_and_bounded() {
             .await
             .unwrap();
     });
-    let transport = WorkerdTransport::for_test_endpoint(auth.clone(), port);
+    let transport = WorkerdTransport::for_test_endpoint(&port);
     transport
         .start_container(namespace, object, 3)
         .await
         .unwrap();
-    auth.activate_for_test(open_compute_core::SecretString::new("cd".repeat(32)));
+
     for _ in 0..7 {
         let error = transport
             .start_container(namespace, object, 3)
@@ -111,7 +101,7 @@ async fn container_start_control_is_authenticated_closed_and_bounded() {
         assert!(!error.to_string().contains("untrusted"));
     }
     assert_eq!(observed.load(Ordering::SeqCst), 8);
-    let inactive = WorkerdTransport::for_test_endpoint(GenerationAuthRegistry::new(), port);
+    let inactive = WorkerdTransport::new(Arc::new(Mutex::new(None)));
     assert!(
         inactive
             .start_container(namespace, object, 3)

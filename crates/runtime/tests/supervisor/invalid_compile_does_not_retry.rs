@@ -1,13 +1,13 @@
 use super::*;
 
 pub(super) async fn run() {
-    let dir = TempDir::new().unwrap();
+    let dir = TempDir::new_in("/tmp").unwrap();
     let runtime = verified(dir.path()).await;
     let clock = Arc::new(DeterministicClock::new(UNIX_EPOCH));
     let sup = WorkerdSupervisor::new(
         WorkerdSupervisorOptions {
             runtime,
-            compiler: FnCompiler(|_t, _id| {
+            compiler: FnCompiler(|_id| {
                 Box::pin(async {
                     Err(open_compute_core::PlatformError::new(
                         ErrorCode::ConfigCompileFailed,
@@ -30,7 +30,6 @@ pub(super) async fn run() {
             jitter: Arc::new(SequenceJitter::new(vec![0])),
             lease_path: None,
         },
-        Vec::new(),
         Vec::new(),
         Vec::new(),
     );

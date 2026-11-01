@@ -1,6 +1,5 @@
 import { RpcTarget } from "cloudflare:workers";
 import type { BindingEnv } from "../bindings/protocol.js";
-import { currentStartupGeneration } from "../loader/shared.js";
 import type {
   WorkflowBatchReply,
   WorkflowBatchStep,
@@ -108,8 +107,6 @@ export class WorkflowRunController
           method: "POST",
           headers: {
             "content-type": "application/json",
-            "x-open-compute-binding-token": this.#env.BINDING_BACKEND_TOKEN,
-            "x-open-compute-startup-generation": currentStartupGeneration(),
           },
           body: JSON.stringify({ ...body, ...this.#identity }),
         },

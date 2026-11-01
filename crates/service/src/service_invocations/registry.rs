@@ -456,41 +456,11 @@ impl ServiceInvocationRegistry {
         }
     }
 
-    /// Select the authenticated workerd generation before processing one controller request.
-    ///
-    /// A first request from a replacement generation atomically invalidates any state left by its
-    /// predecessor. The binding backend calls this while generation authentication is fenced.
-    pub fn activate_generation(&self, generation: &str) {
-        let mut inner = self
-            .inner
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if inner.generation.as_deref() != Some(generation) {
-            *inner = Inner {
-                generation: Some(generation.to_owned()),
-                ..Inner::default()
-            };
-        }
-    }
-
-    /// Drop state only when it still belongs to the named private-protocol generation.
-    #[cfg(any(test, feature = "test-support"))]
-    pub fn clear_generation(&self, generation: &str) {
-        let mut inner = self
-            .inner
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if inner.generation.as_deref() == Some(generation) {
-            *inner = Inner::default();
-        }
-    }
-
     /// Drop every invocation, capability, frame, and version pin after workerd exits.
     ///
     /// The process supervisor owns this unconditional transition and calls it only after the
     /// previously running child is confirmed absent, or immediately before admitting a known
-    /// replacement child. The private protocol generation is intentionally not exposed through
-    /// the supervisor snapshot.
+    /// replacement child.
     pub fn clear_after_child_exit(&self) {
         *self
             .inner

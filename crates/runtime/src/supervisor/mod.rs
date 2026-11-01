@@ -10,7 +10,6 @@ mod python_preparation;
 mod rotation;
 mod spawn;
 mod state;
-mod token;
 mod watchdog;
 
 use crate::compile::{CompileRequest, CompiledConfig, PlatformReleaseMeta, compile_static_config};
@@ -22,12 +21,11 @@ use open_compute_core::clock::Clock;
 use open_compute_core::config::{DurableObjectsConfig, RuntimeConfig};
 use open_compute_core::error::ReadinessReason;
 use open_compute_core::ids::StartupId;
-use open_compute_core::{ErrorCode, PlatformError, Redactor, SecretString, SystemClock};
+use open_compute_core::{ErrorCode, PlatformError, Redactor, SystemClock};
 use owner::{OwnerCompletion, OwnerRegistry};
 use spawn::{LiveRuntime, SpawnFailure, SpawnRequest, spawn_child, wait_ready};
 use std::fmt::{Debug, Formatter};
 use std::future::Future;
-use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::Arc;
@@ -43,7 +41,7 @@ pub use host_extensions::HostExtensionBrokerRegistry;
 pub use logs::set_reader_fail_point;
 #[cfg(any(test, feature = "test-support"))]
 pub use owner::{take_owner_wait_count, take_reader_join_errors};
-pub use probe::{READY_PATH, TOKEN_HEADER, probe_ready_with_raw_token};
+pub use probe::{READY_PATH, probe_ready};
 pub use python_preparation::{PythonPreparationOptions, PythonPreparationProcess};
 pub use spawn::serve_argv;
 #[cfg(any(test, feature = "test-support"))]
@@ -52,9 +50,6 @@ pub use spawn::{
     release_blocking_spawn, set_spawn_fail_point,
 };
 pub use state::{SanitizedExit, SupervisorSnapshot, SupervisorState};
-pub use token::{
-    GenerationAuthRegistry, GenerationCredential, generate_internal_token, token_fingerprint,
-};
 pub use watchdog::{LIVE_PATH, RuntimeFailureEvidence, WatchdogConfig};
 
 /// Bounded redacted child diagnostics. Not part of ordinary snapshot/status/Debug.
@@ -72,11 +67,11 @@ pub struct ProcessDiagnostics {
     pub reader_failed: bool,
 }
 
-/// Loopback address injected into one named workerd external service.
+/// Unix address injected into one named workerd external service.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ExternalServiceAddress {
     name: String,
-    address: SocketAddr,
+    address: PathBuf,
 }
 
 /// Absolute local directory mapped to one named workerd disk service.
@@ -117,20 +112,13 @@ impl DirectoryServicePath {
 }
 
 impl ExternalServiceAddress {
-    /// Validate a service name and a nonzero loopback address.
-    pub fn loopback(name: &str, address: SocketAddr) -> Result<Self, PlatformError> {
-        if validate_service_name(name).is_err()
-            || !address.ip().is_loopback()
-            || address.port() == 0
-        {
-            return Err(PlatformError::new(
-                ErrorCode::ConfigInvalid,
-                "external service must have a bounded name and loopback address",
-            ));
-        }
+    /// Validate a service name and absolute named Unix socket path.
+    pub fn unix(name: &str, address: &Path) -> Result<Self, PlatformError> {
+        validate_service_name(name)?;
+        crate::digest::validate_socket_path(address)?;
         Ok(Self {
             name: name.to_owned(),
-            address,
+            address: address.to_owned(),
         })
     }
 }
@@ -157,12 +145,11 @@ fn directory_invalid() -> PlatformError {
     )
 }
 
-/// Compiles a generation-scoped binary config from a fresh token.
+/// Compiles a private binary config for each spawn attempt.
 pub trait ConfigCompiler: Send + Sync + 'static {
     /// Compile or reuse the static config for this spawn attempt.
     fn compile(
         &self,
-        token: SecretString,
         startup_id: StartupId,
     ) -> Pin<Box<dyn Future<Output = Result<CompiledConfig, PlatformError>> + Send + '_>>;
 }
@@ -174,12 +161,10 @@ pub struct StaticConfigCompiler {
     lock_path: PathBuf,
     assets_dir: PathBuf,
     runtime_data_dir: PathBuf,
+    ingress_socket: PathBuf,
     platform: PlatformReleaseMeta,
     deadline: Duration,
     redactor: Redactor,
-    generation_auth: Option<GenerationAuthRegistry>,
-    binding_generation_auth: Option<GenerationAuthRegistry>,
-    observability_generation_auth: Option<GenerationAuthRegistry>,
     durable_objects: DurableObjectsConfig,
     container_provider: Option<crate::ContainerProviderConfig>,
 }
@@ -201,6 +186,7 @@ impl StaticConfigCompiler {
         lock_path: PathBuf,
         assets_dir: PathBuf,
         runtime_data_dir: PathBuf,
+        ingress_socket: PathBuf,
         platform: PlatformReleaseMeta,
         deadline: Duration,
         redactor: Redactor,
@@ -210,36 +196,13 @@ impl StaticConfigCompiler {
             lock_path,
             assets_dir,
             runtime_data_dir,
+            ingress_socket,
             platform,
             deadline,
             redactor,
-            generation_auth: None,
-            binding_generation_auth: None,
-            observability_generation_auth: None,
             durable_objects: DurableObjectsConfig::default(),
             container_provider: None,
         }
-    }
-
-    /// Activate generation-scoped loopback authentication after each successful compile.
-    #[must_use]
-    pub fn with_generation_auth(mut self, auth: GenerationAuthRegistry) -> Self {
-        self.generation_auth = Some(auth);
-        self
-    }
-
-    /// Activate a distinct generation credential for the private binding backend.
-    #[must_use]
-    pub fn with_binding_generation_auth(mut self, auth: GenerationAuthRegistry) -> Self {
-        self.binding_generation_auth = Some(auth);
-        self
-    }
-
-    /// Activate a distinct generation credential for Workers Logs ingestion.
-    #[must_use]
-    pub fn with_observability_generation_auth(mut self, auth: GenerationAuthRegistry) -> Self {
-        self.observability_generation_auth = Some(auth);
-        self
     }
 
     /// Enable the qualified native Container provider only on the private `DoHost` Worker.
@@ -260,48 +223,23 @@ impl StaticConfigCompiler {
 impl ConfigCompiler for StaticConfigCompiler {
     fn compile(
         &self,
-        token: SecretString,
         _startup_id: StartupId,
     ) -> Pin<Box<dyn Future<Output = Result<CompiledConfig, PlatformError>> + Send + '_>> {
         Box::pin(async move {
-            let binding_token = generate_internal_token()?;
-            let observability_token = generate_internal_token()?;
-            let mut redactor = self.redactor.clone();
-            redactor.register_secret_string(&token);
-            redactor.register_secret_string(&binding_token);
-            redactor.register_secret_string(&observability_token);
-            let compiled = compile_static_config(CompileRequest {
+            compile_static_config(CompileRequest {
                 role: crate::ConfigRole::Runtime,
                 runtime: &self.runtime,
                 lock_path: &self.lock_path,
                 assets_dir: &self.assets_dir,
                 runtime_data_dir: &self.runtime_data_dir,
                 platform: &self.platform,
-                token: &token,
-                binding_token: &binding_token,
-                observability_token: &observability_token,
+                ingress_socket: &self.ingress_socket,
                 durable_objects: self.durable_objects.clone(),
                 container_provider: self.container_provider.as_ref(),
                 deadline: self.deadline,
-                redactor: &redactor,
+                redactor: &self.redactor,
             })
-            .await;
-            if compiled.is_ok()
-                && let Some(auth) = &self.generation_auth
-            {
-                auth.activate(token.clone());
-            }
-            if compiled.is_ok()
-                && let Some(auth) = &self.binding_generation_auth
-            {
-                auth.activate(binding_token);
-            }
-            if compiled.is_ok()
-                && let Some(auth) = &self.observability_generation_auth
-            {
-                auth.activate(observability_token);
-            }
-            compiled
+            .await
         })
     }
 }
@@ -323,17 +261,13 @@ where
     F: Send
         + Sync
         + 'static
-        + Fn(
-            SecretString,
-            StartupId,
-        ) -> Pin<Box<dyn Future<Output = Result<CompiledConfig, PlatformError>> + Send>>,
+        + Fn(StartupId) -> Pin<Box<dyn Future<Output = Result<CompiledConfig, PlatformError>> + Send>>,
 {
     fn compile(
         &self,
-        token: SecretString,
         startup_id: StartupId,
     ) -> Pin<Box<dyn Future<Output = Result<CompiledConfig, PlatformError>> + Send + '_>> {
-        (self.0)(token, startup_id)
+        (self.0)(startup_id)
     }
 }
 
@@ -427,12 +361,11 @@ impl Debug for WorkerdSupervisor {
 }
 
 impl WorkerdSupervisor {
-    /// Create a supervisor with the complete current service and auth composition.
+    /// Create a supervisor with the current private service composition.
     pub fn new<C, K, J>(
         opts: WorkerdSupervisorOptions<C, K, J>,
         external_services: Vec<ExternalServiceAddress>,
         directory_services: Vec<DirectoryServicePath>,
-        generation_auths: Vec<GenerationAuthRegistry>,
     ) -> Self
     where
         C: ConfigCompiler,
@@ -443,7 +376,6 @@ impl WorkerdSupervisor {
             opts,
             external_services,
             directory_services,
-            generation_auths,
             Some(HostExtensionBrokerRegistry::new()),
         )
     }
@@ -453,7 +385,6 @@ impl WorkerdSupervisor {
         opts: WorkerdSupervisorOptions<C, K, J>,
         external_services: Vec<ExternalServiceAddress>,
         directory_services: Vec<DirectoryServicePath>,
-        generation_auths: Vec<GenerationAuthRegistry>,
         host_extension_broker: HostExtensionBrokerRegistry,
     ) -> Self
     where
@@ -465,7 +396,6 @@ impl WorkerdSupervisor {
             opts,
             external_services,
             directory_services,
-            generation_auths,
             Some(host_extension_broker),
         )
     }
@@ -474,7 +404,6 @@ impl WorkerdSupervisor {
         opts: WorkerdSupervisorOptions<C, K, J>,
         external_services: Vec<ExternalServiceAddress>,
         directory_services: Vec<DirectoryServicePath>,
-        generation_auths: Vec<GenerationAuthRegistry>,
         host_extension_broker: Option<HostExtensionBrokerRegistry>,
     ) -> Self
     where
@@ -519,9 +448,7 @@ impl WorkerdSupervisor {
             recovery_failed: false,
             external_services: Arc::from(external_services),
             directory_services: Arc::from(directory_services),
-            generation_auths: Arc::from(generation_auths),
             watchdog: watchdog.clone(),
-            live_token: None,
             probe_flight: None,
             probe_failures: 0,
             next_periodic_probe_at: None,
@@ -692,7 +619,6 @@ impl WorkerdSupervisor {
                 jitter: Arc::new(OsJitter),
                 lease_path: None,
             },
-            Vec::new(),
             Vec::new(),
             Vec::new(),
         )

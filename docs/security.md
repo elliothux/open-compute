@@ -26,8 +26,8 @@ open-compute 只防三类对手。新增防御代码时，PR 要写明它对付�
 
 Worker 出站网络不做过滤，由主机防火墙、network namespace、容器或 VM 负责。Unix socket 一律禁止。
 
-## 待删除的防御
+## 内部通道
 
-下面的代码对付的是模型之外的对手，将逐步删除。删除前不要扩展它们：
-
-- `ocd` 与 workerd 之间的 generation token 和 loopback 通道鉴权。改为 0700 目录下的 Unix socket；原生扩展的 fd 4 session broker 保留。
+`ocd` 与 workerd 的 HTTP 和 RPC 通道使用 `<OCD_DIR>/run/<InstanceId>/` 下的 Unix socket，目录模式为 0700。
+Tenant Worker 的 Network 配置禁止 `unix` 和 `unix-abstract`。内部通道不使用 generation credential。
+原生扩展的 fd 4 HostExtension session broker（Cap'n Proto）保留。

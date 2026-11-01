@@ -15,7 +15,7 @@ const privateTransport = moduleUrl(`
   }
 `);
 const shared = moduleUrl(`
-  export const BINDING_TOKEN_HEADER = "x-open-compute-binding-token";
+
   export const currentStartupGeneration = () => "generation";
   export const systemRequestId = () => "018f0000-0000-7000-8000-000000000001";
   export const bindingError = code => Object.assign(new Error(code), { stableCode: code });
@@ -40,7 +40,6 @@ const props = {
 test("AI transport sends only the private authorized Markdown Conversion wire contract", async () => {
   const calls = [];
   const env = {
-    BINDING_BACKEND_TOKEN: "private-token",
     BINDING_BACKEND: {
       async fetch(url, init) {
         calls.push({ url, init, body: init.body && JSON.parse(init.body) });
@@ -76,7 +75,7 @@ test("AI transport sends only the private authorized Markdown Conversion wire co
   });
   assert.equal(
     calls[0].init.headers["x-open-compute-binding-token"],
-    "private-token",
+    undefined,
   );
   assert.equal(
     calls[0].init.headers["x-open-compute-descriptor-sha256"],
@@ -84,7 +83,7 @@ test("AI transport sends only the private authorized Markdown Conversion wire co
   );
   assert.equal(
     calls[0].init.headers["x-open-compute-startup-generation"],
-    "generation",
+    undefined,
   );
 });
 
@@ -92,7 +91,6 @@ test("AI transport maps backend and malformed envelope failures to stable codes"
   const failed = new AiTransport(
     { props },
     {
-      BINDING_BACKEND_TOKEN: "token",
       BINDING_BACKEND: {
         fetch: async () =>
           new Response(null, {
@@ -109,7 +107,6 @@ test("AI transport maps backend and malformed envelope failures to stable codes"
   const malformed = new AiTransport(
     { props },
     {
-      BINDING_BACKEND_TOKEN: "token",
       BINDING_BACKEND: { fetch: async () => Response.json({ result: [] }) },
     },
   );

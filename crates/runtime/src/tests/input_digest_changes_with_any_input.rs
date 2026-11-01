@@ -13,7 +13,6 @@ fn input_digest_changes_with_any_input() {
         .unwrap();
     let runtime = rt.block_on(verify_ok(&lock_path, &dummy));
     let lock_bytes = runtime.lock_bytes().to_vec();
-    let token = SecretString::new(TOKEN);
 
     fs::write(dir.path().join("config.capnp"), [0xff]).unwrap();
     assert_eq!(
@@ -22,9 +21,7 @@ fn input_digest_changes_with_any_input() {
             &lock_bytes,
             &runtime,
             &platform_meta(),
-            &token,
-            &SecretString::new(TOKEN_C),
-            &SecretString::new(TOKEN_D),
+            Path::new("/tmp/oc-runtime.sock"),
         )
         .unwrap_err()
         .code(),
@@ -36,9 +33,7 @@ fn input_digest_changes_with_any_input() {
         &lock_bytes,
         &runtime,
         &platform_meta(),
-        &token,
-        &SecretString::new(TOKEN_C),
-        &SecretString::new(TOKEN_D),
+        Path::new("/tmp/oc-runtime.sock"),
     )
     .unwrap();
     let (d2, _, _) = digest_for(
@@ -46,9 +41,7 @@ fn input_digest_changes_with_any_input() {
         &lock_bytes,
         &runtime,
         &platform_meta(),
-        &token,
-        &SecretString::new(TOKEN_C),
-        &SecretString::new(TOKEN_D),
+        Path::new("/tmp/oc-runtime.sock"),
     )
     .unwrap();
     assert_eq!(d1, d2);
@@ -63,9 +56,7 @@ fn input_digest_changes_with_any_input() {
         &lock_bytes,
         &runtime,
         &platform_meta(),
-        &token,
-        &SecretString::new(TOKEN_C),
-        &SecretString::new(TOKEN_D),
+        Path::new("/tmp/oc-runtime.sock"),
     )
     .unwrap();
     assert_ne!(d1, d_cfg);
@@ -87,9 +78,7 @@ fn input_digest_changes_with_any_input() {
         &lock_bytes,
         &runtime,
         &platform_meta(),
-        &token,
-        &SecretString::new(TOKEN_C),
-        &SecretString::new(TOKEN_D),
+        Path::new("/tmp/oc-runtime.sock"),
     )
     .unwrap();
     assert_ne!(d1, d_w);
@@ -102,9 +91,7 @@ fn input_digest_changes_with_any_input() {
         &lock_bytes,
         &runtime,
         &platform_meta(),
-        &token,
-        &SecretString::new(TOKEN_C),
-        &SecretString::new(TOKEN_D),
+        Path::new("/tmp/oc-runtime.sock"),
     )
     .unwrap();
     let d_lock2 = config_input_digest(&DigestInputs {
@@ -139,47 +126,20 @@ fn input_digest_changes_with_any_input() {
         &lock_bytes,
         &runtime2,
         &platform_meta(),
-        &token,
-        &SecretString::new(TOKEN_C),
-        &SecretString::new(TOKEN_D),
+        Path::new("/tmp/oc-runtime.sock"),
     )
     .unwrap();
     assert_ne!(d1, d_bin);
 
-    let other = SecretString::new(TOKEN_B);
-    let (d_tok, _, _) = digest_for(
+    let (socket_digest, _, _) = digest_for(
         dir.path(),
         &lock_bytes,
         &runtime,
         &platform_meta(),
-        &other,
-        &SecretString::new(TOKEN_C),
-        &SecretString::new(TOKEN_D),
+        Path::new("/tmp/other.sock"),
     )
     .unwrap();
-    assert_ne!(d1, d_tok);
-    let (d_binding, _, _) = digest_for(
-        dir.path(),
-        &lock_bytes,
-        &runtime,
-        &platform_meta(),
-        &token,
-        &SecretString::new(TOKEN_B),
-        &SecretString::new(TOKEN_D),
-    )
-    .unwrap();
-    assert_ne!(d1, d_binding);
-    let (d_observability, _, _) = digest_for(
-        dir.path(),
-        &lock_bytes,
-        &runtime,
-        &platform_meta(),
-        &token,
-        &SecretString::new(TOKEN_C),
-        &SecretString::new(TOKEN_B),
-    )
-    .unwrap();
-    assert_ne!(d1, d_observability);
+    assert_ne!(d1, socket_digest);
 
     let meta2 = PlatformReleaseMeta {
         version: "other".into(),
@@ -189,9 +149,7 @@ fn input_digest_changes_with_any_input() {
         &lock_bytes,
         &runtime,
         &meta2,
-        &token,
-        &SecretString::new(TOKEN_C),
-        &SecretString::new(TOKEN_D),
+        Path::new("/tmp/oc-runtime.sock"),
     )
     .unwrap();
     assert_ne!(d1, d_rel);

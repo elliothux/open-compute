@@ -418,7 +418,13 @@ pub(super) async fn p0_real_combined_exit_matrix_inner() {
         .await
         .unwrap();
     assert_eq!(restored.instance_id, full_snapshot.instance_id);
-    let doctor = doctor_report(&restored_loaded, DoctorMode::Full, None).await;
+    let doctor = doctor_report(
+        &restored_loaded,
+        DoctorMode::Full,
+        open_compute_service::instance_registry::ServiceScope::User,
+        None,
+    )
+    .await;
     assert!(!doctor.failed(), "restored doctor: {doctor:?}");
 
     let storage =

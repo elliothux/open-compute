@@ -14,7 +14,7 @@ pub enum SupervisorState {
     Stopped,
     /// Spawn and readiness handshake in progress.
     Starting,
-    /// Control-fd listen and authenticated probe succeeded.
+    /// Control-fd listen and Unix probe succeeded.
     Running,
     /// Waiting to retry after a retryable failure.
     BackingOff,
@@ -85,13 +85,9 @@ pub struct SupervisorSnapshot {
     /// Sanitized low-cardinality evidence kind from the latest accepted generation
     /// suspicion; cleared when a new generation starts. Never URLs, tokens, or raw errors.
     pub last_suspicion: Option<&'static str>,
-    /// Non-secret token uniqueness proof. Test/operator support only; omitted from status and Debug.
-    #[cfg(any(test, feature = "test-support"))]
+    /// Private Unix ingress endpoint, omitted from public status and Debug.
     #[serde(skip)]
-    pub token_fingerprint: Option<String>,
-    /// Listen port while running; omitted from Debug.
-    #[serde(skip)]
-    pub listen_port: Option<u16>,
+    pub ingress_socket: Option<std::path::PathBuf>,
 }
 
 impl Debug for SupervisorSnapshot {
@@ -128,10 +124,8 @@ impl SupervisorSnapshot {
             binary_digest,
             config_digest: String::new(),
             startup_id: None,
-            #[cfg(any(test, feature = "test-support"))]
-            token_fingerprint: None,
             last_suspicion: None,
-            listen_port: None,
+            ingress_socket: None,
         }
     }
 }

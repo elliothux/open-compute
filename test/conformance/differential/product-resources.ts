@@ -10,11 +10,16 @@ async function listed(
   environment: Readonly<Record<string, string>>,
 ): Promise<JsonRecord | undefined> {
   for (let page = 1; page <= 100; page++) {
-    const result = await command(
-      cf,
-      [kind, "list", "--page", String(page), "--per-page", "100"],
-      { cwd: dirname(config), env: environment, timeout: 60_000 },
-    );
+    // cf queues list takes no paging flags and returns the whole inventory.
+    const args =
+      kind === "queues"
+        ? [kind, "list"]
+        : [kind, "list", "--page", String(page), "--per-page", "100"];
+    const result = await command(cf, args, {
+      cwd: dirname(config),
+      env: environment,
+      timeout: 60_000,
+    });
     const rows: unknown = JSON.parse(result.stdout);
     if (!Array.isArray(rows)) throw new Error(`${kind} inventory is invalid`);
     for (const row of rows) {
@@ -23,7 +28,7 @@ async function listed(
       if (Reflect.get(row, kind === "queues" ? "queue_name" : "name") === name)
         return row as JsonRecord;
     }
-    if (rows.length < 100) return undefined;
+    if (kind === "queues" || rows.length < 100) return undefined;
   }
   throw new Error(`${kind} inventory exceeded the bounded page audit`);
 }

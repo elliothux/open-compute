@@ -2,21 +2,19 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { Ingress } from "./runtime.mjs";
 
-const token = "generation";
 function request(path, method = "GET", headers = {}, body) {
   return new Request(`http://private${path}`, {
     method,
-    headers: { "x-open-compute-internal-token": token, ...headers },
+    headers,
     body,
   });
 }
 
-test("private HTTP admission rejects stale credentials and malformed health probes", async () => {
-  const gateway = new Ingress({}, { INTERNAL_TOKEN: token });
+test("private HTTP admission accepts credential-free probes and rejects malformed probes", async () => {
+  const gateway = new Ingress({}, {});
   for (const path of ["/internal/ready", "/internal/live"]) {
     assert.equal((await gateway.fetch(request(path))).status, 204);
     for (const item of [
-      request(path, "GET", { "x-open-compute-internal-token": "old" }),
       request(path, "GET", { "content-type": "text/plain" }),
       request(path, "GET", { "content-length": "1" }),
       request(path + "?extra=1"),
@@ -30,12 +28,11 @@ test("private HTTP admission rejects stale credentials and malformed health prob
   assert.equal((await gateway.fetch(bodyProbe)).status, 404);
 });
 
-test("delegated DO HTTP keeps identity and streams but strips the generation token", async () => {
+test("delegated DO HTTP keeps identity and streams without credentials", async () => {
   const forwarded = [];
   const gateway = new Ingress(
     {},
     {
-      INTERNAL_TOKEN: token,
       DO_ROUTER: {
         fetch: async (req) => {
           forwarded.push(req);
@@ -112,23 +109,12 @@ test("delegated DO HTTP keeps identity and streams but strips the generation tok
     );
     assert.equal(
       forwarded.at(-1).headers.get("x-open-compute-internal-token"),
-      token,
+      null,
     );
     assert.equal(await forwarded.at(-1).text(), "prepare");
     for (const req of [
       request("/internal/do/v1/fetch?extra=1"),
-      request("/internal/do/v1/fetch", "GET", {
-        "x-open-compute-internal-token": "old",
-      }),
       request("/internal/do-delete"),
-      request(
-        "/internal/container-start",
-        "POST",
-        {
-          "x-open-compute-internal-token": "old",
-        },
-        "{}",
-      ),
       request("/internal/container-start?extra=1", "POST", {}, "{}"),
     ]) {
       const count = forwarded.length;

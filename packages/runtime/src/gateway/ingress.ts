@@ -5,11 +5,10 @@ import {
   tunnelSockets,
   type SocketAuthorityWire,
 } from "../sockets/tunnel.js";
-import { tokenEquals } from "./token.js";
 
 const READY_PATH = "/internal/ready";
 const LIVE_PATH = "/internal/live";
-const TOKEN_HEADER = "x-open-compute-internal-token";
+
 const INTERNAL_PATHS = new Set([
   "/internal/dispatch",
   "/internal/validate",
@@ -35,12 +34,11 @@ function deny() {
 
 /** The only socket entrypoint, including native RPC delegated by the prepare child. */
 export default class Ingress extends WorkerEntrypoint<{
-  INTERNAL_TOKEN: string;
   LOADER_HOST: Fetcher;
   DO_ROUTER: DoRouterRpc;
   BROWSER_ACTIONS: Fetcher;
 }> {
-  // Workerd admits RPC only through the generation's opaque capnpConnectHost.
+  // The Unix socket admits native RPC from the preparation child.
   // These methods retain the main process's DO router and storage authority.
   dispatchFetch(identity: Record<string, string>, request: Request) {
     return this.env.DO_ROUTER.dispatchFetch(identity, request);
@@ -88,17 +86,13 @@ export default class Ingress extends WorkerEntrypoint<{
   async fetch(request: Request): Promise<Response> {
     const env = this.env;
     const url = new URL(request.url);
-    const presented = request.headers.get(TOKEN_HEADER);
-    if (!tokenEquals(presented, env.INTERNAL_TOKEN)) {
-      return deny();
-    }
     if (
       request.method === "GET" &&
       (url.pathname === READY_PATH || url.pathname === LIVE_PATH) &&
       url.search === ""
     ) {
       // Readiness gates admission; liveness proves the event loop, system Worker dispatch,
-      // and generation credential still complete one minimal exchange. Neither touches
+      // still complete one minimal exchange. Neither touches
       // SQLite, S3, or any external dependency.
       if (request.headers.has("content-type")) return deny();
       const length = request.headers.get("content-length");
@@ -114,12 +108,10 @@ export default class Ingress extends WorkerEntrypoint<{
       url.search === ""
     ) {
       const headers = new Headers(request.headers);
-      headers.set("x-open-compute-startup-generation", env.INTERNAL_TOKEN);
       return env.BROWSER_ACTIONS.fetch(new Request(request, { headers }));
     }
     if (url.pathname === "/internal/do/v1/fetch" && url.search === "") {
       const headers = new Headers(request.headers);
-      headers.delete(TOKEN_HEADER);
       return env.DO_ROUTER.fetch(new Request(request, { headers }));
     }
     const websocket =
@@ -160,9 +152,6 @@ export default class Ingress extends WorkerEntrypoint<{
       return deny();
     }
     const headers = new Headers(request.headers);
-    // Forward only the authenticated generation token to the platform-owned
-    // loader host. The host removes it before constructing the tenant Request.
-    headers.set(TOKEN_HEADER, env.INTERNAL_TOKEN);
     return env.LOADER_HOST.fetch(
       new Request(`http://loader-host${url.pathname}`, {
         method: websocket ? "GET" : "POST",

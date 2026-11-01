@@ -14,7 +14,7 @@ async fn container_rollout_recovers_unknown_stop_and_starts_frozen_replacement_b
         image,
         true,
     ));
-    let (auth, credential) = generation();
+
     let initial = fixture
         .service
         .resolve(
@@ -23,8 +23,7 @@ async fn container_rollout_recovers_unknown_stop_and_starts_frozen_replacement_b
                 Some(json!({"enableInternet":false,"environmentVariables":["MODE=original"]})),
             ),
             10,
-            &auth,
-            &credential,
+            "container-unit-generation",
         )
         .await
         .unwrap()
@@ -33,7 +32,11 @@ async fn container_rollout_recovers_unknown_stop_and_starts_frozen_replacement_b
     fixture.running().await;
     fixture
         .service
-        .resolve(authority.request(false, None), 11, &auth, &credential)
+        .resolve(
+            authority.request(false, None),
+            11,
+            "container-unit-generation",
+        )
         .await
         .unwrap();
     let repo = ContainerAuthority::new(fixture.service.storage.db());
@@ -79,7 +82,7 @@ async fn container_rollout_recovers_unknown_stop_and_starts_frozen_replacement_b
         13,
     )
     .unwrap();
-    let no_runtime = WorkerdTransport::for_test_endpoint(auth.clone(), 9);
+    let no_runtime = WorkerdTransport::for_test_endpoint(std::path::Path::new("/tmp/missing.sock"));
     fixture
         .protocol
         .terminate_fail
@@ -116,25 +119,31 @@ async fn container_rollout_recovers_unknown_stop_and_starts_frozen_replacement_b
         .terminate_fail
         .store(false, Ordering::SeqCst);
     let calls = Arc::new(AtomicUsize::new(0));
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = listener.local_addr().unwrap().port();
+    let listener_dir = tempfile::tempdir_in("/tmp").unwrap();
+    let listener_path = listener_dir.path().join("runtime.sock");
+    let listener = tokio::net::UnixListener::bind(&listener_path).unwrap();
+    let port = listener_path.clone();
     let fixture_for_start = Arc::clone(&fixture);
     let authority_for_start = Arc::clone(&authority);
-    let auth_for_start = auth.clone();
+
     let observed = Arc::clone(&calls);
     let app=Router::new().fallback(move |request:Request| {
-        let fixture=Arc::clone(&fixture_for_start);let authority=Arc::clone(&authority_for_start);let auth=auth_for_start.clone();let calls=Arc::clone(&observed);
+        let fixture=Arc::clone(&fixture_for_start);let authority=Arc::clone(&authority_for_start);let calls=Arc::clone(&observed);
         async move {
             assert_eq!(request.uri().path(),"/internal/container-start");
-            assert_eq!(request.headers()[open_compute_runtime::TOKEN_HEADER],auth.credential().unwrap().expose());
+
             let bytes=to_bytes(request.into_body(),4096).await.unwrap();
             assert_eq!(serde_json::from_slice::<serde_json::Value>(&bytes).unwrap(),json!({"namespaceResourceId":authority.object.namespace_resource_id,"objectId":authority.object.object_id,"objectGeneration":1}));
             let repo=ContainerAuthority::new(fixture.service.storage.db());
             assert_eq!(repo.application_leases(fixture.service.instance_id(),authority.app.id).unwrap()[0].state,ContainerLeaseState::Stopped);
-            let credential=auth.credential().unwrap();
-            fixture.service.resolve(authority.request(true,None),20,&auth,&credential).await.unwrap();
+
+            fixture.service.resolve(authority.request(true,None),
+20,
+"container-unit-generation").await.unwrap();
             fixture.running().await;
-            fixture.service.resolve(authority.request(false,None),21,&auth,&credential).await.unwrap();
+            fixture.service.resolve(authority.request(false,None),
+21,
+"container-unit-generation").await.unwrap();
             calls.fetch_add(1,Ordering::SeqCst);
             axum::Json(json!({"started":true}))
         }
@@ -148,7 +157,7 @@ async fn container_rollout_recovers_unknown_stop_and_starts_frozen_replacement_b
             .await
             .unwrap();
     });
-    let transport = WorkerdTransport::for_test_endpoint(auth, port);
+    let transport = WorkerdTransport::for_test_endpoint(&port);
     let restarted = fixture.restart_service();
     restarted.reconcile_rollouts(&transport).await.unwrap();
     assert_eq!(*fixture.protocol.stop_grace_millis.lock().await, [0, 0]);
@@ -220,10 +229,14 @@ async fn container_maintenance_reclaims_only_expired_owned_spools_and_resumes_ap
     std::fs::write(&unrelated, b"keep").unwrap();
     let image = fixture.admit_image("original").await;
     let authority = authority(&fixture.service, &fixture._artifacts, image, true);
-    let (auth, credential) = generation();
+
     let lease = fixture
         .service
-        .resolve(authority.request(true, None), 10, &auth, &credential)
+        .resolve(
+            authority.request(true, None),
+            10,
+            "container-unit-generation",
+        )
         .await
         .unwrap()
         .lease
@@ -251,7 +264,7 @@ async fn container_maintenance_reclaims_only_expired_owned_spools_and_resumes_ap
         .protocol
         .terminate_fail
         .store(false, Ordering::SeqCst);
-    let transport = WorkerdTransport::for_test_endpoint(auth, 9);
+    let transport = WorkerdTransport::for_test_endpoint(std::path::Path::new("/tmp/missing.sock"));
     fixture
         .restart_service()
         .reconcile_rollouts(&transport)

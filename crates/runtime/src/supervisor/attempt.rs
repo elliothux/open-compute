@@ -4,7 +4,6 @@ use super::*;
 
 pub(super) struct ChildStartOptions {
     pub(super) runtime: VerifiedRuntime,
-    pub(super) token: SecretString,
     pub(super) startup: Duration,
     pub(super) owners: OwnerRegistry,
     pub(super) external_services: Arc<[ExternalServiceAddress]>,
@@ -22,7 +21,7 @@ pub(super) async fn run_attempt(
     let compiled = tokio::select! {
         biased;
         _ = &mut cancel => return AttemptOutcome::Cancelled,
-        compiled = compiler.compile(options.token.clone(), startup_id) => compiled,
+        compiled = compiler.compile(startup_id) => compiled,
     };
     let compiled = match compiled {
         Ok(c) => c,
@@ -45,7 +44,6 @@ pub(super) async fn spawn_ready(
 ) -> AttemptOutcome {
     let ChildStartOptions {
         runtime,
-        token,
         startup,
         owners,
         external_services,
@@ -109,10 +107,9 @@ pub(super) async fn spawn_ready(
             clear_attempt_lease_if_reaped(lease_path.as_deref(), pid);
             AttemptOutcome::Cancelled
         }
-        ready = wait_ready(&mut live, &token, startup) => {
+        ready = wait_ready(&mut live, startup) => {
             match ready {
-                Ok(port) => {
-                    live.port = port;
+                Ok(()) => {
                     AttemptOutcome::Ready(Box::new(live))
                 }
                 Err(error) => {

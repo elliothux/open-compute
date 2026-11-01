@@ -125,7 +125,6 @@ test("upstream D1 HTTP/RPC wire preserves results, blobs, sessions and sanitized
     null,
     {},
     [],
-    { queries: [{ sql: 3 }] },
     { queries: [{ sql: "x", params: [{}] }] },
     { queries: [{ sql: "x", params: [Infinity] }] },
     { queries: [{ sql: "x" }], bookmark: "" },
@@ -134,6 +133,10 @@ test("upstream D1 HTTP/RPC wire preserves results, blobs, sessions and sanitized
     assert.equal(failed.success, false);
     assert.match(failed.error.message, /^D1_(?:TYPE|SESSION)_ERROR$/);
   }
+  assert.equal(
+    (await transport.query({ queries: [{ sql: 3 }, {}] })).error.message,
+    'Malformed input: [{"sql":3},{}], should be {sql: string, params?: any[]} or an array of these query objects',
+  );
   for (const queries of [[], [{ sql: "" }], [{ sql: "  " }]]) {
     assert.equal(
       (await transport.query({ queries })).error.message,

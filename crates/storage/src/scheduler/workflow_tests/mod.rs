@@ -14,6 +14,7 @@ const TEST_EIGHT_VALUE: &str = "T0NEVgECBEAgAAAAAAAA";
 
 mod durable_history_tests;
 mod durable_protocol_tests;
+mod retention_tests;
 
 #[test]
 fn workflow_projection_rejects_another_instance() {

@@ -125,7 +125,7 @@ pub(super) async fn run_loaded(
                 .as_ref()
                 .map(|_| gateway_config(&loaded, scope, registry))
                 .transpose()?;
-            let report = Box::pin(doctor_report(&loaded, mode, gateway.as_ref())).await;
+            let report = Box::pin(doctor_report(&loaded, mode, scope, gateway.as_ref())).await;
             report.write(stdout, json)?;
             if report.failed() {
                 Ok(ExitCode::from(ExitClass::Doctor.code()))

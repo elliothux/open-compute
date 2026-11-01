@@ -1,20 +1,19 @@
 use super::*;
 
 pub(super) async fn run() {
-    let dir = TempDir::new().unwrap();
+    let dir = TempDir::new_in("/tmp").unwrap();
     let runtime = verified(dir.path()).await;
     let data = dir.path().join("d");
     fs::create_dir(&data).unwrap();
     let n = Arc::new(std::sync::atomic::AtomicU32::new(0));
     let data2 = data.clone();
     let n_spawn = n.clone();
-    let compiler = FnCompiler(move |token: SecretString, id: StartupId| {
+    let compiler = FnCompiler(move |id: StartupId| {
         let data = data2.clone();
         let attempt = n_spawn.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         Box::pin(async move {
             if attempt == 0 {
-                let body =
-                    serde_json::json!({"mode": "crash_after_ready", "token": token.expose()});
+                let body = serde_json::json!({"mode": "crash_after_ready", "socket": data.join("ingress.sock")});
                 let digest = id.to_string().replace('-', "");
                 CompiledConfig::from_bytes_for_test(
                     &data,
@@ -49,7 +48,6 @@ pub(super) async fn run() {
             jitter: Arc::new(SequenceJitter::new(vec![0, 0, 0, 0])),
             lease_path: None,
         },
-        Vec::new(),
         Vec::new(),
         Vec::new(),
     );

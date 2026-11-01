@@ -1,7 +1,7 @@
 use super::*;
 
 pub(super) async fn run() {
-    let dir = TempDir::new().unwrap();
+    let dir = TempDir::new_in("/tmp").unwrap();
     let runtime = verified(dir.path()).await;
     let data = dir.path().join("d");
     fs::create_dir(&data).unwrap();
@@ -19,7 +19,6 @@ pub(super) async fn run() {
         },
         Vec::new(),
         Vec::new(),
-        Vec::new(),
     );
     sup.start();
     let snap = wait_state(&sup, SupervisorState::Running).await;
@@ -27,8 +26,5 @@ pub(super) async fn run() {
         snap.last_transition_at,
         UNIX_EPOCH + Duration::from_secs(42)
     );
-    let _ = token_fingerprint(&SecretString::new(
-        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    ));
     sup.shutdown().await;
 }

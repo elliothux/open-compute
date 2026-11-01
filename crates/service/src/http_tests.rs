@@ -19,7 +19,12 @@ async fn gateway_upstream_owns_only_its_private_socket() {
     assert_eq!(fs::read(&path).unwrap(), b"preserve");
     fs::remove_file(&path).unwrap();
 
+    fs::set_permissions(directory.path(), fs::Permissions::from_mode(0o755)).unwrap();
     let upstream = PrivateUnixListener::bind(path.clone()).unwrap();
+    assert_eq!(
+        fs::metadata(directory.path()).unwrap().permissions().mode() & 0o777,
+        0o700
+    );
     let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode, 0o600);
     drop(upstream);
@@ -710,4 +715,13 @@ async fn operator_session_exchange_requires_same_origin_and_accepts_login_code()
     let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
     let token = payload["session_token"].as_str().unwrap();
     assert!(auth.session_valid(token, std::time::SystemTime::now()));
+}
+
+#[tokio::test]
+async fn private_unix_listener_rejects_long_paths_before_creating_directories() {
+    let directory = tempfile::tempdir_in("/tmp").unwrap();
+    let parent = directory.path().join("x".repeat(104));
+    assert!(PrivateUnixListener::bind(parent.join("internal.sock")).is_err());
+    assert!(!parent.exists());
+    assert!(PrivateUnixListener::bind(PathBuf::from("relative.sock")).is_err());
 }

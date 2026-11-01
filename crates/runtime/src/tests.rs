@@ -5,8 +5,7 @@ use crate::compile::{
     set_after_config_rename_hook,
 };
 use crate::digest::{
-    BINDING_TOKEN_PLACEHOLDER, DigestInputs, OBSERVABILITY_TOKEN_PLACEHOLDER, PlatformReleaseMeta,
-    config_input_digest, digest_for, load_assets, render_config_with_tokens, validate_token,
+    DigestInputs, PlatformReleaseMeta, config_input_digest, digest_for, load_assets, render_config,
 };
 use crate::fsutil::{
     FILE_MODE, clear_publish_hook, set_publish_hook, set_test_max_asset_entries,
@@ -26,18 +25,12 @@ use std::fs::{self, File};
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tempfile::TempDir;
 
 const VERSION: &str = "workerd 2026-08-30";
 const TOKEN: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-const TOKEN_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
-const TOKEN_C: &str = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
-const TOKEN_D: &str = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
-static TEST_BINDING_TOKEN: LazyLock<SecretString> = LazyLock::new(|| SecretString::new(TOKEN_B));
-static TEST_OBSERVABILITY_TOKEN: LazyLock<SecretString> =
-    LazyLock::new(|| SecretString::new(TOKEN_C));
 
 fn sha256_file(path: &Path) -> String {
     let bytes = fs::read(path).expect("read");
@@ -228,7 +221,6 @@ fn compile_req<'a>(
     assets: &'a Path,
     data: &'a Path,
     platform: &'a PlatformReleaseMeta,
-    token: &'a SecretString,
     redactor: &'a Redactor,
     deadline: Duration,
 ) -> CompileRequest<'a> {
@@ -239,9 +231,7 @@ fn compile_req<'a>(
         assets_dir: assets,
         runtime_data_dir: data,
         platform,
-        token,
-        binding_token: &TEST_BINDING_TOKEN,
-        observability_token: &TEST_OBSERVABILITY_TOKEN,
+        ingress_socket: Path::new("/tmp/oc-runtime.sock"),
         durable_objects: open_compute_core::DurableObjectsConfig::default(),
         container_provider: None,
         deadline,
@@ -284,7 +274,7 @@ mod lock_validation_rejects_every_malformed_authority_field;
 
 mod lock_target_url_identity_and_accessors_are_strict;
 
-mod digest_assets_tokens_and_supervisor_auth_are_fail_closed;
+mod digest_assets_and_unix_addresses_are_fail_closed;
 mod native_container_protocol;
 
 mod missing_directory_rejected_before_version;

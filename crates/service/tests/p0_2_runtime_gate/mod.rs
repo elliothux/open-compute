@@ -18,9 +18,9 @@ use open_compute_core::{
     ReadinessReason, Redactor, RequestId, SecretString,
 };
 use open_compute_runtime::{
-    DirectoryServicePath, ExternalServiceAddress, GenerationAuthRegistry, OsJitter,
-    PlatformReleaseMeta, StaticConfigCompiler, SupervisorState, WorkerdSupervisor,
-    WorkerdSupervisorOptions, verify_runtime_binary,
+    DirectoryServicePath, ExternalServiceAddress, OsJitter, PlatformReleaseMeta,
+    StaticConfigCompiler, SupervisorState, WorkerdSupervisor, WorkerdSupervisorOptions,
+    verify_runtime_binary,
 };
 use open_compute_service::http::{HttpState, merged_router};
 use open_compute_service::runtime_bridge::{
@@ -80,6 +80,7 @@ async fn deploy_egress(
     account: open_compute_core::InstanceId,
     worker: open_compute_core::WorkerId,
     fixture: Option<&EgressFixture>,
+    internal_sockets: &[PathBuf],
 ) -> open_compute_storage::worker_repository::VersionRecord {
     let allowed_targets = fixture.map_or_else(Vec::new, |fixture| {
         vec![
@@ -91,6 +92,10 @@ async fn deploy_egress(
         ]
     });
     let mut vars = BTreeMap::new();
+    vars.insert(
+        "INTERNAL_SOCKETS_JSON".into(),
+        serde_json::json!(serde_json::to_string(internal_sockets).unwrap()),
+    );
     vars.insert(
         "ALLOWED_TARGETS_JSON".to_owned(),
         serde_json::json!(serde_json::to_string(&allowed_targets).unwrap()),
@@ -277,7 +282,7 @@ fn egress_fixture_from_env() -> Option<EgressFixture> {
 }
 
 async fn run_tls_fixture(workerd: &Path, root: &Path, fixture: &EgressFixture) {
-    let temp = tempfile::tempdir().expect("TLS fixture tempdir");
+    let temp = tempfile::tempdir_in("/tmp").expect("TLS fixture tempdir");
     for name in ["p0-2-tls.wd-test", "p0-2-tls.js"] {
         std::fs::copy(
             root.join("test/runtime/fixtures").join(name),

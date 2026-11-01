@@ -2,17 +2,13 @@
 
 use open_compute_core::{ErrorCode, PlatformError};
 use serde::Deserialize;
-use std::net::{Ipv4Addr, SocketAddrV4};
 
 const MAX_LINE: usize = 4096;
 const MAX_TOTAL: usize = 16 * 1024;
 
 /// Successful loopback HTTP listen report.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ListenEvent {
-    /// Ephemeral port assigned by the OS.
-    pub(crate) port: u16,
-}
+pub(crate) struct ListenEvent;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -97,36 +93,21 @@ impl ControlParser {
         if msg.socket != "http" {
             return Err(malformed("control-fd listen socket is not http"));
         }
-        if msg.port == 0 || msg.port > u64::from(u16::MAX) {
-            return Err(malformed("control-fd listen port is invalid"));
-        }
-        let port =
-            u16::try_from(msg.port).map_err(|_| malformed("control-fd listen port is invalid"))?;
-        if let Some(addr) = msg.address.as_deref() {
-            validate_address(addr, port)?;
+        if msg.port != 0
+            || msg
+                .address
+                .as_deref()
+                .is_some_and(|address| !address.starts_with("unix:/"))
+        {
+            return Err(malformed("control-fd listen address is not a Unix socket"));
         }
         if self.seen {
             return Err(malformed("control-fd emitted a duplicate listen event"));
         }
         self.seen = true;
-        self.listen = Some(ListenEvent { port });
+        self.listen = Some(ListenEvent);
         Ok(())
     }
-}
-
-fn validate_address(text: &str, port: u16) -> Result<(), PlatformError> {
-    let sock: SocketAddrV4 = text
-        .parse()
-        .map_err(|_| malformed("control-fd listen address is not a valid IPv4 socket address"))?;
-    if *sock.ip() != Ipv4Addr::LOCALHOST {
-        return Err(malformed("control-fd listen address is not loopback"));
-    }
-    if sock.port() != port {
-        return Err(malformed(
-            "control-fd listen address port does not match the listen port",
-        ));
-    }
-    Ok(())
 }
 
 fn malformed(message: &'static str) -> PlatformError {

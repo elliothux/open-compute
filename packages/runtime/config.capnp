@@ -1,9 +1,7 @@
 using Workerd = import "/workerd/workerd.capnp";
 
-const internalToken :Text = "__OPEN_COMPUTE_INTERNAL_TOKEN__";
-const doRouterRpcHost :Text = "__OPEN_COMPUTE_DO_RPC_HOST__";
-const bindingToken :Text = "__OPEN_COMPUTE_BINDING_TOKEN__";
-const observabilityToken :Text = "__OPEN_COMPUTE_OBSERVABILITY_TOKEN__";
+const ingressAddress :Text = "__OPEN_COMPUTE_INGRESS_ADDRESS__";
+const doRouterRpcHost :Text = "do-router";
 const doMaxObjectNameBytes :Text = "__OPEN_COMPUTE_DO_MAX_OBJECT_NAME_BYTES__";
 const doMaxFetchBodyBytes :Text = "__OPEN_COMPUTE_DO_MAX_FETCH_BODY_BYTES__";
 const doDispatchTimeoutMs :Text = "__OPEN_COMPUTE_DO_DISPATCH_TIMEOUT_MS__";
@@ -48,7 +46,7 @@ const config :Workerd.Config = (
     (name = "do-router", worker = .doHostWorker),
     (name = "do-storage", disk = (writable = true, allowDotfiles = true)),
     # The address is deliberately omitted from the compiled config. ocd
-    # injects a generation-local loopback listener with --external-addr.
+    # injects a private Unix listener with --external-addr.
     (name = "runtime-source", external = (http = ())),
     (name = "binding-backend", external = (http = ())),
     (name = "observability-backend", external = (http = ())),
@@ -60,7 +58,7 @@ const config :Workerd.Config = (
   ],
 
   sockets = [
-    (name = "http", address = "127.0.0.1:0", http = (capnpConnectHost = .doRouterRpcHost), service = "ingress"),
+    (name = "http", address = .ingressAddress, http = (capnpConnectHost = .doRouterRpcHost), service = "ingress"),
   ],
 );
 
@@ -75,7 +73,6 @@ const prepareConfig :Workerd.Config = (
     (name = "browser-actions", worker = .browserActionsWorker),
     (name = "do-router", external = (http = (
       capnpConnectHost = .doRouterRpcHost,
-      injectRequestHeaders = [(name = "x-open-compute-internal-token", value = .internalToken)],
     ))),
     (name = "runtime-source", external = (http = ())),
     (name = "binding-backend", external = (http = ())),
@@ -87,7 +84,7 @@ const prepareConfig :Workerd.Config = (
     )),
   ],
   sockets = [
-    (name = "http", address = "127.0.0.1:0", http = (), service = "ingress"),
+    (name = "http", address = .ingressAddress, http = (), service = "ingress"),
   ],
 );
 
@@ -96,11 +93,9 @@ const ingressWorker :Workerd.Worker = (
   compatibilityFlags = __OPEN_COMPUTE_SYSTEM_COMPATIBILITY_FLAGS__,
   modules = [
     (name = "gateway/ingress.js", esModule = embed "dist/gateway/ingress.js"),
-    (name = "gateway/token.js", esModule = embed "dist/gateway/token.js"),
     (name = "sockets/tunnel.js", esModule = embed "dist/sockets/tunnel.js"),
   ],
   bindings = [
-    (name = "INTERNAL_TOKEN", text = .internalToken),
     (name = "LOADER_HOST", service = "loader-host"),
     (name = "BROWSER_ACTIONS", service = "browser-actions"),
     (name = "DO_ROUTER", service = "do-router"),
@@ -115,7 +110,6 @@ const loaderHostWorker :Workerd.Worker = (
     (name = "loader/host.js", esModule = embed "dist/loader/host.js"),
     (name = "loader/python-prepare.js", esModule = embed "dist/loader/python-prepare.js"),
     (name = "loader/python-snapshot.js", esModule = embed "dist/loader/python-snapshot.js"),
-    (name = "gateway/token.js", esModule = embed "dist/gateway/token.js"),
     (name = "loader/dispatch.js", esModule = embed "dist/loader/dispatch.js"),
     (name = "loader/envelope.js", esModule = embed "dist/loader/envelope.js"),
     (name = "loader/transports.js", esModule = embed "dist/loader/transports.js"),
@@ -178,10 +172,7 @@ const loaderHostWorker :Workerd.Worker = (
     (name = "QUEUE_WIRE_CODEC", openComputeQueueCodec = void),
     (name = "RUNTIME_SOURCE", service = "runtime-source"),
     (name = "BINDING_BACKEND", service = "binding-backend"),
-    (name = "BINDING_BACKEND_TOKEN", text = .bindingToken),
     (name = "OBSERVABILITY_BACKEND", service = "observability-backend"),
-    (name = "OBSERVABILITY_BACKEND_TOKEN", text = .observabilityToken),
-    (name = "INTERNAL_TOKEN", text = .internalToken),
     (name = "DO_ROUTER", service = "do-router"),
     (name = "OUTBOUND_NETWORK", service = "outbound-network"),
     (name = "DO_MAX_OBJECT_NAME_BYTES", text = .doMaxObjectNameBytes),
@@ -208,7 +199,6 @@ const doHostWorker :Workerd.Worker = (
     (name = "durable-objects/host-protocol.js", esModule = embed "dist/durable-objects/host-protocol.js"),
     (name = "durable-objects/identity.js", esModule = embed "dist/durable-objects/identity.js"),
     (name = "loader/host.js", esModule = embed "dist/loader/host.js"),
-    (name = "gateway/token.js", esModule = embed "dist/gateway/token.js"),
     (name = "loader/python-prepare.js", esModule = embed "dist/loader/python-prepare.js"),
     (name = "loader/python-snapshot.js", esModule = embed "dist/loader/python-snapshot.js"),
     (name = "loader/dispatch.js", esModule = embed "dist/loader/dispatch.js"),
@@ -272,10 +262,7 @@ const doHostWorker :Workerd.Worker = (
     (name = "QUEUE_WIRE_CODEC", openComputeQueueCodec = void),
     (name = "RUNTIME_SOURCE", service = "runtime-source"),
     (name = "BINDING_BACKEND", service = "binding-backend"),
-    (name = "BINDING_BACKEND_TOKEN", text = .bindingToken),
     (name = "OBSERVABILITY_BACKEND", service = "observability-backend"),
-    (name = "OBSERVABILITY_BACKEND_TOKEN", text = .observabilityToken),
-    (name = "INTERNAL_TOKEN", text = .internalToken),
     (name = "DO_ROUTER", service = "do-router"),
     (name = "DO_HOST", durableObjectNamespace = "DoHost"),
     (name = "NATIVE_DO_ID", wrapped = (moduleName = "cloudflare-internal:open-compute-do-id")),
@@ -308,7 +295,5 @@ const browserActionsWorker :Workerd.Worker = (
   modules = [(name = "browser/actions.js", esModule = embed "dist/browser/actions.js")],
   bindings = [
     (name = "BINDING_BACKEND", service = "binding-backend"),
-    (name = "BINDING_BACKEND_TOKEN", text = .bindingToken),
-    (name = "INTERNAL_TOKEN", text = .internalToken),
   ],
 );

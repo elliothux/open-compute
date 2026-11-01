@@ -1,6 +1,6 @@
 use super::*;
 use crate::workflow_http::tests::{Fixture, fixture};
-use open_compute_core::{RequestId, SecretString, WorkflowId, WorkflowOperationId};
+use open_compute_core::{RequestId, WorkflowId, WorkflowOperationId};
 use open_compute_storage::scheduler::{WorkflowCompletion, WorkflowState};
 use open_compute_storage::worker_repository::{NewVersion, NewVersionProducts, WorkerRepository};
 use open_compute_storage::workflows::WorkflowBindingRecord;
@@ -145,6 +145,6 @@ mod workflow_private_dynamic_delay_round_trip_is_durable;
 
 mod workflow_private_protocol_rejects_shape_drift_and_persists_failure_delay;
 
-mod workflow_private_http_is_bounded_and_rechecks_startup_generation;
+mod workflow_private_http_is_bounded;
 
 mod workflow_metric_guards_count_all_outcomes_without_sensitive_labels;

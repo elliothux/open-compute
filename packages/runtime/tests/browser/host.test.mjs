@@ -5,7 +5,7 @@ import { importRuntime, moduleUrl } from "../compiled-runtime.mjs";
 const { BrowserTransport } = await importRuntime("browser/host.ts", {
   "cloudflare:workers": moduleUrl("export class WorkerEntrypoint {}"),
   "../loader/shared.js": moduleUrl(
-    `export const BINDING_TOKEN_HEADER = "x-open-compute-binding-token"; export const currentStartupGeneration = () => "current-generation"; export const bindingError = code => new Error(code);`,
+    `export const currentStartupGeneration = () => "current-generation"; export const bindingError = code => new Error(code);`,
   ),
 });
 
@@ -23,20 +23,16 @@ test("BrowserTransport overwrites authority and strips caller credentials for HT
     },
   };
   transport.env = {
-    BINDING_BACKEND_TOKEN: "private-token",
     BINDING_BACKEND: {
       fetch: async (request) => {
         assert.equal(
           request.url,
           "http://binding-backend/internal/browser/v1/devtools/browser/session?keep_alive=60000",
         );
-        assert.equal(
-          request.headers.get("x-open-compute-binding-token"),
-          "private-token",
-        );
+        assert.equal(request.headers.get("x-open-compute-binding-token"), null);
         assert.equal(
           request.headers.get("x-open-compute-startup-generation"),
-          "current-generation",
+          null,
         );
         for (const [name, value] of [
           ["instance-id", "instance"],

@@ -200,11 +200,7 @@
               "name": "TypeError",
               "message": "Suffix is incompatible with length."
             },
-            "emptyRange": {
-              "synchronous": false,
-              "name": "Error",
-              "message": "get: We encountered an internal error. Please try again. (10001)"
-            },
+            "emptyRange": null,
             "malformedRangeHeader": null,
             "multiRangeHeader": null,
             "quotedMatch": {

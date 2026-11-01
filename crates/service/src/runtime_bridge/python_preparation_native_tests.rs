@@ -138,30 +138,18 @@ async fn fresh_native_preparation_publishes_once_and_reaps_after_import_rejectio
         pin.clone(),
     )
     .unwrap();
-    let source_listener = bind_runtime_source().await.unwrap();
-    let source_port = source_listener.local_addr().unwrap().port();
-    let services = ["runtime-source", "binding-backend", "observability-backend"].map(|name| {
-        let auth = GenerationAuthRegistry::new();
-        auth.activate_for_test(SecretString::new(format!("{:064x}", name.len())));
-        let port = if name == "runtime-source" {
-            source_port
-        } else {
-            9
-        };
-        (
-            auth,
-            ExternalServiceAddress::loopback(
-                name,
-                SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port),
-            )
-            .unwrap(),
-        )
-    });
+    let source_listener_dir = tempfile::tempdir_in("/tmp").unwrap();
+
+    let source_listener = bind_runtime_source(&source_listener_dir.path().join("backend.sock"))
+        .await
+        .unwrap();
+    let source_port = source_listener.path().to_owned();
+    let services = ["runtime-source", "binding-backend", "observability-backend"]
+        .map(|name| ExternalServiceAddress::unix(name, &source_port).unwrap());
     let (stop, stopped) = oneshot::channel();
     let source_server = tokio::spawn(serve_runtime_source(
         source_listener,
         source.clone(),
-        services[0].0.clone(),
         None,
         async {
             let _ = stopped.await;
@@ -181,7 +169,8 @@ async fn fresh_native_preparation_publishes_once_and_reaps_after_import_rejectio
         .unwrap(),
     );
     // This component supplies parent-generation admission; it does not run the daemon.
-    let mut transport = WorkerdTransport::for_test_endpoint(services[0].0.clone(), 9);
+    let mut transport =
+        WorkerdTransport::for_test_endpoint(std::path::Path::new("/tmp/missing.sock"));
     transport.test_generation = Some(open_compute_core::StartupId::generate());
     let preparation = Arc::new(PythonPreparation {
         storage: storage.clone(),

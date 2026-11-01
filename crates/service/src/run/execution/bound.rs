@@ -13,15 +13,12 @@ pub(super) struct BoundPlatform {
     pub(super) images: Arc<ImageBindingService>,
     pub(super) browser: Option<Arc<crate::browser::BrowserService>>,
     pub(super) document_parser: Arc<DocumentParserBindingService>,
-    pub(super) generation_auth: GenerationAuthRegistry,
-    pub(super) binding_generation_auth: GenerationAuthRegistry,
-    pub(super) observability_generation_auth: GenerationAuthRegistry,
-    pub(super) runtime_source_listener: tokio::net::TcpListener,
-    pub(super) runtime_source_addr: SocketAddr,
-    pub(super) binding_backend_listener: tokio::net::TcpListener,
-    pub(super) binding_backend_addr: SocketAddr,
-    pub(super) observability_backend_listener: tokio::net::TcpListener,
-    pub(super) observability_backend_addr: SocketAddr,
+    pub(super) runtime_source_listener: http::PrivateUnixListener,
+    pub(super) runtime_source_addr: std::path::PathBuf,
+    pub(super) binding_backend_listener: http::PrivateUnixListener,
+    pub(super) binding_backend_addr: std::path::PathBuf,
+    pub(super) observability_backend_listener: http::PrivateUnixListener,
+    pub(super) observability_backend_addr: std::path::PathBuf,
     pub(super) compiler: StaticConfigCompiler,
     pub(super) store: ArtifactStore,
     pub(super) package: open_compute_runtime::RuntimePackage,
@@ -68,9 +65,6 @@ pub(super) async fn run(platform: BoundPlatform) -> Result<(), PlatformError> {
         images,
         browser,
         document_parser,
-        generation_auth,
-        binding_generation_auth,
-        observability_generation_auth,
         runtime_source_listener,
         runtime_source_addr,
         binding_backend_listener,
@@ -136,34 +130,20 @@ pub(super) async fn run(platform: BoundPlatform) -> Result<(), PlatformError> {
             runtime_config: loaded.config.runtime.clone(),
             durable_objects: loaded.config.durable_objects.clone(),
             services: [
-                (
-                    generation_auth.clone(),
-                    ExternalServiceAddress::loopback("runtime-source", runtime_source_addr)?,
-                ),
-                (
-                    binding_generation_auth.clone(),
-                    ExternalServiceAddress::loopback("binding-backend", binding_backend_addr)?,
-                ),
-                (
-                    observability_generation_auth.clone(),
-                    ExternalServiceAddress::loopback(
-                        "observability-backend",
-                        observability_backend_addr,
-                    )?,
-                ),
+                ExternalServiceAddress::unix("runtime-source", &runtime_source_addr)?,
+                ExternalServiceAddress::unix("binding-backend", &binding_backend_addr)?,
+                ExternalServiceAddress::unix("observability-backend", &observability_backend_addr)?,
             ],
             broker: host_extension_broker.clone(),
             serial: tokio::sync::Mutex::new(()),
         },
     )?;
     let mut shutdown_source = shutdown_rx.clone();
-    let source_auth = generation_auth.clone();
     let source_containers = state.container_service().cloned();
     let runtime_source_task = tokio::spawn(async move {
         serve_runtime_source(
             runtime_source_listener,
             runtime_source,
-            source_auth,
             source_containers,
             async move {
                 let _ = shutdown_source.changed().await;
@@ -173,7 +153,6 @@ pub(super) async fn run(platform: BoundPlatform) -> Result<(), PlatformError> {
     });
     let mut shutdown_binding = shutdown_rx.clone();
     let binding_storage = storage.clone();
-    let binding_auth = binding_generation_auth.clone();
     let binding_metrics = metrics.clone();
     let binding_do_config = loaded.config.durable_objects.clone();
     let binding_queue_config = loaded.config.queues.clone();
@@ -198,7 +177,6 @@ pub(super) async fn run(platform: BoundPlatform) -> Result<(), PlatformError> {
         serve_binding_backend_with_ai_search_and_snapshot_pins(
             binding_backend_listener,
             binding_storage,
-            binding_auth,
             resource_pins,
             binding_executor,
             Some(binding_metrics),
@@ -225,12 +203,10 @@ pub(super) async fn run(platform: BoundPlatform) -> Result<(), PlatformError> {
     });
     let mut shutdown_observability = shutdown_rx.clone();
     let observability_backend_service = observability.clone();
-    let observability_backend_auth = observability_generation_auth.clone();
     let observability_backend_task = tokio::spawn(async move {
         serve_observability_backend(
             observability_backend_listener,
             observability_backend_service,
-            observability_backend_auth,
             async move {
                 let _ = shutdown_observability.changed().await;
             },
@@ -251,19 +227,14 @@ pub(super) async fn run(platform: BoundPlatform) -> Result<(), PlatformError> {
             lease_path: Some(runtime_lease_path),
         },
         vec![
-            ExternalServiceAddress::loopback("runtime-source", runtime_source_addr)?,
-            ExternalServiceAddress::loopback("binding-backend", binding_backend_addr)?,
-            ExternalServiceAddress::loopback("observability-backend", observability_backend_addr)?,
+            ExternalServiceAddress::unix("runtime-source", &runtime_source_addr)?,
+            ExternalServiceAddress::unix("binding-backend", &binding_backend_addr)?,
+            ExternalServiceAddress::unix("observability-backend", &observability_backend_addr)?,
         ],
         vec![DirectoryServicePath::local(
             "do-storage",
             &durable_object_storage,
         )?],
-        vec![
-            generation_auth,
-            binding_generation_auth,
-            observability_generation_auth,
-        ],
         host_extension_socket_registry,
     ));
     *supervisor_handle

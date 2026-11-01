@@ -3,17 +3,14 @@ use super::*;
 /// Streaming client for the current workerd generation.
 #[derive(Clone)]
 pub struct WorkerdTransport {
-    pub(super) client: Client<HttpConnector, Body>,
-    pub(super) body_client: Client<HttpConnector, Body>,
-    pub(super) auth: GenerationAuthRegistry,
     pub(super) supervisor: Arc<Mutex<Option<Arc<WorkerdSupervisor>>>>,
     pub(super) python_preparation: Arc<Mutex<Option<Arc<python_preparation::PythonPreparation>>>>,
     pub(super) max_request_body: usize,
     pub(super) version_pins: Option<VersionPins>,
     pub(super) service_invocations: Option<crate::service_invocations::ServiceInvocationRegistry>,
-    pub(super) workflow_quarantine: Arc<Mutex<Option<open_compute_runtime::GenerationCredential>>>,
+    pub(super) workflow_quarantine: Arc<Mutex<Option<open_compute_core::StartupId>>>,
     #[cfg(test)]
-    pub(super) test_endpoint: Option<u16>,
+    pub(super) test_endpoint: Option<PathBuf>,
     #[cfg(test)]
     pub(crate) test_generation: Option<open_compute_core::StartupId>,
 }
@@ -25,20 +22,10 @@ impl std::fmt::Debug for WorkerdTransport {
 }
 
 impl WorkerdTransport {
-    /// Bind transport to the supervisor slot and generation credential authority.
+    /// Bind transport to the supervisor slot.
     #[must_use]
-    pub fn new(
-        auth: GenerationAuthRegistry,
-        supervisor: Arc<Mutex<Option<Arc<WorkerdSupervisor>>>>,
-    ) -> Self {
-        let mut connector = HttpConnector::new();
-        connector.enforce_http(true);
+    pub fn new(supervisor: Arc<Mutex<Option<Arc<WorkerdSupervisor>>>>) -> Self {
         Self {
-            client: Client::builder(TokioExecutor::new()).build(connector.clone()),
-            body_client: Client::builder(TokioExecutor::new())
-                .pool_max_idle_per_host(0)
-                .build(connector),
-            auth,
             supervisor,
             python_preparation: Arc::new(Mutex::new(None)),
             max_request_body: MAX_TENANT_BODY_BYTES,
@@ -53,10 +40,35 @@ impl WorkerdTransport {
     }
 
     #[cfg(test)]
-    pub(crate) fn for_test_endpoint(auth: GenerationAuthRegistry, port: u16) -> Self {
-        let mut transport = Self::new(auth, Arc::new(Mutex::new(None)));
-        transport.test_endpoint = Some(port);
+    pub(crate) fn for_test_endpoint(socket: &Path) -> Self {
+        let mut transport = Self::new(Arc::new(Mutex::new(None)));
+        transport.test_endpoint = Some(socket.to_owned());
+        transport.test_generation = Some(open_compute_core::StartupId::generate());
         transport
+    }
+
+    pub(super) async fn request(
+        &self,
+        socket: &Path,
+        mut request: Request,
+    ) -> Result<hyper::Response<hyper::body::Incoming>, Box<dyn std::error::Error + Send + Sync>>
+    {
+        request
+            .headers_mut()
+            .entry(header::HOST)
+            .or_insert(HeaderValue::from_static("runtime"));
+        *request.uri_mut() = request
+            .uri()
+            .path_and_query()
+            .map_or("/", hyper::http::uri::PathAndQuery::as_str)
+            .parse()?;
+        let stream = tokio::net::UnixStream::connect(socket).await?;
+        let (mut sender, connection) =
+            hyper::client::conn::http1::handshake(hyper_util::rt::TokioIo::new(stream)).await?;
+        tokio::spawn(async move {
+            let _ = connection.with_upgrades().await;
+        });
+        Ok(sender.send_request(request).await?)
     }
 
     /// Reduce the request body ceiling for bounded transport fault fixtures.
@@ -125,24 +137,25 @@ impl WorkerdTransport {
         authority: &AuthorizedDurableObjectDelete,
     ) -> Result<(), PlatformError> {
         let endpoint = self.endpoint()?;
-        let (port, credential) = (endpoint.port, endpoint.credential);
         let body = serde_json::to_vec(authority).map_err(|_| runtime_unavailable())?;
         let request = hyper::Request::builder()
             .method(Method::POST)
-            .uri(format!("http://127.0.0.1:{port}/internal/do-delete"))
-            .header(TOKEN_HEADER, credential.expose())
+            .uri("http://runtime/internal/do-delete")
             .header(header::CONTENT_TYPE, "application/json")
             .body(Body::from(body))
             .map_err(|_| runtime_unavailable())?;
-        let response = tokio::time::timeout(RESPONSE_HEADER_TIMEOUT, self.client.request(request))
-            .await
-            .map_err(|_| {
-                PlatformError::new(
-                    ErrorCode::DoDispatchTimeout,
-                    "Durable Object delete result is unknown",
-                )
-            })?
-            .map_err(|_| runtime_unavailable())?;
+        let response = tokio::time::timeout(
+            RESPONSE_HEADER_TIMEOUT,
+            self.request(&endpoint.socket_path, request),
+        )
+        .await
+        .map_err(|_| {
+            PlatformError::new(
+                ErrorCode::DoDispatchTimeout,
+                "Durable Object delete result is unknown",
+            )
+        })?
+        .map_err(|_| runtime_unavailable())?;
         if response.status() == StatusCode::NO_CONTENT {
             Ok(())
         } else {
@@ -153,7 +166,7 @@ impl WorkerdTransport {
         }
     }
 
-    /// Deliver one scheduler claim through the generation-authenticated private alarm path.
+    /// Deliver one scheduler claim through the private private alarm path.
     #[cfg(any(test, feature = "test-support"))]
     pub async fn dispatch_alarm(
         &self,
@@ -218,7 +231,7 @@ impl WorkerdTransport {
         validate_alarm_repair_result(result)
     }
 
-    /// Start a rollout replacement through the generation-authenticated native host.
+    /// Start a rollout replacement through the private native host.
     pub(crate) async fn start_container(
         &self,
         namespace_resource_id: open_compute_core::ResourceId,
@@ -274,18 +287,15 @@ impl WorkerdTransport {
         body: &impl Serialize,
     ) -> Result<T, PlatformError> {
         let endpoint = self.endpoint()?;
-        let (port, credential) = (endpoint.port, endpoint.credential);
         let bytes = serde_json::to_vec(body).map_err(|_| alarm_protocol_error())?;
         let request = hyper::Request::builder()
             .method(Method::POST)
-            .uri(format!("http://127.0.0.1:{port}{path}"))
-            .header(TOKEN_HEADER, credential.expose())
+            .uri(format!("http://runtime{path}"))
             .header(header::CONTENT_TYPE, "application/json")
             .body(Body::from(bytes))
             .map_err(|_| alarm_protocol_error())?;
         let response = self
-            .client
-            .request(request)
+            .request(&endpoint.socket_path, request)
             .await
             .map_err(|_| runtime_unavailable())?;
         if !response.status().is_success() {
@@ -385,11 +395,9 @@ impl WorkerdTransport {
 
     pub(super) fn endpoint(&self) -> Result<EndpointSnapshot, PlatformError> {
         #[cfg(test)]
-        if let Some(port) = self.test_endpoint {
-            let credential = self.auth.credential().ok_or_else(runtime_unavailable)?;
+        if let Some(socket_path) = &self.test_endpoint {
             return Ok(EndpointSnapshot {
-                port,
-                credential,
+                socket_path: socket_path.clone(),
                 startup_id: self.test_generation,
             });
         }
@@ -403,11 +411,9 @@ impl WorkerdTransport {
         if snapshot.state != SupervisorState::Running {
             return Err(runtime_unavailable());
         }
-        let port = snapshot.listen_port.ok_or_else(runtime_unavailable)?;
-        let credential = self.auth.credential().ok_or_else(runtime_unavailable)?;
+        let socket_path = snapshot.ingress_socket.ok_or_else(runtime_unavailable)?;
         Ok(EndpointSnapshot {
-            port,
-            credential,
+            socket_path,
             startup_id: snapshot.startup_id,
         })
     }

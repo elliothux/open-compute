@@ -10,15 +10,9 @@ impl ContainerService {
         &self,
         authority: &ContainerObjectAuthority,
         lease: &ContainerLease,
-        auth: &GenerationAuthRegistry,
-        credential: &GenerationCredential,
     ) -> Result<Vec<(ContainerDirectoryRestore, Option<ContainerImage>)>, PlatformError> {
-        let inputs = auth
-            .with_current(credential, || {
-                ContainerAuthority::new(self.storage.db())
-                    .directory_restore_inputs(authority, &lease.opaque_engine_key)
-            })
-            .ok_or_else(unavailable)??;
+        let inputs = ContainerAuthority::new(self.storage.db())
+            .directory_restore_inputs(authority, &lease.opaque_engine_key)?;
         if inputs
             .iter()
             .map(|(entry, _)| entry)
@@ -34,13 +28,11 @@ impl ContainerService {
         authority: &ContainerObjectAuthority,
         lease: &ContainerLease,
         registration: &BrokerLease,
-        auth: &GenerationAuthRegistry,
-        credential: &GenerationCredential,
     ) -> Result<(), PlatformError> {
         if lease.directory_snapshots.is_empty() {
             return Ok(());
         }
-        let inputs = self.current_directory_inputs(authority, lease, auth, credential)?;
+        let inputs = self.current_directory_inputs(authority, lease)?;
         let observed = self.provider.observe(&lease.opaque_engine_key).await?;
         if observed.image != registration.image
             || observed.manifest_sha256 != registration.manifest_sha256
@@ -100,7 +92,7 @@ impl ContainerService {
                 })
                 .await
                 .map_err(|_| unavailable())??;
-                if self.current_directory_inputs(authority, lease, auth, credential)? != inputs {
+                if self.current_directory_inputs(authority, lease)? != inputs {
                     return Err(unavailable());
                 }
                 self.provider
@@ -108,7 +100,7 @@ impl ContainerService {
                     .await?;
             }
         }
-        if self.current_directory_inputs(authority, lease, auth, credential)? != inputs {
+        if self.current_directory_inputs(authority, lease)? != inputs {
             return Err(unavailable());
         }
         Ok(())

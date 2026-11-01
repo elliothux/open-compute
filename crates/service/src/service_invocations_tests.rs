@@ -308,10 +308,10 @@ fn extension_admission_reuses_only_the_current_generation_session() {
     let other = self::fixture();
     let other_registry = ServiceInvocationRegistry::new(other.storage, VersionPins::new())
         .with_local_extensions(extensions.clone());
-    other_registry.activate_generation("first");
+
     let registry = ServiceInvocationRegistry::new(fixture.storage, VersionPins::new())
         .with_local_extensions(extensions);
-    registry.activate_generation("first");
+
     let first = registry
         .resolve(&resolve_request(caller_version, "FILES", digest, None))
         .unwrap();
@@ -343,7 +343,7 @@ fn extension_admission_reuses_only_the_current_generation_session() {
         Some("local-files")
     );
 
-    registry.activate_generation("second");
+    registry.clear_after_child_exit();
     assert!(registry.extension_for_session(&first_identity).is_none());
     let third = registry
         .resolve(&resolve_request(caller_version, "FILES", digest, None))
@@ -439,7 +439,7 @@ fn private_http_admission_rechecks_grants_reuses_sessions_and_allows_only_fetch(
     );
     let registry = ServiceInvocationRegistry::new(fixture.storage, VersionPins::new())
         .with_local_extensions(extensions);
-    registry.activate_generation("private-http");
+
     let first = registry
         .resolve(&fetch_request(version, "INVENTORY", digest))
         .unwrap();
@@ -467,7 +467,7 @@ fn private_http_admission_rechecks_grants_reuses_sessions_and_allows_only_fetch(
             .code(),
         ErrorCode::ServiceBindingDenied
     );
-    registry.activate_generation("replacement");
+    registry.clear_after_child_exit();
     assert!(registry.private_http_for_session(&first_identity).is_none());
 }
 
@@ -695,8 +695,6 @@ async fn private_websocket_handoff_body_keeps_pins_until_caller_disconnects() {
     use axum::body::Body;
     use axum::http::{Request, StatusCode, header};
     use http_body_util::BodyExt as _;
-    use open_compute_core::SecretString;
-    use open_compute_runtime::GenerationAuthRegistry;
 
     let fixture = fixture();
     let pins = VersionPins::new();
@@ -705,11 +703,7 @@ async fn private_websocket_handoff_body_keeps_pins_until_caller_disconnects() {
         pins.clone(),
         Duration::from_millis(50),
     );
-    let auth = GenerationAuthRegistry::new();
-    let token = "ab".repeat(32);
-    auth.activate_for_test(SecretString::new(&token));
-    assert!(auth.authorize(&token, "generation"));
-    registry.activate_generation("generation");
+
     let admission = registry
         .resolve(&fetch_request(
             fixture.caller_version,
@@ -724,15 +718,8 @@ async fn private_websocket_handoff_body_keeps_pins_until_caller_disconnects() {
             serde_json::to_vec(&serde_json::json!({ "handles": [admission.handle] })).unwrap(),
         ))
         .unwrap();
-    let response = crate::binding_backend::handle_service_invocation(
-        &registry,
-        &auth,
-        &token,
-        "generation",
-        None,
-        request,
-    )
-    .await;
+    let response =
+        crate::binding_backend::handle_service_invocation(&registry, None, request).await;
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
         response.headers()[header::CONTENT_TYPE],
@@ -765,8 +752,7 @@ async fn private_websocket_handoff_peer_disconnect_drops_the_pending_http_body()
     use axum::body::Body;
     use axum::http::Request;
     use axum::{Router, routing::post};
-    use open_compute_core::SecretString;
-    use open_compute_runtime::GenerationAuthRegistry;
+
     use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
     let fixture = fixture();
@@ -776,11 +762,7 @@ async fn private_websocket_handoff_peer_disconnect_drops_the_pending_http_body()
         pins.clone(),
         Duration::from_secs(1),
     );
-    let auth = GenerationAuthRegistry::new();
-    let token = "ab".repeat(32);
-    auth.activate_for_test(SecretString::new(&token));
-    assert!(auth.authorize(&token, "generation"));
-    registry.activate_generation("generation");
+
     let admission = registry
         .resolve(&fetch_request(
             fixture.caller_version,
@@ -788,37 +770,34 @@ async fn private_websocket_handoff_peer_disconnect_drops_the_pending_http_body()
             fixture.caller_digest,
         ))
         .unwrap();
-    let listener = crate::binding_backend::bind_binding_backend()
-        .await
-        .unwrap();
-    let address = listener.local_addr().unwrap();
+    let listener_dir = tempfile::tempdir_in("/tmp").unwrap();
+    let mut listener =
+        crate::binding_backend::bind_binding_backend(&listener_dir.path().join("backend.sock"))
+            .await
+            .unwrap();
+    let address = listener.path().to_owned();
     let server_registry = registry.clone();
     let app = Router::new().route(
         "/internal/services/v1/websocket/handoff",
         post(move |request: Request<Body>| {
             let registry = server_registry.clone();
-            let auth = auth.clone();
-            let token = token.clone();
+
             async move {
-                crate::binding_backend::handle_service_invocation(
-                    &registry,
-                    &auth,
-                    &token,
-                    "generation",
-                    None,
-                    request,
-                )
-                .await
+                crate::binding_backend::handle_service_invocation(&registry, None, request).await
             }
         }),
     );
-    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-    let mut peer = tokio::net::TcpStream::connect(address).await.unwrap();
+    let server = tokio::spawn(async move {
+        axum::serve(listener.take_listener().unwrap(), app)
+            .await
+            .unwrap();
+    });
+    let mut peer = tokio::net::UnixStream::connect(&address).await.unwrap();
     let payload =
         serde_json::to_string(&serde_json::json!({ "handles": [admission.handle] })).unwrap();
     peer.write_all(
         format!(
-            "POST /internal/services/v1/websocket/handoff HTTP/1.1\r\nHost: {address}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{payload}",
+            "POST /internal/services/v1/websocket/handoff HTTP/1.1\r\nHost: runtime\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{payload}",
             payload.len(),
         )
         .as_bytes(),
@@ -866,19 +845,13 @@ async fn private_websocket_handoff_peer_disconnect_drops_the_pending_http_body()
 }
 
 #[tokio::test]
-async fn private_websocket_handoff_rejects_stale_auth_and_bad_handles_without_mutation() {
+async fn private_websocket_handoff_rejects_bad_handles_without_mutation() {
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
-    use open_compute_core::SecretString;
-    use open_compute_runtime::GenerationAuthRegistry;
 
     let fixture = fixture();
     let registry = ServiceInvocationRegistry::new(fixture.storage, VersionPins::new());
-    let auth = GenerationAuthRegistry::new();
-    let token = "ab".repeat(32);
-    auth.activate_for_test(SecretString::new(&token));
-    assert!(auth.authorize(&token, "generation"));
-    registry.activate_generation("generation");
+
     let fetch = registry
         .resolve(&fetch_request(
             fixture.caller_version,
@@ -901,17 +874,6 @@ async fn private_websocket_handoff_rejects_stale_auth_and_bad_handles_without_mu
             .body(Body::from(bytes))
             .unwrap()
     };
-    for (bad_token, generation) in [("wrong-token", "generation"), (token.as_str(), "stale")] {
-        let request = make_request(
-            serde_json::to_vec(&serde_json::json!({ "handles": [fetch.handle] })).unwrap(),
-        );
-        let response = crate::binding_backend::handle_service_invocation(
-            &registry, &auth, bad_token, generation, None, request,
-        )
-        .await;
-        assert_eq!(response.status(), StatusCode::NOT_FOUND);
-        assert_eq!(registry.counts(), (2, 2, 0));
-    }
     for (payload, status) in [
         (serde_json::json!({}), StatusCode::BAD_REQUEST),
         (
@@ -934,9 +896,6 @@ async fn private_websocket_handoff_rejects_stale_auth_and_bad_handles_without_mu
     ] {
         let response = crate::binding_backend::handle_service_invocation(
             &registry,
-            &auth,
-            &token,
-            "generation",
             None,
             make_request(serde_json::to_vec(&payload).unwrap()),
         )
@@ -946,9 +905,6 @@ async fn private_websocket_handoff_rejects_stale_auth_and_bad_handles_without_mu
     }
     let oversized = crate::binding_backend::handle_service_invocation(
         &registry,
-        &auth,
-        &token,
-        "generation",
         None,
         make_request(vec![b'x'; 16 * 1024 + 1]),
     )
@@ -1249,7 +1205,7 @@ fn confirmed_generation_exit_invalidates_handles_and_releases_every_pin() {
     let fixture = fixture();
     let pins = VersionPins::new();
     let registry = ServiceInvocationRegistry::new(fixture.storage, pins.clone());
-    registry.activate_generation("generation-a");
+
     let admission = registry
         .resolve(&resolve_request(
             fixture.caller_version,
@@ -1266,8 +1222,6 @@ fn confirmed_generation_exit_invalidates_handles_and_releases_every_pin() {
         .unwrap();
     assert_eq!(registry.counts(), (1, 1, 1));
 
-    registry.clear_generation("unrelated-private-claim");
-    assert_eq!(registry.counts(), (1, 1, 1));
     registry.clear_after_child_exit();
 
     assert_eq!(registry.counts(), (0, 0, 0));
@@ -1284,7 +1238,6 @@ fn confirmed_generation_exit_invalidates_handles_and_releases_every_pin() {
         ErrorCode::ServiceBindingDenied
     );
 
-    registry.activate_generation("generation-a");
     let current = registry
         .resolve(&resolve_request(
             fixture.caller_version,
@@ -1293,11 +1246,11 @@ fn confirmed_generation_exit_invalidates_handles_and_releases_every_pin() {
             None,
         ))
         .unwrap();
-    registry.activate_generation("generation-b");
+    registry.clear_after_child_exit();
     assert_eq!(registry.counts(), (0, 0, 0));
     assert_eq!(pins.count(fixture.caller_version), 0);
     assert_eq!(pins.count(fixture.target_version), 0);
-    registry.clear_generation("generation-a");
+    registry.clear_after_child_exit();
     assert_eq!(registry.counts(), (0, 0, 0));
     assert_eq!(
         registry

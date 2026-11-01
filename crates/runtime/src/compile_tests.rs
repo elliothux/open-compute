@@ -21,6 +21,7 @@ async fn compiled_cache_private_helpers_cover_success_cleanup_and_wait_paths() {
     assert_eq!(compiled.read_bytes().unwrap(), bytes);
 
     let forged = CompiledConfig {
+        ingress_socket: tmp.path().join("ingress.sock"),
         role: ConfigRole::Runtime,
         digest: digest.clone(),
         path: path.clone(),

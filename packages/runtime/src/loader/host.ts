@@ -28,7 +28,6 @@ export { WorkflowBindingTransport } from "../workflows/binding.js";
 
 export {
   bindingError,
-  currentStartupGeneration,
   doPolicy,
   resolveSnapshot,
   snapshotWorkerCode,

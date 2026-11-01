@@ -1,35 +1,29 @@
-//! Authenticated readiness probe against the formal system worker.
+//! Unix socket readiness probe against the formal system worker.
 
-use open_compute_core::{ErrorCode, PlatformError, SecretString};
+use open_compute_core::{ErrorCode, PlatformError};
+use std::path::Path;
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
+use tokio::net::UnixStream;
 use tokio::time::timeout;
 
 /// Formal ingress probe contract.
 pub const READY_PATH: &str = "/internal/ready";
-/// Header carrying the generation-scoped internal token.
-pub const TOKEN_HEADER: &str = "x-open-compute-internal-token";
 
 const MAX_RESPONSE: usize = 8 * 1024;
 const MAX_HEADER: usize = 4 * 1024;
 
-pub(crate) async fn probe_ready(
-    port: u16,
-    token: &SecretString,
-    deadline: Duration,
-) -> Result<(), PlatformError> {
-    probe_authenticated(port, token.expose(), READY_PATH, deadline).await
+pub async fn probe_ready(socket: &Path, deadline: Duration) -> Result<(), PlatformError> {
+    probe_path(socket, READY_PATH, deadline).await
 }
 
-/// One authenticated GET against a loopback internal path, expecting 204 with no body.
-pub(super) async fn probe_authenticated(
-    port: u16,
-    token: &str,
+/// One private GET against a Unix socket internal path, expecting 204 with no body.
+pub(super) async fn probe_path(
+    socket: &Path,
     path: &str,
     deadline: Duration,
 ) -> Result<(), PlatformError> {
-    timeout(deadline, probe_once(port, token, path))
+    timeout(deadline, probe_once(socket, path))
         .await
         .map_err(|_| {
             PlatformError::new(
@@ -39,16 +33,14 @@ pub(super) async fn probe_authenticated(
         })?
 }
 
-async fn probe_once(port: u16, token: &str, path: &str) -> Result<(), PlatformError> {
-    let mut stream = TcpStream::connect(("127.0.0.1", port)).await.map_err(|_| {
+async fn probe_once(socket: &Path, path: &str) -> Result<(), PlatformError> {
+    let mut stream = UnixStream::connect(socket).await.map_err(|_| {
         PlatformError::new(
             ErrorCode::RuntimeExitedBeforeReady,
             "runtime readiness probe could not connect",
         )
     })?;
-    let req = format!(
-        "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n{TOKEN_HEADER}: {token}\r\nConnection: close\r\n\r\n"
-    );
+    let req = format!("GET {path} HTTP/1.1\r\nHost: runtime\r\nConnection: close\r\n\r\n");
     stream.write_all(req.as_bytes()).await.map_err(|_| {
         PlatformError::new(
             ErrorCode::RuntimeExitedBeforeReady,
@@ -77,7 +69,7 @@ struct ParsedResponse {
 }
 
 async fn read_http_response(
-    stream: &mut TcpStream,
+    stream: &mut UnixStream,
     deadline: Duration,
 ) -> Result<ParsedResponse, PlatformError> {
     let deadline = Instant::now() + deadline;
@@ -219,15 +211,6 @@ fn find_header_end(buf: &[u8]) -> Option<usize> {
 
 fn probe_err(message: &'static str) -> PlatformError {
     PlatformError::new(ErrorCode::RuntimeExitedBeforeReady, message)
-}
-
-/// Probe with an explicit token string, for wrong-token tests.
-pub async fn probe_ready_with_raw_token(
-    port: u16,
-    token: &str,
-    deadline: Duration,
-) -> Result<(), PlatformError> {
-    probe_authenticated(port, token, READY_PATH, deadline).await
 }
 
 #[cfg(test)]

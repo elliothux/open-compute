@@ -1,7 +1,7 @@
 //! In-process version dispatch pins and deletion fence.
 
-use open_compute_core::{DeploymentId, ErrorCode, PlatformError, VersionId};
-use std::collections::HashMap;
+use open_compute_core::{DeploymentId, ErrorCode, PlatformError, RequestId, VersionId};
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::Notify;
@@ -12,6 +12,8 @@ struct Entry {
     deployments: HashMap<DeploymentId, usize>,
     fenced: bool,
     retained_until_restart: bool,
+    // Separate acknowledgements keep one drained activation from releasing concurrent or cancelled work.
+    awaiting_drain: HashSet<RequestId>,
 }
 
 #[derive(Debug, Default)]
@@ -116,6 +118,49 @@ impl VersionPins {
         Ok(())
     }
 
+    /// Retain a dispatched activation until its exact trusted drain acknowledgement or generation exit.
+    pub fn retain_until_drain(
+        &self,
+        version_id: VersionId,
+        request_id: RequestId,
+    ) -> Result<(), PlatformError> {
+        let mut entries = self
+            .inner
+            .entries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let entry = entries.entry(version_id).or_default();
+        if entry.fenced {
+            return Err(PlatformError::new(
+                ErrorCode::VersionNotReady,
+                "version is fenced for deletion",
+            ));
+        }
+        entry.awaiting_drain.insert(request_id);
+        Ok(())
+    }
+
+    /// Release only the acknowledged activation; late replies cannot release a later generation's work.
+    pub fn release_drained(&self, version_id: VersionId, request_id: RequestId) {
+        let mut entries = self
+            .inner
+            .entries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(entry) = entries.get_mut(&version_id) {
+            entry.awaiting_drain.remove(&request_id);
+            if entry.count == 0
+                && !entry.fenced
+                && !entry.retained_until_restart
+                && entry.awaiting_drain.is_empty()
+            {
+                entries.remove(&version_id);
+            }
+        }
+        drop(entries);
+        self.inner.changed.notify_waiters();
+    }
+
     /// Release conservative background-work holds after the supervised workerd generation exits.
     ///
     /// Ordinary RAII pins remain intact because their Rust owners can outlive the child long
@@ -129,6 +174,7 @@ impl VersionPins {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         entries.retain(|_, entry| {
             entry.retained_until_restart = false;
+            entry.awaiting_drain.clear();
             entry.count > 0 || entry.fenced
         });
         self.inner.changed.notify_waiters();
@@ -169,7 +215,11 @@ impl VersionPins {
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .iter()
                     .filter(|(id, _)| version_ids.contains(id))
-                    .all(|(_, entry)| entry.count == 0 && !entry.retained_until_restart);
+                    .all(|(_, entry)| {
+                        entry.count == 0
+                            && !entry.retained_until_restart
+                            && entry.awaiting_drain.is_empty()
+                    });
                 if empty {
                     return;
                 }
@@ -193,7 +243,8 @@ impl VersionPins {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(entry) = entries.get_mut(&version_id) {
             entry.fenced = false;
-            if entry.count == 0 && !entry.retained_until_restart {
+            if entry.count == 0 && !entry.retained_until_restart && entry.awaiting_drain.is_empty()
+            {
                 entries.remove(&version_id);
             }
         }
@@ -210,10 +261,12 @@ impl VersionPins {
             .entries
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if entries
-            .get(&version_id)
-            .is_some_and(|entry| entry.fenced && entry.count == 0 && !entry.retained_until_restart)
-        {
+        if entries.get(&version_id).is_some_and(|entry| {
+            entry.fenced
+                && entry.count == 0
+                && !entry.retained_until_restart
+                && entry.awaiting_drain.is_empty()
+        }) {
             entries.remove(&version_id);
         }
         self.inner.changed.notify_waiters();
@@ -228,7 +281,7 @@ impl VersionPins {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(&version_id)
             .map_or(0, |entry| {
-                entry.count + usize::from(entry.retained_until_restart)
+                entry.count + usize::from(entry.retained_until_restart) + entry.awaiting_drain.len()
             })
     }
 }
@@ -270,7 +323,11 @@ impl Drop for VersionPin {
                     entry.deployments.remove(&deployment_id);
                 }
             }
-            if entry.count == 0 && !entry.fenced && !entry.retained_until_restart {
+            if entry.count == 0
+                && !entry.fenced
+                && !entry.retained_until_restart
+                && entry.awaiting_drain.is_empty()
+            {
                 entries.remove(&self.version_id);
             }
         }

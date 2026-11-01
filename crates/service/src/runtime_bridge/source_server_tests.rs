@@ -1,6 +1,6 @@
 use super::*;
 use crate::runtime_feature_fixture::RuntimeFeatureFixture;
-use open_compute_core::SecretString;
+
 use open_compute_workers::python_artifact::{
     PreparedPythonIdentity, PythonRuntimePin, publish_prepared_python,
 };
@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 
 #[tokio::test]
 async fn containers_endpoints_preserve_authority_and_require_positive_cleanup() {
-    use crate::containers::test_support::{do_authority, fixture, generation};
+    use crate::containers::test_support::{do_authority, fixture};
     let fixture = fixture().await;
     let image = fixture.admit_image("main").await;
     let authority = do_authority(&fixture.service, &fixture._artifacts, image, true);
@@ -24,7 +24,7 @@ async fn containers_endpoints_preserve_authority_and_require_positive_cleanup() 
     let declarations = repo
         .version_declarations(authority.object.instance_id, target.spec.worker_version_id)
         .unwrap();
-    let (auth, credential) = generation();
+
     let state = SourceState {
         source: RuntimeSource::new(
             fixture._artifacts.storage.clone(),
@@ -39,14 +39,15 @@ async fn containers_endpoints_preserve_authority_and_require_positive_cleanup() 
             },
         )
         .unwrap(),
-        auth: auth.clone(),
         containers: Some(fixture.service.clone()),
     };
     let request = |value: &serde_json::Value| {
         Request::builder()
             .method(Method::POST)
-            .header(TOKEN_HEADER, credential.expose())
-            .header(GENERATION_HEADER, "containers-process")
+            .header(
+                "x-open-compute-startup-generation",
+                "container-unit-generation",
+            )
             .body(Body::from(serde_json::to_vec(value).unwrap()))
             .unwrap()
     };
@@ -119,22 +120,10 @@ async fn containers_endpoints_preserve_authority_and_require_positive_cleanup() 
         StatusCode::NO_CONTENT
     );
     assert_eq!(fixture.protocol.terminated.lock().await.len(), 1);
-    auth.activate_for_test(SecretString::new("rotated"));
-    assert_eq!(
-        container_snapshot(State(state.clone()), request(&snapshot_body))
-            .await
-            .status(),
-        StatusCode::NOT_FOUND
-    );
-    assert_eq!(
-        container_stop(State(state), request(&body)).await.status(),
-        StatusCode::NOT_FOUND
-    );
-    assert_eq!(fixture.protocol.terminated.lock().await.len(), 1);
 }
 
 #[tokio::test]
-async fn container_endpoints_require_generation_auth_and_an_available_provider() {
+async fn container_endpoints_require_an_available_provider() {
     let fixture = Fixture::create().await;
     let frozen = serde_json::json!({
         "instanceId": fixture.base.account,
@@ -206,14 +195,6 @@ async fn container_endpoints_require_generation_auth_and_an_available_provider()
         .status(),
         StatusCode::NOT_FOUND
     );
-    let mut unauthorized = fixture.request(Body::from(serde_json::to_vec(&snapshot_body).unwrap()));
-    unauthorized.headers_mut().remove(TOKEN_HEADER);
-    assert_eq!(
-        container_snapshot(State(fixture.state.clone()), unauthorized)
-            .await
-            .status(),
-        StatusCode::NOT_FOUND
-    );
     assert_eq!(
         container_snapshot(
             State(fixture.state.clone()),
@@ -222,14 +203,6 @@ async fn container_endpoints_require_generation_auth_and_an_available_provider()
         .await
         .status(),
         StatusCode::PAYLOAD_TOO_LARGE
-    );
-    let mut unauthorized = fixture.request(Body::from(serde_json::to_vec(&resolve_body).unwrap()));
-    unauthorized.headers_mut().remove(TOKEN_HEADER);
-    assert_eq!(
-        container_resolve(State(fixture.state.clone()), unauthorized)
-            .await
-            .status(),
-        StatusCode::NOT_FOUND
     );
     assert_eq!(
         container_resolve(
@@ -382,13 +355,12 @@ impl Fixture {
             .unwrap()
             .python_prepared_sha256
             .unwrap();
-        let auth = GenerationAuthRegistry::new();
-        auth.activate_for_test(SecretString::new("a".repeat(64)));
+
         Self {
             base,
             state: SourceState {
                 source,
-                auth,
+
                 containers: None,
             },
             body: serde_json::json!({"key":key,"expectedWorkerCodeSha256":digest,"expectedPreparedSha256":prepared,"scope":"runtime"}),
@@ -399,55 +371,42 @@ impl Fixture {
         Request::builder()
             .method(Method::POST)
             .uri(PYTHON_SNAPSHOT_PATH)
-            .header(TOKEN_HEADER, "a".repeat(64))
-            .header(GENERATION_HEADER, "process-generation")
+            .header(
+                "x-open-compute-startup-generation",
+                "container-unit-generation",
+            )
             .body(body)
             .unwrap()
     }
 }
 
 #[tokio::test]
-async fn python_snapshot_endpoint_returns_only_authenticated_verified_private_binary() {
+async fn python_snapshot_endpoint_returns_only_verified_private_binary() {
     let fixture = Fixture::create().await;
-    let listener = bind_runtime_source().await.unwrap();
-    let address = listener.local_addr().unwrap();
+    let listener_dir = tempfile::tempdir_in("/tmp").unwrap();
+
+    let listener = bind_runtime_source(&listener_dir.path().join("backend.sock"))
+        .await
+        .unwrap();
+    let address = listener.path().to_owned();
     let (shutdown, receiver) = tokio::sync::oneshot::channel();
     let source = fixture.state.source.clone();
-    let auth = fixture.state.auth.clone();
     let server = tokio::spawn(async move {
-        serve_runtime_source(listener, source, auth, None, async move {
+        serve_runtime_source(listener, source, None, async move {
             let _ = receiver.await;
         })
         .await
         .unwrap();
     });
     let client = reqwest::Client::builder()
+        .unix_socket(address.clone())
         .no_proxy()
         .timeout(Duration::from_secs(3))
         .build()
         .unwrap();
-    let url = format!("http://{address}{PYTHON_SNAPSHOT_PATH}");
-    for (token, generation) in [
-        ("".to_owned(), "process-generation"),
-        ("b".repeat(64), "process-generation"),
-        ("a".repeat(64), ""),
-    ] {
-        let response = client
-            .post(&url)
-            .header(TOKEN_HEADER, token)
-            .header(GENERATION_HEADER, generation)
-            .header(header::CONTENT_TYPE, "application/json")
-            .body(serde_json::to_vec(&fixture.body).unwrap())
-            .send()
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::NOT_FOUND);
-        assert!(response.bytes().await.unwrap().is_empty());
-    }
+    let url = format!("http://runtime{PYTHON_SNAPSHOT_PATH}");
     let response = client
         .post(&url)
-        .header(TOKEN_HEADER, "a".repeat(64))
-        .header(GENERATION_HEADER, "process-generation")
         .header(header::CONTENT_TYPE, "application/json")
         .body(serde_json::to_vec(&fixture.body).unwrap())
         .send()
@@ -472,9 +431,7 @@ async fn python_snapshot_endpoint_returns_only_authenticated_verified_private_bi
         metadata
     };
     let response = client
-        .post(format!("http://{address}{SOURCE_PATH}"))
-        .header(TOKEN_HEADER, "a".repeat(64))
-        .header(GENERATION_HEADER, "process-generation")
+        .post(format!("http://runtime{SOURCE_PATH}"))
         .header(header::CONTENT_TYPE, "application/json")
         .body(serde_json::to_vec(&metadata).unwrap())
         .send()
@@ -494,8 +451,6 @@ async fn python_snapshot_endpoint_returns_only_authenticated_verified_private_bi
         .set_fault(open_compute_artifacts::Fault::CorruptBody);
     let response = client
         .post(&url)
-        .header(TOKEN_HEADER, "a".repeat(64))
-        .header(GENERATION_HEADER, "process-generation")
         .header(header::CONTENT_TYPE, "application/json")
         .body(serde_json::to_vec(&fixture.body).unwrap())
         .send()
@@ -510,19 +465,8 @@ async fn python_snapshot_endpoint_returns_only_authenticated_verified_private_bi
 }
 
 #[tokio::test]
-async fn source_request_rejects_invalid_frames_and_rechecks_generation_before_response_commit() {
+async fn source_request_rejects_invalid_frames() {
     let fixture = Fixture::create().await;
-    let empty = SourceState {
-        containers: None,
-        source: fixture.state.source.clone(),
-        auth: GenerationAuthRegistry::new(),
-    };
-    assert_eq!(
-        resolve_python(State(empty), fixture.request(Body::empty()))
-            .await
-            .status(),
-        StatusCode::NOT_FOUND
-    );
     for body in [
         b"invalid JSON".to_vec(),
         serde_json::to_vec(&serde_json::json!({"key":"x","scope":"runtime"})).unwrap(),
@@ -558,54 +502,5 @@ async fn source_request_rejects_invalid_frames_and_rechecks_generation_before_re
         let response = resolve_python(State(fixture.state.clone()), request).await;
         assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
         assert_eq!(response.headers()[ERROR_HEADER], "BUNDLE_TOO_LARGE");
-    }
-    for binary in [true, false] {
-        fixture
-            .state
-            .auth
-            .activate_for_test(SecretString::new("a".repeat(64)));
-        let mut value = fixture.body.clone();
-        if !binary {
-            value
-                .as_object_mut()
-                .unwrap()
-                .remove("expectedPreparedSha256");
-        }
-        let bytes = bytes::Bytes::from(serde_json::to_vec(&value).unwrap());
-        let (started, receiving) = tokio::sync::oneshot::channel();
-        let (release, released) = tokio::sync::oneshot::channel();
-        let request = fixture.request(Body::from_stream(futures::stream::once(async move {
-            started.send(()).unwrap();
-            released.await.unwrap();
-            Ok::<_, std::io::Error>(bytes)
-        })));
-        let state = fixture.state.clone();
-        let pending = tokio::spawn(async move {
-            if binary {
-                resolve_python(State(state), request).await
-            } else {
-                resolve(State(state), request).await
-            }
-        });
-        tokio::time::timeout(Duration::from_secs(3), receiving)
-            .await
-            .unwrap()
-            .unwrap();
-        fixture
-            .state
-            .auth
-            .activate_for_test(SecretString::new("b".repeat(64)));
-        release.send(()).unwrap();
-        let response = tokio::time::timeout(Duration::from_secs(3), pending)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::NOT_FOUND);
-        assert!(
-            to_bytes(response.into_body(), 1024)
-                .await
-                .unwrap()
-                .is_empty()
-        );
     }
 }

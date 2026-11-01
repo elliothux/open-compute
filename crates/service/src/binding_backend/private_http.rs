@@ -145,7 +145,7 @@ mod tests {
             .status(),
             StatusCode::NOT_FOUND
         );
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let fixture = Router::new()
             .route(
@@ -201,8 +201,8 @@ mod tests {
             .uri("/internal/services/v1/private-http")
             .header(PATH_HEADER, "/allowed")
             .header(SESSION_HEADER, "session")
-            .header(TOKEN_HEADER, "runtime-secret")
-            .header(GENERATION_HEADER, "generation-secret")
+            .header("x-open-compute-internal-token", "runtime-secret")
+            .header("x-open-compute-startup-generation", "generation-secret")
             .header(header::AUTHORIZATION, "tenant-secret")
             .header(header::COOKIE, "tenant-cookie")
             .header("proxy-authorization", "tenant-proxy-secret")

@@ -7,11 +7,15 @@ async fn authority_read_does_not_reserve_and_stale_facets_cannot_start() {
     let fixture = fixture().await;
     let image = fixture.admit_image("main").await;
     let authority = authority(&fixture.service, &fixture._artifacts, image, true);
-    let (auth, credential) = generation();
+
     assert!(
         fixture
             .service
-            .resolve(authority.request(false, None), 10, &auth, &credential)
+            .resolve(
+                authority.request(false, None),
+                10,
+                "container-unit-generation"
+            )
             .await
             .unwrap()
             .lease
@@ -30,36 +34,26 @@ async fn authority_read_does_not_reserve_and_stale_facets_cannot_start() {
         assert!(
             fixture
                 .service
-                .resolve(request, 11, &auth, &credential)
+                .resolve(request, 11, "container-unit-generation")
                 .await
                 .is_err()
         );
     }
-    auth.activate_for_test(open_compute_core::SecretString::new("rotated"));
-    assert!(
-        fixture
-            .service
-            .resolve(authority.request(true, None), 12, &auth, &credential)
-            .await
-            .is_err()
-    );
-    assert!(
-        ContainerAuthority::new(fixture.service.storage.db())
-            .application_leases(fixture.service.instance_id(), authority.app.id)
-            .unwrap()
-            .is_empty()
-    );
-    assert!(fixture.protocol.registrations.lock().await.is_empty());
+
     fixture
         .service
         .delete_application(authority.app.id)
         .await
         .unwrap();
-    let current = auth.credential().unwrap();
+
     assert!(
         fixture
             .service
-            .resolve(authority.request(false, None), 13, &auth, &current)
+            .resolve(
+                authority.request(false, None),
+                13,
+                "container-unit-generation"
+            )
             .await
             .unwrap()
             .lease
@@ -68,7 +62,11 @@ async fn authority_read_does_not_reserve_and_stale_facets_cannot_start() {
     assert!(
         fixture
             .service
-            .resolve(authority.request(true, None), 13, &auth, &current)
+            .resolve(
+                authority.request(true, None),
+                13,
+                "container-unit-generation"
+            )
             .await
             .is_err()
     );
@@ -79,10 +77,14 @@ async fn poststart_requires_exact_running_evidence_and_unknown_state_keeps_same_
     let fixture = fixture().await;
     let image = fixture.admit_image("main").await;
     let authority = authority(&fixture.service, &fixture._artifacts, image, true);
-    let (auth, credential) = generation();
+
     let initial = fixture
         .service
-        .resolve(authority.request(true, None), 10, &auth, &credential)
+        .resolve(
+            authority.request(true, None),
+            10,
+            "container-unit-generation",
+        )
         .await
         .unwrap()
         .lease
@@ -92,7 +94,11 @@ async fn poststart_requires_exact_running_evidence_and_unknown_state_keeps_same_
     fixture.running().await;
     let running = fixture
         .service
-        .resolve(authority.request(false, None), 11, &auth, &credential)
+        .resolve(
+            authority.request(false, None),
+            11,
+            "container-unit-generation",
+        )
         .await
         .unwrap()
         .lease
@@ -116,7 +122,11 @@ async fn poststart_requires_exact_running_evidence_and_unknown_state_keeps_same_
         *fixture.protocol.observation.lock().await = Some(invalid);
         let response = fixture
             .service
-            .resolve(authority.request(false, None), 12, &auth, &credential)
+            .resolve(
+                authority.request(false, None),
+                12,
+                "container-unit-generation",
+            )
             .await;
         if mutation >= 4 {
             assert!(response.is_err());
@@ -130,7 +140,11 @@ async fn poststart_requires_exact_running_evidence_and_unknown_state_keeps_same_
     assert_eq!(
         fixture
             .service
-            .resolve(authority.request(false, None), 13, &auth, &credential)
+            .resolve(
+                authority.request(false, None),
+                13,
+                "container-unit-generation"
+            )
             .await
             .unwrap()
             .lease
@@ -140,7 +154,11 @@ async fn poststart_requires_exact_running_evidence_and_unknown_state_keeps_same_
     );
     let retried = fixture
         .restart_service()
-        .resolve(authority.request(true, None), 14, &auth, &credential)
+        .resolve(
+            authority.request(true, None),
+            14,
+            "container-unit-generation",
+        )
         .await
         .unwrap()
         .lease
@@ -153,7 +171,7 @@ async fn poststart_requires_exact_running_evidence_and_unknown_state_keeps_same_
     assert!(
         fixture
             .service
-            .resolve(competing, 15, &auth, &credential)
+            .resolve(competing, 15, "container-unit-generation")
             .await
             .is_err()
     );
@@ -176,7 +194,7 @@ async fn failed_registration_is_durable_lost_and_recovery_does_not_create_replac
         } else {
             authority(&fixture.service, &fixture._artifacts, image, true)
         };
-        let (auth, credential) = generation();
+
         let mut startup = json!({"enableInternet":false});
         if durable_object {
             startup["image"] = json!(format!("app@sha256:{}", hex::encode(image)));
@@ -188,8 +206,7 @@ async fn failed_registration_is_durable_lost_and_recovery_does_not_create_replac
                 .resolve(
                     authority.request(true, Some(startup)),
                     10,
-                    &auth,
-                    &credential
+                    "container-unit-generation"
                 )
                 .await
                 .is_err()
@@ -203,7 +220,11 @@ async fn failed_registration_is_durable_lost_and_recovery_does_not_create_replac
             .store(false, Ordering::SeqCst);
         let recovered = fixture
             .restart_service()
-            .resolve(authority.request(true, None), 11, &auth, &credential)
+            .resolve(
+                authority.request(true, None),
+                11,
+                "container-unit-generation",
+            )
             .await
             .unwrap()
             .lease
@@ -231,10 +252,14 @@ async fn stop_is_fenced_by_full_facet_and_requires_positive_provider_cleanup() {
     let fixture = fixture().await;
     let image = fixture.admit_image("main").await;
     let authority = authority(&fixture.service, &fixture._artifacts, image, true);
-    let (auth, credential) = generation();
+
     let initial = fixture
         .service
-        .resolve(authority.request(true, None), 10, &auth, &credential)
+        .resolve(
+            authority.request(true, None),
+            10,
+            "container-unit-generation",
+        )
         .await
         .unwrap()
         .lease
@@ -242,7 +267,11 @@ async fn stop_is_fenced_by_full_facet_and_requires_positive_provider_cleanup() {
     fixture.running().await;
     let lease = fixture
         .service
-        .resolve(authority.request(false, None), 11, &auth, &credential)
+        .resolve(
+            authority.request(false, None),
+            11,
+            "container-unit-generation",
+        )
         .await
         .unwrap()
         .lease
@@ -259,23 +288,21 @@ async fn stop_is_fenced_by_full_facet_and_requires_positive_provider_cleanup() {
             6 => stop.instance_id = InstanceId::generate(),
             _ => stop.descriptor_sha256 = "invalid".into(),
         }
-        assert!(
-            fixture
-                .service
-                .stop(&stop, 12, &auth, &credential)
-                .await
-                .is_err()
-        );
+        assert!(fixture.service.stop(&stop, 12).await.is_err());
     }
     assert!(fixture.protocol.terminated.lock().await.is_empty());
     fixture
         .service
-        .begin_stop(&authority.stop(&lease), 13, &auth, &credential)
+        .begin_stop(&authority.stop(&lease), 13)
         .unwrap();
     assert!(
         fixture
             .service
-            .resolve(authority.request(false, None), 14, &auth, &credential)
+            .resolve(
+                authority.request(false, None),
+                14,
+                "container-unit-generation"
+            )
             .await
             .is_err()
     );
@@ -289,7 +316,7 @@ async fn stop_is_fenced_by_full_facet_and_requires_positive_provider_cleanup() {
     assert!(
         fixture
             .service
-            .resolve(for_stop, 15, &auth, &credential)
+            .resolve(for_stop, 15, "container-unit-generation")
             .await
             .is_err()
     );
@@ -312,7 +339,7 @@ async fn stop_is_fenced_by_full_facet_and_requires_positive_provider_cleanup() {
     assert!(
         fixture
             .restart_service()
-            .resolve(for_stop, 16, &auth, &credential)
+            .resolve(for_stop, 16, "container-unit-generation")
             .await
             .unwrap()
             .lease
@@ -329,7 +356,11 @@ async fn stop_is_fenced_by_full_facet_and_requires_positive_provider_cleanup() {
     assert!(
         fixture
             .service
-            .resolve(authority.request(false, None), 17, &auth, &credential)
+            .resolve(
+                authority.request(false, None),
+                17,
+                "container-unit-generation"
+            )
             .await
             .unwrap()
             .lease
@@ -337,7 +368,11 @@ async fn stop_is_fenced_by_full_facet_and_requires_positive_provider_cleanup() {
     );
     let replacement = fixture
         .service
-        .resolve(authority.request(true, None), 18, &auth, &credential)
+        .resolve(
+            authority.request(true, None),
+            18,
+            "container-unit-generation",
+        )
         .await
         .unwrap()
         .lease
@@ -347,7 +382,7 @@ async fn stop_is_fenced_by_full_facet_and_requires_positive_provider_cleanup() {
     assert!(
         fixture
             .service
-            .stop(&authority.stop(&lease), 19, &auth, &credential)
+            .stop(&authority.stop(&lease), 19)
             .await
             .is_err()
     );
@@ -367,10 +402,14 @@ async fn monitor_purpose_preserves_exited_lease_for_native_wait_without_authoriz
     let fixture = fixture().await;
     let image = fixture.admit_image("main").await;
     let authority = authority(&fixture.service, &fixture._artifacts, image, true);
-    let (auth, credential) = generation();
+
     let lease = fixture
         .service
-        .resolve(authority.request(true, None), 10, &auth, &credential)
+        .resolve(
+            authority.request(true, None),
+            10,
+            "container-unit-generation",
+        )
         .await
         .unwrap()
         .lease
@@ -380,7 +419,7 @@ async fn monitor_purpose_preserves_exited_lease_for_native_wait_without_authoriz
     assert_eq!(
         fixture
             .service
-            .resolve(monitoring, 11, &auth, &credential)
+            .resolve(monitoring, 11, "container-unit-generation")
             .await
             .unwrap()
             .lease
@@ -391,7 +430,11 @@ async fn monitor_purpose_preserves_exited_lease_for_native_wait_without_authoriz
     fixture.running().await;
     let proved = fixture
         .service
-        .resolve(authority.request(false, None), 12, &auth, &credential)
+        .resolve(
+            authority.request(false, None),
+            12,
+            "container-unit-generation",
+        )
         .await
         .unwrap()
         .lease
@@ -409,7 +452,7 @@ async fn monitor_purpose_preserves_exited_lease_for_native_wait_without_authoriz
     monitoring.for_monitor = true;
     let exited = fixture
         .service
-        .resolve(monitoring, 13, &auth, &credential)
+        .resolve(monitoring, 13, "container-unit-generation")
         .await
         .unwrap()
         .lease
@@ -419,7 +462,11 @@ async fn monitor_purpose_preserves_exited_lease_for_native_wait_without_authoriz
     assert_eq!(
         fixture
             .service
-            .resolve(authority.request(false, None), 14, &auth, &credential)
+            .resolve(
+                authority.request(false, None),
+                14,
+                "container-unit-generation"
+            )
             .await
             .unwrap()
             .lease
@@ -432,7 +479,7 @@ async fn monitor_purpose_preserves_exited_lease_for_native_wait_without_authoriz
     assert_eq!(
         fixture
             .service
-            .resolve(monitoring, 15, &auth, &credential)
+            .resolve(monitoring, 15, "container-unit-generation")
             .await
             .unwrap()
             .lease
@@ -452,21 +499,21 @@ async fn monitor_purpose_preserves_exited_lease_for_native_wait_without_authoriz
         assert!(
             fixture
                 .service
-                .resolve(monitoring, 16, &auth, &credential)
+                .resolve(monitoring, 16, "container-unit-generation")
                 .await
                 .is_err()
         );
     }
     fixture
         .service
-        .begin_stop(&authority.stop(&lease), 17, &auth, &credential)
+        .begin_stop(&authority.stop(&lease), 17)
         .unwrap();
     let mut monitoring = authority.request(false, None);
     monitoring.for_monitor = true;
     assert!(
         fixture
             .service
-            .resolve(monitoring, 18, &auth, &credential)
+            .resolve(monitoring, 18, "container-unit-generation")
             .await
             .is_err()
     );

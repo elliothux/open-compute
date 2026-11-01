@@ -12,7 +12,7 @@ async fn compile_failures_clean_partials() {
     let runtime = verify_ok(&lock_path, &bin).await;
     let data = dir.path().join("data");
     fs::create_dir(&data).unwrap();
-    let token = SecretString::new(TOKEN);
+
     let redactor = redactor_with_token();
     let platform = platform_meta();
     let err = compile_static_config(compile_req(
@@ -21,7 +21,6 @@ async fn compile_failures_clean_partials() {
         dir.path(),
         &data,
         &platform,
-        &token,
         &redactor,
         Duration::from_secs(5),
     ))
@@ -57,7 +56,6 @@ async fn compile_failures_clean_partials() {
         dir.path(),
         &data,
         &platform,
-        &token,
         &redactor,
         Duration::from_millis(300),
     ))
@@ -81,7 +79,6 @@ async fn compile_failures_clean_partials() {
         dir.path(),
         &data,
         &platform,
-        &token,
         &redactor,
         Duration::from_secs(5),
     ))

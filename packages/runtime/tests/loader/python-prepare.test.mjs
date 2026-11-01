@@ -17,7 +17,6 @@ const shared = moduleUrl(
   }),
 );
 const { preparePython } = await importRuntime("loader/python-prepare.ts", {
-  "../gateway/token.js": await leaf("gateway/token.ts"),
   "./envelope.js": await leaf("loader/envelope.ts"),
   "./shared.js": shared,
   "./modules.js": moduleUrl(
@@ -41,7 +40,6 @@ const instance = "019c0000000070008000000000000001";
 const worker = "019c0000-0000-7000-8000-000000000002";
 const version = "019c0000-0000-7000-8000-000000000003";
 const key = `${instance}/${worker}/${version}`;
-const token = "a".repeat(64);
 const snapshot = {
   schemaVersion: 1,
   loaderKey: key,
@@ -78,7 +76,6 @@ function request(headers = {}, method = "POST") {
   return new Request("http://loader/internal/prepare-python", {
     method,
     headers: {
-      "x-open-compute-internal-token": token,
       "x-open-compute-loader-key": key,
       "x-open-compute-instance-id": instance,
       "x-open-compute-worker-code-sha256": "b".repeat(64),
@@ -97,7 +94,6 @@ function host({
   const events = [];
   let captured;
   const env = {
-    INTERNAL_TOKEN: token,
     OUTBOUND_NETWORK: {},
     DO_MAX_OBJECT_NAME_BYTES: "1024",
     DO_MAX_FETCH_BODY_BYTES: "1024",
@@ -168,9 +164,8 @@ test("private prepare uses exact Python source and env, then revokes its single-
   assert.equal(h.code().limits.cpuMs, 1000);
 });
 
-test("private prepare rejects bad authentication, scope, descriptor and runtime before granting a Loader", async () => {
+test("private prepare rejects bad scope, descriptor and runtime before granting a Loader", async () => {
   for (const [headers, method, options, status] of [
-    [{ "x-open-compute-internal-token": "wrong" }, "POST", {}, 404],
     [{}, "GET", {}, 422],
     [{ "x-open-compute-entrypoint": "Named" }, "POST", {}, 422],
     [{ "x-open-compute-loader-key": "wrong" }, "POST", {}, 422],

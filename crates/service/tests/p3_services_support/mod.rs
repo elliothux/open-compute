@@ -8,9 +8,9 @@ use open_compute_core::{
     ResponseCacheConfig, RuntimeConfig, StartupId, SystemClock,
 };
 use open_compute_runtime::{
-    DirectoryServicePath, ExternalServiceAddress, GenerationAuthRegistry, OsJitter,
-    PlatformReleaseMeta, StaticConfigCompiler, SupervisorState, WorkerdSupervisor,
-    WorkerdSupervisorOptions, verify_runtime_binary,
+    DirectoryServicePath, ExternalServiceAddress, OsJitter, PlatformReleaseMeta,
+    StaticConfigCompiler, SupervisorState, WorkerdSupervisor, WorkerdSupervisorOptions,
+    verify_runtime_binary,
 };
 use open_compute_service::asset_backend::AssetBindingService;
 use open_compute_service::cache_backend::CacheBindingService;
@@ -84,7 +84,7 @@ impl Harness {
             .expect("OPEN_COMPUTE_TEST_WORKERD must name the verified stock runtime");
         let root = repo_root();
         let lock = root.join("packages/runtime/workerd.lock.json");
-        let temp = tempfile::tempdir().unwrap();
+        let temp = tempfile::tempdir_in("/tmp").unwrap();
         let storage = Arc::new(
             PlatformStorage::bootstrap(&storage_config(&temp.path().join("data")), &SystemClock)
                 .unwrap(),
@@ -103,12 +103,18 @@ impl Harness {
             verify_runtime_binary(&lock, &workerd, Duration::from_secs(10), &Redactor::new())
                 .await
                 .expect("formal pinned runtime");
-        let source_auth = GenerationAuthRegistry::new();
-        let binding_auth = GenerationAuthRegistry::new();
-        let source_listener = bind_runtime_source().await.unwrap();
-        let source_addr = source_listener.local_addr().unwrap();
-        let binding_listener = bind_binding_backend().await.unwrap();
-        let binding_addr = binding_listener.local_addr().unwrap();
+
+        let source_listener =
+            bind_runtime_source(&storage.data_dir().runtime_dir().join("source.sock"))
+                .await
+                .unwrap();
+        let source_addr = source_listener.path().to_owned();
+
+        let binding_listener =
+            bind_binding_backend(&storage.data_dir().runtime_dir().join("binding.sock"))
+                .await
+                .unwrap();
+        let binding_addr = binding_listener.path().to_owned();
         let version_pins = VersionPins::new();
         let local_extension = provider.map(|provider| {
             let extension = temp.path().join("local-files");
@@ -166,9 +172,9 @@ impl Harness {
                 open_compute_service::runtime_bridge::python_runtime_pin(&runtime),
             )
             .unwrap();
-            let auth = source_auth.clone();
+
             async move {
-                serve_runtime_source(source_listener, source, auth, None, async move {
+                serve_runtime_source(source_listener, source, None, async move {
                     let _ = source_shutdown.changed().await;
                 })
                 .await
@@ -176,7 +182,7 @@ impl Harness {
         });
         let binding_task = tokio::spawn({
             let storage = storage.clone();
-            let auth = binding_auth.clone();
+
             let pins = version_pins.clone();
             let services = service_invocations.clone();
             let response_cache = Arc::new(
@@ -198,7 +204,6 @@ impl Harness {
                 serve_binding_backend_with_assets(
                     binding_listener,
                     storage.clone(),
-                    auth,
                     ResourcePins::new(),
                     Arc::new(SqliteKvBindingExecutor::new(
                         storage.clone(),
@@ -227,16 +232,15 @@ impl Harness {
             lock,
             root.join("packages/runtime"),
             storage.data_dir().runtime_dir(),
+            storage.data_dir().runtime_dir().join("ingress.sock"),
             PlatformReleaseMeta {
                 version: release.to_owned(),
             },
             Duration::from_secs(20),
             Redactor::new(),
-        )
-        .with_generation_auth(source_auth.clone())
-        .with_binding_generation_auth(binding_auth.clone());
+        );
         let supervisor_slot = Arc::new(Mutex::new(None));
-        let transport = WorkerdTransport::new(source_auth.clone(), supervisor_slot.clone())
+        let transport = WorkerdTransport::new(supervisor_slot.clone())
             .with_version_pins(version_pins.clone())
             .with_service_invocations(service_invocations.as_ref().clone());
         let do_storage = storage
@@ -260,27 +264,23 @@ impl Harness {
             ),
         };
         let external_services = vec![
-            ExternalServiceAddress::loopback("runtime-source", source_addr).unwrap(),
-            ExternalServiceAddress::loopback("binding-backend", binding_addr).unwrap(),
-            ExternalServiceAddress::loopback("observability-backend", binding_addr).unwrap(),
+            ExternalServiceAddress::unix("runtime-source", &source_addr).unwrap(),
+            ExternalServiceAddress::unix("binding-backend", &binding_addr).unwrap(),
+            ExternalServiceAddress::unix("observability-backend", &binding_addr).unwrap(),
         ];
         let directory_services =
             vec![DirectoryServicePath::local("do-storage", &do_storage).unwrap()];
-        let generation_auths = vec![source_auth, binding_auth];
+
         let supervisor = Arc::new(match &local_extension {
             Some(extension) => WorkerdSupervisor::new_with_host_extension_broker(
                 supervisor_options,
                 external_services,
                 directory_services,
-                generation_auths,
                 extension.socket_registry(),
             ),
-            None => WorkerdSupervisor::new(
-                supervisor_options,
-                external_services,
-                directory_services,
-                generation_auths,
-            ),
+            None => {
+                WorkerdSupervisor::new(supervisor_options, external_services, directory_services)
+            }
         });
         *supervisor_slot.lock().unwrap() = Some(supervisor.clone());
         supervisor.start();

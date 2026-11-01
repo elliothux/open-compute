@@ -14,9 +14,8 @@ use open_compute_core::{
     WorkflowFence, WorkflowId, WorkflowInstanceId, WorkflowToken, WorkflowVersionId,
 };
 use open_compute_runtime::{
-    DirectoryServicePath, ExternalServiceAddress, GenerationAuthRegistry, OsJitter,
-    PlatformReleaseMeta, StaticConfigCompiler, WorkerdSupervisor, WorkerdSupervisorOptions,
-    verify_runtime_binary,
+    DirectoryServicePath, ExternalServiceAddress, OsJitter, PlatformReleaseMeta,
+    StaticConfigCompiler, WorkerdSupervisor, WorkerdSupervisorOptions, verify_runtime_binary,
 };
 use open_compute_service::asset_backend::AssetBindingService;
 use open_compute_service::runtime_bridge::{

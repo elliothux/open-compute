@@ -88,14 +88,13 @@ fn start_backend(
     tokio::spawn({
         let listener = harness.binding_listener.take().unwrap();
         let storage = harness.storage.clone();
-        let auth = harness.binding_auth.clone();
+
         let store = store.clone();
         let config = config.clone();
         async move {
             serve_binding_backend(
                 listener,
                 storage.clone(),
-                auth,
                 ResourcePins::new(),
                 Arc::new(SqliteKvBindingExecutor::new(storage, Arc::new(SystemClock))),
                 None,

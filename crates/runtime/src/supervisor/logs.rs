@@ -144,12 +144,7 @@ pub fn set_reader_fail_point() {
 fn is_secret_header(name: &str) -> bool {
     matches!(
         name.to_ascii_lowercase().as_str(),
-        "authorization"
-            | "proxy-authorization"
-            | "cookie"
-            | "set-cookie"
-            | "x-api-key"
-            | "x-open-compute-internal-token"
+        "authorization" | "proxy-authorization" | "cookie" | "set-cookie" | "x-api-key"
     )
 }
 

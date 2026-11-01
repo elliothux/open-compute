@@ -7,7 +7,7 @@ pub(super) async fn run() {
     let root = repo_root();
     let lock = root.join("packages/runtime/workerd.lock.json");
     let assets = root.join("packages/runtime");
-    let temp = tempfile::tempdir().unwrap();
+    let temp = tempfile::tempdir_in("/tmp").unwrap();
     let storage = Arc::new(
         PlatformStorage::bootstrap(&storage_config(&temp.path().join("data")), &SystemClock)
             .unwrap(),
@@ -27,12 +27,17 @@ pub(super) async fn run() {
         .await
         .expect("formal pinned runtime");
 
-    let auth = GenerationAuthRegistry::new();
-    let binding_auth = GenerationAuthRegistry::new();
-    let source_listener = bind_runtime_source().await.unwrap();
-    let source_addr = source_listener.local_addr().unwrap();
-    let binding_listener = bind_binding_backend().await.unwrap();
-    let binding_addr = binding_listener.local_addr().unwrap();
+    let source_listener =
+        bind_runtime_source(&storage.data_dir().runtime_dir().join("source.sock"))
+            .await
+            .unwrap();
+    let source_addr = source_listener.path().to_owned();
+
+    let binding_listener =
+        bind_binding_backend(&storage.data_dir().runtime_dir().join("binding.sock"))
+            .await
+            .unwrap();
+    let binding_addr = binding_listener.path().to_owned();
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
     let mut binding_shutdown_rx = shutdown_tx.subscribe();
     let source_task = tokio::spawn({
@@ -43,9 +48,9 @@ pub(super) async fn run() {
             open_compute_service::runtime_bridge::python_runtime_pin(&runtime),
         )
         .unwrap();
-        let auth = auth.clone();
+
         async move {
-            serve_runtime_source(source_listener, source, auth, None, async move {
+            serve_runtime_source(source_listener, source, None, async move {
                 let _ = shutdown_rx.changed().await;
             })
             .await
@@ -53,12 +58,11 @@ pub(super) async fn run() {
     });
     let binding_task = tokio::spawn({
         let storage = storage.clone();
-        let auth = binding_auth.clone();
+
         async move {
             serve_binding_backend(
                 binding_listener,
                 storage.clone(),
-                auth,
                 ResourcePins::new(),
                 Arc::new(SqliteKvBindingExecutor::new(storage, Arc::new(SystemClock))),
                 None,
@@ -81,16 +85,15 @@ pub(super) async fn run() {
         lock.clone(),
         assets,
         storage.data_dir().runtime_dir(),
+        storage.data_dir().runtime_dir().join("ingress.sock"),
         PlatformReleaseMeta {
             version: "p0.2-gate".to_owned(),
         },
         Duration::from_secs(20),
         Redactor::new(),
-    )
-    .with_generation_auth(auth.clone())
-    .with_binding_generation_auth(binding_auth.clone());
+    );
     let supervisor_slot = Arc::new(Mutex::new(None));
-    let transport = WorkerdTransport::new(auth.clone(), supervisor_slot.clone());
+    let transport = WorkerdTransport::new(supervisor_slot.clone());
     let do_storage = storage
         .data_dir()
         .prepare_durable_object_storage(
@@ -108,18 +111,16 @@ pub(super) async fn run() {
             lease_path: Some(storage.data_dir().runtime_dir().join("p0-2-gate.lease")),
         },
         vec![
-            ExternalServiceAddress::loopback("runtime-source", source_addr).unwrap(),
-            ExternalServiceAddress::loopback("binding-backend", binding_addr).unwrap(),
-            ExternalServiceAddress::loopback("observability-backend", binding_addr).unwrap(),
+            ExternalServiceAddress::unix("runtime-source", &source_addr).unwrap(),
+            ExternalServiceAddress::unix("binding-backend", &binding_addr).unwrap(),
+            ExternalServiceAddress::unix("observability-backend", &binding_addr).unwrap(),
         ],
         vec![DirectoryServicePath::local("do-storage", &do_storage).unwrap()],
-        vec![auth.clone(), binding_auth.clone()],
     ));
     *supervisor_slot.lock().unwrap() = Some(supervisor.clone());
     supervisor.start();
     wait_running(&supervisor, Duration::from_secs(30)).await;
     let first_pid = supervisor.snapshot().pid.unwrap();
-    let first_credential = auth.credential().unwrap();
 
     let account = storage.identity().instance_id;
     let repo = WorkerRepository::new(storage.db());
@@ -480,7 +481,18 @@ pub(super) async fn run() {
     if let Some(fixture) = egress_fixture.as_ref() {
         run_tls_fixture(&workerd, &root, fixture).await;
     }
-    let egress = deploy_egress(&controller, account, worker.id, egress_fixture.as_ref()).await;
+    let egress = deploy_egress(
+        &controller,
+        account,
+        worker.id,
+        egress_fixture.as_ref(),
+        &[
+            source_addr,
+            binding_addr,
+            storage.data_dir().runtime_dir().join("ingress.sock"),
+        ],
+    )
+    .await;
     let response = dispatch(&storage, &transport, account, worker.id, &egress, None, "").await;
     assert_eq!(
         response.status,
@@ -490,6 +502,10 @@ pub(super) async fn run() {
     );
     let egress_result: serde_json::Value = serde_json::from_str(&response.body).unwrap();
     assert_eq!(egress_result["unreachable"], UNREACHABLE_TARGETS.len());
+    assert_eq!(
+        egress_result["unixDenied"], 6,
+        "tenant fetch and connect must reject every internal Unix socket: {egress_result}"
+    );
     let allowed = egress_result["allowed"].as_array().unwrap();
     assert_eq!(allowed.len(), egress_fixture.as_ref().map_or(0, |_| 5));
     assert!(allowed.iter().all(|value| value == "fixture-ok"));
@@ -647,11 +663,6 @@ pub(super) async fn run() {
     assert_eq!(
         persisted_b.compatibility_flags,
         b_runtime_features.compatibility_flags
-    );
-    assert_ne!(
-        auth.credential().unwrap().expose(),
-        first_credential.expose(),
-        "generation token must rotate"
     );
     let concurrent = futures::future::join_all((0..100).map(|index| {
         let storage = storage.clone();

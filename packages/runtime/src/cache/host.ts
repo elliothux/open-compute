@@ -6,12 +6,7 @@ import {
   isRecord,
 } from "../bindings/private-transport.js";
 import type { BindingEnv, CacheTransportProps } from "../bindings/protocol.js";
-import {
-  BINDING_TOKEN_HEADER,
-  bindingError,
-  currentStartupGeneration,
-  INTERNAL_HEADERS,
-} from "../loader/shared.js";
+import { bindingError, INTERNAL_HEADERS } from "../loader/shared.js";
 import { nativeCacheRequest, nativeCacheResponse } from "./native-adapter.js";
 
 const HOP_BY_HOP_HEADERS = new Set([
@@ -99,8 +94,6 @@ export class CacheTransport extends WorkerEntrypoint<
   #headers() {
     const props = this.#props();
     return {
-      [BINDING_TOKEN_HEADER]: this.env.BINDING_BACKEND_TOKEN,
-      "x-open-compute-startup-generation": currentStartupGeneration(),
       "x-open-compute-instance-id": props.instanceId,
       "x-open-compute-worker-id": props.workerId,
       "x-open-compute-version-id": props.versionId,

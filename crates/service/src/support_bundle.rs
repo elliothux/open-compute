@@ -52,7 +52,13 @@ pub async fn create_support_bundle(
 ) -> Result<SupportBundleResult, PlatformError> {
     validate_output(output)?;
     let release = platform_release_metadata(loaded)?;
-    let mut doctor = doctor_report(loaded, DoctorMode::Basic, None).await;
+    let mut doctor = doctor_report(
+        loaded,
+        DoctorMode::Basic,
+        crate::instance_registry::ServiceScope::User,
+        None,
+    )
+    .await;
     for check in &mut doctor.checks {
         if check.name == "resource_catalog"
             && let Some(value) = check.value.as_deref()

@@ -514,6 +514,7 @@ fn definition_result(
         created_on: iso_timestamp(definition.created_at_ms)?,
         modified_on: iso_timestamp(definition.updated_at_ms)?,
         script_name: worker.name,
+        script_deleted: worker.deleted_at_ms.is_some(),
         class_name: version.target.class_name,
         triggered_on,
         instances: counts,
@@ -677,6 +678,8 @@ struct DefinitionResult {
     created_on: String,
     modified_on: String,
     script_name: String,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    script_deleted: bool,
     class_name: String,
     triggered_on: Option<String>,
     instances: BTreeMap<&'static str, u64>,

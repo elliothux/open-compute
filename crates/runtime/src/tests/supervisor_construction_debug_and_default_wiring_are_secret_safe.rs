@@ -14,7 +14,8 @@ async fn supervisor_construction_debug_and_default_wiring_are_secret_safe() {
         runtime.clone(),
         lock_path,
         dir.path().to_path_buf(),
-        data,
+        data.clone(),
+        data.join("ingress.sock"),
         platform_meta(),
         Duration::from_secs(1),
         Redactor::new(),
@@ -31,7 +32,7 @@ async fn supervisor_construction_debug_and_default_wiring_are_secret_safe() {
         lease_path: None,
     };
     assert!(format!("{options:?}").contains("WorkerdSupervisorOptions"));
-    let supervisor = crate::WorkerdSupervisor::new(options, Vec::new(), Vec::new(), Vec::new());
+    let supervisor = crate::WorkerdSupervisor::new(options, Vec::new(), Vec::new());
     assert!(format!("{supervisor:?}").contains("WorkerdSupervisor"));
     supervisor.shutdown().await;
 

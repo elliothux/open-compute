@@ -28,7 +28,6 @@ const snapshot = {
   workerCodeSha256: "a".repeat(64),
   pythonPreparedSha256: "b".repeat(64),
 };
-const token = "private-generation";
 const binary = (bytes, headers = {}) =>
   new Response(bytes, {
     headers: { "content-type": "application/octet-stream", ...headers },
@@ -38,7 +37,6 @@ const read = (response) =>
     { RUNTIME_SOURCE: { fetch: async () => response } },
     snapshot,
     "runtime",
-    token,
   );
 const stable = (code) => (error) => {
   assert.equal(error.stableCode, code);
@@ -59,10 +57,13 @@ test("prepared snapshot transfer authenticates its exact source and retained art
               "http://runtime-source/internal/runtime/v1/versions/python-snapshot",
             );
             assert.equal(init.method, "POST");
-            assert.equal(init.headers["x-open-compute-internal-token"], token);
+            assert.equal(
+              init.headers["x-open-compute-internal-token"],
+              undefined,
+            );
             assert.equal(
               init.headers["x-open-compute-startup-generation"],
-              token,
+              undefined,
             );
             assert.deepEqual(JSON.parse(init.body), {
               key: snapshot.loaderKey,
@@ -76,7 +77,6 @@ test("prepared snapshot transfer authenticates its exact source and retained art
       },
       snapshot,
       scope,
-      token,
     );
     assert.deepEqual(value, bytes);
   }
@@ -160,7 +160,6 @@ test("private snapshot rejects stream overflow and hides transport or cleanup ex
       },
       snapshot,
       "runtime",
-      token,
     ),
     stable("RUNTIME_UNAVAILABLE"),
   );

@@ -27,7 +27,7 @@ wait
     let runtime = verify_ok(&lock_path, &bin).await;
     let data = dir.path().join("data");
     fs::create_dir(&data).unwrap();
-    let token = SecretString::new(TOKEN);
+
     let redactor = redactor_with_token();
     let platform = platform_meta();
     let mut fut = Box::pin(compile_static_config(compile_req(
@@ -36,7 +36,6 @@ wait
         dir.path(),
         &data,
         &platform,
-        &token,
         &redactor,
         Duration::from_secs(30),
     )));

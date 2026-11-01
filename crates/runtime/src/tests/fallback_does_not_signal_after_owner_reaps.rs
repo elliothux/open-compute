@@ -22,7 +22,7 @@ sleep 30
     let runtime = verify_ok(&lock_path, &bin).await;
     let data = dir.path().join("data");
     fs::create_dir(&data).unwrap();
-    let token = SecretString::new(TOKEN);
+
     let redactor = redactor_with_token();
     let platform = platform_meta();
     let owner_reaped = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -36,7 +36,6 @@ sleep 30
         dir.path(),
         &data,
         &platform,
-        &token,
         &redactor,
         Duration::from_secs(30),
     )));

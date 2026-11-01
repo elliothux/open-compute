@@ -30,7 +30,7 @@ export function cloudflareDeploymentUrl(
 
 export function cloudflareWorkerMissing(output: string): boolean {
   return (
-    /\[\s*code:\s*(?:10007|10090)\s*\]/i.test(output) ||
+    /\[\s*(?:code:\s*)?(?:10007|10090)\s*\]/i.test(output) ||
     /(?:Worker|script)[^\n]{0,80}not found/i.test(output)
   );
 }

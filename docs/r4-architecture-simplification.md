@@ -70,7 +70,7 @@
 
 ### R4.4 按威胁模型删除防御
 
-状态：R4.4a **已完成**（2026-11-01）：删除启动重算摘要、发信号前的进程身份和摘要校验、registry 本地文件复检、receipt 摘要、update cache 的 owner、mode 和未来时间检查，以及数据目录的 symlink 和 owner 检查。保留构建期 pin 校验、目录锁和租户输入的路径校验。孤儿恢复按记录的 PGID 停止进程组；lease 记录开机标识，开机标识不同时丢弃 lease，不发信号。R4.4b（内部通道改为 Unix socket，删除 generation credential）待做。
+状态：R4.4a **已完成**（2026-11-01）：删除启动重算摘要、发信号前的进程身份和摘要校验、registry 本地文件复检、receipt 摘要、update cache 的 owner、mode 和未来时间检查，以及数据目录的 symlink 和 owner 检查。保留构建期 pin 校验、目录锁和租户输入的路径校验。孤儿恢复按记录的 PGID 停止进程组；lease 记录开机标识，开机标识不同时丢弃 lease，不发信号。R4.4b **已完成**（2026-11-01）：ocd 与 workerd 之间的内部通道（私有 ingress、绑定后端、Workers Logs、探活、源码服务、Python 预备）改走 `<OCD_DIR>/run/<InstanceId>/` 下 0700 目录中的 Unix socket，用 stock workerd 的 `unix:` 地址，删除 generation credential 和 loopback 鉴权；租户仍不能连 Unix socket，fd 4 HostExtension broker 保留。macOS 上对端在 accept 前关闭会让 workerd 的 `peer_cred` 返回 ENOTCONN，fork R25 修补后报告未知凭据。HTTP、WebSocket 和 Workflow 分发结束时释放 Version pin，删除 Worker 不再被遗留 pin 阻塞。SQLite 关闭 memstatus，避免并行连接争用全局分配锁。真实 Cloudflare 对比（p3-cf-diff）9 个 fixture 全部一致，修正了 D1 错误信息、R2 空 range、multipart 元数据、list 上限和 Workflow 保留期下限（V24）。
 
 依据 [威胁模型](security.md)，删除对付同机进程和本地篡改的代码：
 

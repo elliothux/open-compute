@@ -134,19 +134,19 @@ async fn prepare_http_uses_the_private_identity_and_preserves_failure_status_hea
         version_id: VersionId::generate(),
         worker_code_sha256: [2; 32],
     };
-    let auth = GenerationAuthRegistry::new();
-    auth.activate_for_test(SecretString::new("a".repeat(64)));
-    let credential = auth.credential().unwrap();
+
     let expected = candidate.clone();
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = listener.local_addr().unwrap().port();
+    let listener_dir = tempfile::tempdir_in("/tmp").unwrap();
+    let listener_path = listener_dir.path().join("runtime.sock");
+    let listener = tokio::net::UnixListener::bind(&listener_path).unwrap();
+    let port = listener_path.clone();
     let router = Router::new().route(
         "/internal/prepare-python",
         post(move |request: Request| {
             let expected = expected.clone();
             async move {
                 assert_eq!(request.method(), Method::POST);
-                assert_eq!(request.headers()[TOKEN_HEADER], "a".repeat(64));
+
                 assert_eq!(
                     request.headers()["x-open-compute-instance-id"],
                     expected.instance_id.to_string()
@@ -182,12 +182,11 @@ async fn prepare_http_uses_the_private_identity_and_preserves_failure_status_hea
             .await
             .unwrap();
     });
-    let transport = WorkerdTransport::new(auth, Arc::new(Mutex::new(None)));
+    let transport = WorkerdTransport::new(Arc::new(Mutex::new(None)));
     let error = PythonPreparation::request_snapshot(
         &transport,
-        port,
+        &port,
         &candidate,
-        &credential,
         Instant::now() + Duration::from_secs(5),
     )
     .await
@@ -195,30 +194,23 @@ async fn prepare_http_uses_the_private_identity_and_preserves_failure_status_hea
     assert_eq!(error.code(), ErrorCode::BundleRuntimeInvalid);
     assert!(!error.to_string().contains("traceback"));
     assert!(
-        PythonPreparation::request_snapshot(
-            &transport,
-            port,
-            &candidate,
-            &credential,
-            Instant::now()
-        )
-        .await
-        .is_err()
+        PythonPreparation::request_snapshot(&transport, &port, &candidate, Instant::now())
+            .await
+            .is_err()
     );
     stop.send(()).unwrap();
     server.await.unwrap();
     // A lost preparation listener cannot expose the connector's address/error.
     let error = PythonPreparation::request_snapshot(
         &transport,
-        port,
+        &port,
         &candidate,
-        &credential,
         Instant::now() + Duration::from_secs(5),
     )
     .await
     .unwrap_err();
     assert_eq!(error.code(), ErrorCode::RuntimeUnavailable);
-    assert!(!error.to_string().contains(&port.to_string()));
+    assert!(!error.to_string().contains(&port.display().to_string()));
 }
 
 #[tokio::test]
@@ -231,14 +223,14 @@ async fn preparation_http_collects_complete_snapshots_and_bounds_stalled_or_trun
         version_id: VersionId::generate(),
         worker_code_sha256: [2; 32],
     };
-    let auth = GenerationAuthRegistry::new();
-    auth.activate_for_test(SecretString::new("a".repeat(64)));
-    let credential = auth.credential().unwrap();
-    let transport = WorkerdTransport::new(auth, Arc::new(Mutex::new(None)));
+
+    let transport = WorkerdTransport::new(Arc::new(Mutex::new(None)));
     let bytes = b"0123456789abcdef01234567";
     for mode in ["complete", "stalled_headers", "stalled_body", "truncated"] {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
+        let listener_dir = tempfile::tempdir_in("/tmp").unwrap();
+        let listener_path = listener_dir.path().join("runtime.sock");
+        let listener = tokio::net::UnixListener::bind(&listener_path).unwrap();
+        let port = listener_path.clone();
         let (arrived, request_arrived) = oneshot::channel();
         let (stop, stopped) = oneshot::channel();
         let server = tokio::spawn(async move {
@@ -267,22 +259,15 @@ async fn preparation_http_collects_complete_snapshots_and_bounds_stalled_or_trun
             if mode != "truncated" {
                 let _ = stopped.await;
             }
-            socket.shutdown().await.unwrap();
+            drop(socket);
         });
         let deadline = Instant::now() + Duration::from_millis(500);
         let pending = {
             let transport = transport.clone();
             let candidate = candidate.clone();
-            let credential = credential.clone();
+            let port = port.clone();
             tokio::spawn(async move {
-                PythonPreparation::request_snapshot(
-                    &transport,
-                    port,
-                    &candidate,
-                    &credential,
-                    deadline,
-                )
-                .await
+                PythonPreparation::request_snapshot(&transport, &port, &candidate, deadline).await
             })
         };
         let result = tokio::time::timeout(Duration::from_secs(5), async {
@@ -302,7 +287,7 @@ async fn preparation_http_collects_complete_snapshots_and_bounds_stalled_or_trun
         } else {
             let error = result.unwrap_err();
             assert_eq!(error.code(), ErrorCode::RuntimeUnavailable, "{mode}");
-            assert!(!error.to_string().contains(&port.to_string()));
+            assert!(!error.to_string().contains(&port.display().to_string()));
             assert!(!error.to_string().contains("0123456789abcdef"));
             if mode.starts_with("stalled_") {
                 assert!(Instant::now() >= deadline, "{mode}");
@@ -312,7 +297,7 @@ async fn preparation_http_collects_complete_snapshots_and_bounds_stalled_or_trun
 }
 
 #[tokio::test]
-async fn retained_preparation_reuses_verified_authority_and_fences_every_backend_generation() {
+async fn retained_preparation_reuses_verified_authority_and_fences_runtime_generation() {
     use crate::local_extensions::LocalExtensionRegistry;
     use crate::runtime_feature_fixture::RuntimeFeatureFixture;
     use crate::service_invocations::ServiceInvocationRegistry;
@@ -351,14 +336,8 @@ async fn retained_preparation_reuses_verified_authority_and_fences_every_backend
         python_runtime_pin(&runtime),
     )
     .unwrap();
-    let services = ["runtime-source", "binding-backend", "observability-backend"].map(|name| {
-        let auth = GenerationAuthRegistry::new();
-        auth.activate_for_test(SecretString::new(format!("{:064x}", name.len())));
-        (
-            auth,
-            ExternalServiceAddress::loopback(name, "127.0.0.1:9".parse().unwrap()).unwrap(),
-        )
-    });
+    let services = ["runtime-source", "binding-backend", "observability-backend"]
+        .map(|name| ExternalServiceAddress::unix(name, Path::new("/tmp/missing.sock")).unwrap());
     let broker = Arc::new(
         HostExtensionBroker::new(
             HostExtensionBrokerRegistry::new(),
@@ -372,11 +351,11 @@ async fn retained_preparation_reuses_verified_authority_and_fences_every_backend
         )
         .unwrap(),
     );
-    let mut transport = WorkerdTransport::for_test_endpoint(services[0].0.clone(), 9);
+    let mut transport = WorkerdTransport::for_test_endpoint(Path::new("/tmp/missing.sock"));
     let generation = open_compute_core::StartupId::generate();
     transport.test_generation = Some(generation);
     let clone_before_configure = transport.clone();
-    let mut coordinator = PythonPreparation {
+    let coordinator = PythonPreparation {
         storage: fixture.storage.clone(),
         artifacts: fixture.artifacts.clone(),
         source: source.clone(),
@@ -397,14 +376,10 @@ async fn retained_preparation_reuses_verified_authority_and_fences_every_backend
             .worker_code_sha256,
     };
     // These failures precede Source resolution, compilation and any child lease.
-    let no_owner = WorkerdTransport::new(transport.auth.clone(), Arc::new(Mutex::new(None)));
+    let no_owner = WorkerdTransport::new(Arc::new(Mutex::new(None)));
     let mut no_generation = transport.clone();
     no_generation.test_generation = None;
-    let foreign_auth = GenerationAuthRegistry::new();
-    foreign_auth.activate_for_test(SecretString::new("f".repeat(64)));
-    let mut foreign = WorkerdTransport::for_test_endpoint(foreign_auth, 9);
-    foreign.test_generation = Some(generation);
-    for rejected in [no_owner, no_generation, foreign] {
+    for rejected in [no_owner, no_generation] {
         let (_cancel, cancelled) = oneshot::channel();
         assert_eq!(
             coordinator
@@ -414,22 +389,6 @@ async fn retained_preparation_reuses_verified_authority_and_fences_every_backend
                 .code(),
             ErrorCode::RuntimeUnavailable,
         );
-    }
-    for index in 0..3 {
-        let active = std::mem::replace(
-            &mut coordinator.services[index].0,
-            GenerationAuthRegistry::new(),
-        );
-        let (_cancel, cancelled) = oneshot::channel();
-        assert_eq!(
-            coordinator
-                .run(js_candidate.clone(), transport.clone(), cancelled)
-                .await
-                .unwrap_err()
-                .code(),
-            ErrorCode::RuntimeUnavailable,
-        );
-        coordinator.services[index].0 = active;
     }
     assert_eq!(fixture._mock.object_count(), 1);
     for lease in ["python-compile.lease", "python-prepare.lease"] {
@@ -453,7 +412,7 @@ async fn retained_preparation_reuses_verified_authority_and_fences_every_backend
     preparation
         .prepare(
             js_candidate.clone(),
-            WorkerdTransport::new(GenerationAuthRegistry::new(), Arc::new(Mutex::new(None))),
+            WorkerdTransport::new(Arc::new(Mutex::new(None))),
         )
         .await
         .unwrap();
@@ -465,13 +424,9 @@ async fn retained_preparation_reuses_verified_authority_and_fences_every_backend
             .await
             .is_err()
     );
-    let credentials = preparation
-        .services
-        .each_ref()
-        .map(|(auth, _)| auth.credential().unwrap());
     assert_eq!(
         preparation
-            .with_generation(&credentials, &transport, generation, || Ok(37))
+            .with_generation(&transport, generation, || Ok(37))
             .unwrap(),
         37
     );
@@ -595,33 +550,10 @@ async fn retained_preparation_reuses_verified_authority_and_fences_every_backend
         3,
         "retained recovery adds no immutable objects"
     );
-    for index in 0..3 {
-        let credentials = preparation
-            .services
-            .each_ref()
-            .map(|(auth, _)| auth.credential().unwrap());
-        preparation.services[index]
-            .0
-            .activate_for_test(SecretString::new(format!("{:064x}", index + 50)));
-        let mut executed = false;
-        assert!(
-            preparation
-                .with_generation(&credentials, &transport, generation, || {
-                    executed = true;
-                    Ok(())
-                })
-                .is_err()
-        );
-        assert!(!executed, "a stale backend credential cannot commit SQL");
-    }
-    let credentials = preparation
-        .services
-        .each_ref()
-        .map(|(auth, _)| auth.credential().unwrap());
     transport.test_generation = Some(open_compute_core::StartupId::generate());
     assert!(
         preparation
-            .with_generation(&credentials, &transport, generation, || Ok(()))
+            .with_generation(&transport, generation, || Ok(()))
             .is_err()
     );
 }

@@ -70,20 +70,18 @@ pub(super) fn instance_runtime_healthy(status: &str) -> bool {
         == Some(true)
 }
 
-pub(super) fn probe_workerd(port: u16, token: &str) -> bool {
-    let Ok(mut stream) = TcpStream::connect(("127.0.0.1", port)) else {
+pub(super) fn probe_workerd(socket: &Path) -> bool {
+    let Ok(mut stream) = std::os::unix::net::UnixStream::connect(socket) else {
         return false;
     };
-    let req = format!(
-        "GET {} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n{}: {token}\r\nConnection: close\r\n\r\n",
-        open_compute_runtime::READY_PATH,
-        open_compute_runtime::TOKEN_HEADER
-    );
-    let _ = stream.write_all(req.as_bytes());
-    let mut buf = Vec::new();
-    let _ = stream.read_to_end(&mut buf);
-    let text = String::from_utf8_lossy(&buf);
-    text.contains("204") || text.contains("200")
+    stream
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    let _ = stream
+        .write_all(b"GET /internal/ready HTTP/1.1\r\nHost: runtime\r\nConnection: close\r\n\r\n");
+    let mut response = String::new();
+    let _ = stream.read_to_string(&mut response);
+    response.starts_with("HTTP/1.1 204")
 }
 
 pub(super) fn listen_ports(pid: i32) -> Vec<u16> {
@@ -138,15 +136,6 @@ pub(super) fn health_port_from(ports: &[u16]) -> Option<u16> {
 
 pub(super) fn public_health_port(pid: i32) -> Option<u16> {
     health_port_from(&listen_ports(pid))
-}
-
-pub(super) fn sole_listen_port(pid: i32) -> Option<u16> {
-    let ports = listen_ports(pid);
-    match ports.as_slice() {
-        [] => None,
-        [port] => Some(*port),
-        _ => panic!("pid {pid} has multiple listener ports: {ports:?}"),
-    }
 }
 
 pub(super) fn respond_once(listener: TcpListener, status: u16) -> std::thread::JoinHandle<()> {
@@ -322,80 +311,6 @@ pub(super) fn kill_tree(pid: i32) {
     }
     if let Some(raw) = Pid::from_raw(pid) {
         let _ = kill_process(raw, Signal::KILL);
-    }
-}
-
-pub(super) fn extract_token(data: &Path, lock: &RuntimeLock, runtime_port: u16) -> Option<String> {
-    let skip: Vec<String> = lock
-        .targets
-        .values()
-        .flat_map(|t| [t.binary_sha256.clone(), t.archive_sha256.clone()])
-        .collect();
-    let runtime = data.join("runtime");
-    let entries = fs::read_dir(runtime).ok()?;
-    let mut candidates = Vec::new();
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|s| s.to_str()) == Some("bin")
-            && let Ok(bytes) = fs::read(&path)
-        {
-            let text = String::from_utf8_lossy(&bytes);
-            for c in extract_hex64(&text) {
-                if !skip.iter().any(|s| s == &c) && !candidates.contains(&c) {
-                    candidates.push(c);
-                }
-            }
-        }
-    }
-    candidates
-        .into_iter()
-        .find(|c| probe_workerd(runtime_port, c))
-}
-
-pub(super) fn extract_hex64(text: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let bytes = text.as_bytes();
-    let mut i = 0;
-    while i + 64 <= bytes.len() {
-        if bytes[i..i + 64]
-            .iter()
-            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
-        {
-            let s = String::from_utf8_lossy(&bytes[i..i + 64]).into_owned();
-            if !out.contains(&s) {
-                out.push(s);
-            }
-            i += 64;
-        } else {
-            i += 1;
-        }
-    }
-    out
-}
-
-pub(super) fn assert_token_absent(
-    token: &str,
-    platform: i32,
-    workerd: i32,
-    status: &str,
-    metrics: &str,
-    stderr: &Path,
-) {
-    assert!(!status.contains(token));
-    assert!(!metrics.contains(token));
-    assert!(!read_lossy(stderr).contains(token));
-    for pid in [platform, workerd] {
-        let out = Command::new("/bin/ps")
-            .args(["eww", "-p", &pid.to_string()])
-            .output()
-            .expect("/bin/ps must succeed to assert token absence");
-        assert!(
-            out.status.success(),
-            "/bin/ps failed for pid {pid}: {}",
-            String::from_utf8_lossy(&out.stderr)
-        );
-        let text = String::from_utf8_lossy(&out.stdout);
-        assert!(!text.contains(token), "token leaked in process listing");
     }
 }
 

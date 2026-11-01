@@ -245,7 +245,6 @@ struct Retention {
 
 #[derive(Debug, Default)]
 struct Inner {
-    generation: Option<String>,
     extension_sessions: HashMap<String, ExtensionSession>,
     extension_session_by_binding: HashMap<String, String>,
     private_http_sessions: HashMap<String, String>,

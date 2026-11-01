@@ -933,56 +933,15 @@ async fn run_cf(origin: &str, account: open_compute_core::InstanceId, args: &[&s
 
 #[tokio::test]
 async fn control_credentials_fence_late_generations_unknown_results_and_cancellation() {
-    use open_compute_runtime::GenerationAuthRegistry;
     use std::sync::atomic::Ordering;
     let first_fixture = fixture().await;
-    let auth = Arc::new(GenerationAuthRegistry::new());
-    auth.activate_for_test(open_compute_core::SecretString::new("generation-old"));
-    let old = auth.credential().unwrap();
-    first_fixture
-        .credentials
-        .block
-        .store(true, Ordering::SeqCst);
-    let service = Arc::clone(&first_fixture.service);
-    let registry = Arc::clone(&auth);
-    let first_old = old.clone();
-    let first = tokio::spawn(async move {
-        service
-            .credentials_for_generation(&"a".repeat(64), &registry, &first_old)
-            .await
-    });
-    first_fixture.credentials.entered.notified().await;
-    auth.activate_for_test(open_compute_core::SecretString::new("generation-new"));
-    let current = auth.credential().unwrap();
-    let service = Arc::clone(&first_fixture.service);
-    let registry = Arc::clone(&auth);
-    let late = tokio::spawn(async move {
-        service
-            .credentials_for_generation(&"a".repeat(64), &registry, &old)
-            .await
-    });
-    let service = Arc::clone(&first_fixture.service);
-    let registry = Arc::clone(&auth);
-    let newer = tokio::spawn(async move {
-        service
-            .credentials_for_generation(&"a".repeat(64), &registry, &current)
-            .await
-    });
-    first_fixture.credentials.release.notify_one();
-    assert!(first.await.unwrap().is_err());
-    assert!(late.await.unwrap().is_err());
-    assert!(newer.await.unwrap().is_ok());
-    let generations = first_fixture.credentials.observed.lock().await;
-    assert_eq!(generations.len(), 2);
-    assert_ne!(generations[0], generations[1]);
-    drop(generations);
 
     first_fixture.credentials.fail.store(true, Ordering::SeqCst);
-    let current = auth.credential().unwrap();
+
     assert!(
         first_fixture
             .service
-            .credentials_for_generation(&"a".repeat(64), &auth, &current)
+            .credentials_for_generation(&"a".repeat(64), "container-unit-generation")
             .await
             .is_err()
     );
@@ -993,19 +952,19 @@ async fn control_credentials_fence_late_generations_unknown_results_and_cancella
     assert!(
         first_fixture
             .service
-            .credentials_for_generation(&"a".repeat(64), &auth, &current)
+            .credentials_for_generation(&"a".repeat(64), "container-unit-generation")
             .await
             .is_err()
     );
-    assert_eq!(first_fixture.credentials.observed.lock().await.len(), 3);
+    assert_eq!(first_fixture.credentials.observed.lock().await.len(), 1);
     assert!(
         first_fixture
             .service
-            .credentials_for_generation(&"b".repeat(64), &auth, &current)
+            .credentials_for_generation(&"b".repeat(64), "container-unit-generation")
             .await
             .is_ok()
     );
-    assert_eq!(first_fixture.credentials.observed.lock().await.len(), 4);
+    assert_eq!(first_fixture.credentials.observed.lock().await.len(), 2);
 
     let cancelled_fixture = fixture().await;
     cancelled_fixture
@@ -1013,11 +972,10 @@ async fn control_credentials_fence_late_generations_unknown_results_and_cancella
         .block
         .store(true, Ordering::SeqCst);
     let service = Arc::clone(&cancelled_fixture.service);
-    let registry = Arc::clone(&auth);
-    let token = current.clone();
+
     let cancelled = tokio::spawn(async move {
         service
-            .credentials_for_generation(&"a".repeat(64), &registry, &token)
+            .credentials_for_generation(&"a".repeat(64), "container-unit-generation")
             .await
     });
     cancelled_fixture.credentials.entered.notified().await;
@@ -1027,7 +985,7 @@ async fn control_credentials_fence_late_generations_unknown_results_and_cancella
     assert!(
         cancelled_fixture
             .service
-            .credentials_for_generation(&"a".repeat(64), &auth, &current)
+            .credentials_for_generation(&"a".repeat(64), "container-unit-generation")
             .await
             .is_err()
     );

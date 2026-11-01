@@ -5,7 +5,6 @@ use open_compute_core::{
     DeterministicSchedulerClock, InstanceId, RequestId, SchedulerConfig, SecretString, VersionId,
     WorkflowsConfig,
 };
-use open_compute_runtime::GenerationAuthRegistry;
 use open_compute_storage::queues::{QueueConfig, QueueRepository};
 use open_compute_storage::scheduler::{QueueProjection, SchedulerStore};
 use open_compute_storage::worker_repository::{NewVersion, NewVersionProducts, VersionContentKind};
@@ -112,10 +111,7 @@ async fn consumer_routes_cover_create_read_update_delete_and_validation() {
     );
     let queue = seed_queue(&storage, &scheduler_store, account, "source-queue");
     seed_queue(&storage, &scheduler_store, account, "dead-letter");
-    let transport = crate::runtime_bridge::WorkerdTransport::new(
-        GenerationAuthRegistry::new(),
-        Arc::new(Mutex::new(None)),
-    );
+    let transport = crate::runtime_bridge::WorkerdTransport::new(Arc::new(Mutex::new(None)));
     let scheduler = Arc::new(crate::SchedulerService::new(
         scheduler_store,
         storage.clone(),

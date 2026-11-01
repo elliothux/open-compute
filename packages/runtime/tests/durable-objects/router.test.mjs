@@ -81,7 +81,6 @@ test("authenticated order cancellation remains available when tenant admission i
   let cancelled,
     authorized = true;
   const env = {
-    BINDING_BACKEND_TOKEN: "test-only-backend-token",
     BINDING_BACKEND: {
       fetch: async () =>
         authorized
@@ -142,8 +141,6 @@ test("container rollout wake resolves current DO authority and never dispatches 
   const router = new ControlRouter(
     {},
     {
-      INTERNAL_TOKEN: "generation",
-      BINDING_BACKEND_TOKEN: "binding",
       BINDING_BACKEND: {
         async fetch(url, options) {
           requests.push({ url, body: JSON.parse(options.body) });

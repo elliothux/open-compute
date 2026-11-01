@@ -22,7 +22,7 @@ const inert = moduleUrl(`
   export const tunnelSockets = (...args) => tunnelControl.run(...args);
   export const assembleOnce = async (_key, factory) => factory();
   export const bindingError = code => Object.assign(new Error(code), { stableCode: code });
-  export const BINDING_TOKEN_HEADER = "x-binding-token";
+
   export const currentStartupGeneration = () => "generation";
   export const observedEntrypoint = (stub, _factory, _ctx, _identity, name, options) => stub.getEntrypoint(name, options);
   export const doPolicy = () => ({});
@@ -123,7 +123,6 @@ function delayedAdmission({ rejectFirst = false } = {}) {
         }),
       }),
     },
-    BINDING_BACKEND_TOKEN: "token",
     BINDING_BACKEND: {
       async fetch(url, init) {
         const body = JSON.parse(init.body);
@@ -449,7 +448,6 @@ test("expired Service roots reject repeated and sibling calls without renewing a
         }),
       }),
     },
-    BINDING_BACKEND_TOKEN: "token",
     BINDING_BACKEND: {
       async fetch(url, init) {
         const body = JSON.parse(init.body);
@@ -512,7 +510,6 @@ test("expired Service roots reject repeated and sibling calls without renewing a
 test("Service lifecycle mutations retry transient private-hop failures", async () => {
   let calls = 0;
   const env = {
-    BINDING_BACKEND_TOKEN: "token",
     BINDING_BACKEND: {
       async fetch(_url, init) {
         calls += 1;
@@ -568,7 +565,6 @@ for (const outcome of ["success", "disconnect", "finalization failure"]) {
           };
         },
       },
-      BINDING_BACKEND_TOKEN: "token",
       BINDING_BACKEND: {
         async fetch(url) {
           if (url.endsWith("/resolve"))
@@ -693,7 +689,6 @@ test("Extension admission injects one host port and no outbound capability", asy
         return stub.getEntrypoint(name, options);
       },
     },
-    BINDING_BACKEND_TOKEN: "token",
     BINDING_BACKEND: {
       async fetch(url) {
         assert.ok(url.endsWith("/resolve"));
@@ -823,7 +818,6 @@ for (const outcome of [
           };
         },
       },
-      BINDING_BACKEND_TOKEN: "token",
       BINDING_BACKEND: {
         async fetch(url, init) {
           if (url.endsWith("/resolve")) {
@@ -943,7 +937,6 @@ function deadlineFixture({
         };
       },
     },
-    BINDING_BACKEND_TOKEN: "token",
     BINDING_BACKEND: {
       async fetch(url, init) {
         if (url.endsWith("/resolve"))
@@ -1770,7 +1763,6 @@ test("private channel WebSocket ownership uses one authenticated streaming hando
     },
   });
   const env = {
-    BINDING_BACKEND_TOKEN: "fixture-token",
     BINDING_BACKEND: {
       async fetch(url, init) {
         calls.push({ url, init });
@@ -1790,10 +1782,10 @@ test("private channel WebSocket ownership uses one authenticated streaming hando
   assert.deepEqual(JSON.parse(calls[0].init.body), {
     handles: ["issued-handle"],
   });
-  assert.equal(calls[0].init.headers["x-binding-token"], "fixture-token");
+  assert.equal(calls[0].init.headers["x-binding-token"], undefined);
   assert.equal(
     calls[0].init.headers["x-open-compute-startup-generation"],
-    "generation",
+    undefined,
   );
   assert.equal(dropped, false);
   await held.cancel();
@@ -1806,7 +1798,6 @@ test("private channel WebSocket ownership rejects a wrong receipt and closes its
   const transport = new ServiceTransport(
     {},
     {
-      BINDING_BACKEND_TOKEN: "fixture-token",
       BINDING_BACKEND: {
         async fetch() {
           attempts += 1;

@@ -15,7 +15,7 @@ async fn concurrent_compiles_do_not_clobber_workspaces() {
     let runtime = verify_ok(&lock_path, &bin).await;
     let data = dir.path().join("data");
     fs::create_dir(&data).unwrap();
-    let token = SecretString::new(TOKEN);
+
     let redactor = redactor_with_token();
     let platform = platform_meta();
     let a = compile_static_config(compile_req(
@@ -24,7 +24,6 @@ async fn concurrent_compiles_do_not_clobber_workspaces() {
         dir.path(),
         &data,
         &platform,
-        &token,
         &redactor,
         Duration::from_secs(5),
     ));
@@ -34,7 +33,6 @@ async fn concurrent_compiles_do_not_clobber_workspaces() {
         dir.path(),
         &data,
         &platform,
-        &token,
         &redactor,
         Duration::from_secs(5),
     ));

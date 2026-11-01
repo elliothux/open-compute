@@ -12,7 +12,7 @@ async fn reader_panic_is_typed_and_cleans_up() {
     let runtime = verify_ok(&lock_path, &bin).await;
     let data = dir.path().join("data");
     fs::create_dir(&data).unwrap();
-    let token = SecretString::new(TOKEN);
+
     let redactor = redactor_with_token();
     let platform = platform_meta();
     set_reader_panic(true);
@@ -24,7 +24,6 @@ async fn reader_panic_is_typed_and_cleans_up() {
         dir.path(),
         &data,
         &platform,
-        &token,
         &redactor,
         deadline,
     ))

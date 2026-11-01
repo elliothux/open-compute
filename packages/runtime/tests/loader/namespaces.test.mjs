@@ -16,7 +16,6 @@ function request(value, overrides = {}) {
     headers: {
       "content-type": "application/json",
       "content-length": String(Buffer.byteLength(body)),
-      "x-open-compute-internal-token": "generation",
       ...overrides,
     },
   });
@@ -76,7 +75,6 @@ test("only the authenticated private gateway can forward native namespace revoca
   });
   const revoked = [];
   const env = {
-    INTERNAL_TOKEN: "generation",
     LOADER_HOST: {
       fetch(req) {
         return revokeWorkerLoaders(req, {
@@ -88,15 +86,6 @@ test("only the authenticated private gateway can forward native namespace revoca
     },
   };
   const gateway = new Ingress({}, env);
-  assert.equal(
-    (
-      await gateway.fetch(
-        request([key], { "x-open-compute-internal-token": "old" }),
-      )
-    ).status,
-    404,
-  );
-  assert.deepEqual(revoked, []);
   assert.equal(
     (await gateway.fetch(new Request(path + "?extra=1", request([key]))))
       .status,

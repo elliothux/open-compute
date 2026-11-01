@@ -97,9 +97,6 @@ async fn serve(composed: composition::ComposedPlatform) -> Result<(), PlatformEr
         images,
         browser,
         document_parser,
-        generation_auth,
-        binding_generation_auth,
-        observability_generation_auth,
         runtime_source_listener,
         runtime_source_addr,
         binding_backend_listener,
@@ -311,9 +308,6 @@ async fn serve(composed: composition::ComposedPlatform) -> Result<(), PlatformEr
         images,
         browser,
         document_parser,
-        generation_auth,
-        binding_generation_auth,
-        observability_generation_auth,
         runtime_source_listener,
         runtime_source_addr,
         binding_backend_listener,
@@ -358,7 +352,7 @@ mod container_maintenance_tests {
     use super::*;
 
     fn test_transport() -> WorkerdTransport {
-        WorkerdTransport::new(GenerationAuthRegistry::new(), Arc::new(Mutex::new(None)))
+        WorkerdTransport::new(Arc::new(Mutex::new(None)))
     }
 
     #[tokio::test]

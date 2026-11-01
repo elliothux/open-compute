@@ -12,7 +12,7 @@ async fn compile_stdout_read_failure_is_typed_and_cleans_up() {
     let runtime = verify_ok(&lock_path, &bin).await;
     let data = dir.path().join("data");
     fs::create_dir(&data).unwrap();
-    let token = SecretString::new(TOKEN);
+
     let redactor = redactor_with_token();
     let platform = platform_meta();
     set_stdout_read_fail(true);
@@ -22,7 +22,6 @@ async fn compile_stdout_read_failure_is_typed_and_cleans_up() {
         dir.path(),
         &data,
         &platform,
-        &token,
         &redactor,
         Duration::from_secs(5),
     ))

@@ -12,7 +12,7 @@ async fn corrupt_sidecar_fails_closed() {
     let runtime = verify_ok(&lock_path, &bin).await;
     let data = dir.path().join("data");
     fs::create_dir(&data).unwrap();
-    let token = SecretString::new(TOKEN);
+
     let redactor = redactor_with_token();
     let platform = platform_meta();
     let compiled = compile_static_config(compile_req(
@@ -21,7 +21,6 @@ async fn corrupt_sidecar_fails_closed() {
         dir.path(),
         &data,
         &platform,
-        &token,
         &redactor,
         Duration::from_secs(5),
     ))
@@ -36,7 +35,6 @@ async fn corrupt_sidecar_fails_closed() {
         dir.path(),
         &data,
         &platform,
-        &token,
         &redactor,
         Duration::from_secs(5),
     ))

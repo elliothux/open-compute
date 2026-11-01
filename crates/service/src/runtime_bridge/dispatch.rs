@@ -12,7 +12,6 @@ impl WorkerdTransport {
         probe: bool,
     ) -> Result<Response, PlatformError> {
         let endpoint = self.endpoint()?;
-        let (port, credential) = (endpoint.port, endpoint.credential);
         let websocket = match websocket::WebSocketHandshake::capture(&mut request) {
             Ok(value) => value,
             Err(status) => return Ok(status.into_response()),
@@ -28,13 +27,13 @@ impl WorkerdTransport {
         {
             return Ok(StatusCode::PAYLOAD_TOO_LARGE.into_response());
         }
-        // A tenant may return without consuming its streaming body. The pinned
-        // workerd can then close this HTTP/1 hop after the response, racing reuse.
-        // Pool only bodyless dispatches; never buffer input or retry a mutation.
-        let client = if body.is_end_stream() {
-            &self.client
+        let mut execution_pin = if validation {
+            None
         } else {
-            &self.body_client
+            self.version_pins
+                .as_ref()
+                .map(|pins| pins.pin(target.version_id))
+                .transpose()?
         };
         let original_method = parts.method.as_str().to_owned();
         let original_url = if validation {
@@ -51,7 +50,6 @@ impl WorkerdTransport {
             headers.insert(header::UPGRADE, HeaderValue::from_static("websocket"));
             headers.insert(header::CONNECTION, HeaderValue::from_static("upgrade"));
         }
-        insert_header(&mut headers, TOKEN_HEADER, credential.expose())?;
         insert_header(
             &mut headers,
             "x-open-compute-instance-id",
@@ -97,7 +95,7 @@ impl WorkerdTransport {
             insert_header(&mut headers, "x-open-compute-entrypoint", entrypoint)?;
         }
         let uri: Uri = format!(
-            "http://127.0.0.1:{port}{}",
+            "http://runtime{}",
             if durable_object_class {
                 "/internal/validate-do"
             } else if probe {
@@ -119,14 +117,18 @@ impl WorkerdTransport {
         };
         *internal.uri_mut() = uri;
         *internal.headers_mut() = headers;
-        let mut response =
-            match tokio::time::timeout(RESPONSE_HEADER_TIMEOUT, client.request(internal)).await {
-                Ok(Ok(response)) => response,
-                Ok(Err(error)) if request_body_limit_error(&error) => {
-                    return Ok(StatusCode::PAYLOAD_TOO_LARGE.into_response());
-                }
-                Ok(Err(_)) | Err(_) => return Err(runtime_unavailable()),
-            };
+        let mut response = match tokio::time::timeout(
+            RESPONSE_HEADER_TIMEOUT,
+            self.request(&endpoint.socket_path, internal),
+        )
+        .await
+        {
+            Ok(Ok(response)) => response,
+            Ok(Err(error)) if request_body_limit_error(error.as_ref()) => {
+                return Ok(StatusCode::PAYLOAD_TOO_LARGE.into_response());
+            }
+            Ok(Err(_)) | Err(_) => return Err(runtime_unavailable()),
+        };
         let upgraded = response.status() == StatusCode::SWITCHING_PROTOCOLS;
         let service_websocket_handoffs = service_websocket_handoff_handles(response.headers())?;
         if !upgraded && !service_websocket_handoffs.is_empty() {
@@ -143,15 +145,13 @@ impl WorkerdTransport {
             )
         };
         if upgraded {
-            websocket
-                .ok_or_else(runtime_unavailable)?
-                .connect(&mut response, service_websocket_lease)?;
+            websocket.ok_or_else(runtime_unavailable)?.connect(
+                &mut response,
+                service_websocket_lease,
+                execution_pin.take(),
+            )?;
         }
         let (mut parts, body) = response.into_parts();
-        let execution_started = parts
-            .headers
-            .get("x-open-compute-execution-started")
-            .is_some_and(|value| value == "1");
         let loader_outcome = parts
             .headers
             .get("x-open-compute-loader-outcome")
@@ -169,9 +169,6 @@ impl WorkerdTransport {
         } else {
             None
         };
-        if execution_started && let Some(pins) = &self.version_pins {
-            pins.retain_until_restart(target.version_id)?;
-        }
         sanitize_response_headers(&mut parts.headers);
         if upgraded {
             parts
@@ -187,7 +184,11 @@ impl WorkerdTransport {
         if let Some(outcome) = loader_outcome {
             parts.extensions.insert(outcome);
         }
-        Ok(Response::from_parts(parts, Body::new(body)))
+        let response = Response::from_parts(parts, Body::new(body));
+        Ok(match execution_pin {
+            Some(pin) => crate::asset_backend::pin_response(response, pin),
+            None => response,
+        })
     }
 }
 

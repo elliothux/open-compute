@@ -40,7 +40,6 @@ struct Round {
     child: Option<Child>,
     tracked_pids: Vec<i32>,
     tracked_ports: Vec<u16>,
-    known_tokens: Vec<String>,
     ok: bool,
 }
 

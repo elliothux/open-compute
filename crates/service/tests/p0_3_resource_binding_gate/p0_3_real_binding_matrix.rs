@@ -7,7 +7,7 @@ pub(super) async fn run() {
     let root = repo_root();
     let lock = root.join("packages/runtime/workerd.lock.json");
     let assets = root.join("packages/runtime");
-    let temp = tempfile::tempdir().unwrap();
+    let temp = tempfile::tempdir_in("/tmp").unwrap();
     let storage = Arc::new(
         PlatformStorage::bootstrap(&storage_config(&temp.path().join("data")), &SystemClock)
             .unwrap(),
@@ -18,12 +18,17 @@ pub(super) async fn run() {
         .await
         .expect("formal pinned runtime");
 
-    let source_auth = GenerationAuthRegistry::new();
-    let binding_auth = GenerationAuthRegistry::new();
-    let source_listener = bind_runtime_source().await.unwrap();
-    let source_addr = source_listener.local_addr().unwrap();
-    let binding_listener = bind_binding_backend().await.unwrap();
-    let binding_addr = binding_listener.local_addr().unwrap();
+    let source_listener =
+        bind_runtime_source(&storage.data_dir().runtime_dir().join("source.sock"))
+            .await
+            .unwrap();
+    let source_addr = source_listener.path().to_owned();
+
+    let binding_listener =
+        bind_binding_backend(&storage.data_dir().runtime_dir().join("binding.sock"))
+            .await
+            .unwrap();
+    let binding_addr = binding_listener.path().to_owned();
     let pins = ResourcePins::new();
     let fake = Arc::new(FakeState::default());
     let (shutdown_tx, mut source_shutdown) = tokio::sync::watch::channel(false);
@@ -36,9 +41,9 @@ pub(super) async fn run() {
             open_compute_service::runtime_bridge::python_runtime_pin(&runtime),
         )
         .unwrap();
-        let auth = source_auth.clone();
+
         async move {
-            serve_runtime_source(source_listener, source, auth, None, async move {
+            serve_runtime_source(source_listener, source, None, async move {
                 let _ = source_shutdown.changed().await;
             })
             .await
@@ -46,14 +51,13 @@ pub(super) async fn run() {
     });
     let binding_task = tokio::spawn({
         let storage = storage.clone();
-        let auth = binding_auth.clone();
+
         let pins = pins.clone();
         let executor = Arc::new(FakeExecutor(fake.clone()));
         async move {
             serve_binding_backend(
                 binding_listener,
                 storage,
-                auth,
                 pins,
                 executor,
                 None,
@@ -76,16 +80,15 @@ pub(super) async fn run() {
         lock.clone(),
         assets,
         storage.data_dir().runtime_dir(),
+        storage.data_dir().runtime_dir().join("ingress.sock"),
         PlatformReleaseMeta {
             version: "p0.3-gate".to_owned(),
         },
         Duration::from_secs(20),
         Redactor::new(),
-    )
-    .with_generation_auth(source_auth.clone())
-    .with_binding_generation_auth(binding_auth.clone());
+    );
     let supervisor_slot = Arc::new(Mutex::new(None));
-    let transport = WorkerdTransport::new(source_auth.clone(), supervisor_slot.clone());
+    let transport = WorkerdTransport::new(supervisor_slot.clone());
     let do_storage = storage
         .data_dir()
         .prepare_durable_object_storage(
@@ -103,12 +106,11 @@ pub(super) async fn run() {
             lease_path: Some(storage.data_dir().runtime_dir().join("p0-3-gate.lease")),
         },
         vec![
-            ExternalServiceAddress::loopback("runtime-source", source_addr).unwrap(),
-            ExternalServiceAddress::loopback("binding-backend", binding_addr).unwrap(),
-            ExternalServiceAddress::loopback("observability-backend", binding_addr).unwrap(),
+            ExternalServiceAddress::unix("runtime-source", &source_addr).unwrap(),
+            ExternalServiceAddress::unix("binding-backend", &binding_addr).unwrap(),
+            ExternalServiceAddress::unix("observability-backend", &binding_addr).unwrap(),
         ],
         vec![DirectoryServicePath::local("do-storage", &do_storage).unwrap()],
-        vec![source_auth.clone(), binding_auth.clone()],
     ));
     *supervisor_slot.lock().unwrap() = Some(supervisor.clone());
     supervisor.start();
@@ -276,31 +278,8 @@ pub(super) async fn run() {
         .unwrap()
         .pop()
         .unwrap();
-    let current_token = binding_auth.credential().unwrap();
-    let generation = binding_auth.claimed_generation_for_test().unwrap();
-    let forged_token = backend_call(
-        binding_addr,
-        &"00".repeat(32),
-        &generation,
-        binding.id,
-        bound.id,
-        &hex::encode(binding.descriptor_sha256),
-        "get",
-        br#"{"keys":["k"]}"#,
-        None,
-    )
-    .await;
-    assert_eq!(forged_token.status(), StatusCode::NOT_FOUND);
-    assert!(
-        forged_token
-            .headers()
-            .get("x-open-compute-error-code")
-            .is_none()
-    );
     let forged_hash = backend_call(
-        binding_addr,
-        current_token.expose(),
-        &generation,
+        &binding_addr,
         binding.id,
         bound.id,
         &"00".repeat(32),
@@ -317,9 +296,7 @@ pub(super) async fn run() {
         ErrorCode::BindingTypeMismatch.as_str()
     );
     let oversized = backend_call(
-        binding_addr,
-        current_token.expose(),
-        &generation,
+        &binding_addr,
         binding.id,
         bound.id,
         &hex::encode(binding.descriptor_sha256),
@@ -474,22 +451,8 @@ pub(super) async fn run() {
     assert_eq!(delete_referenced.code(), ErrorCode::ResourceReferenced);
 
     let old_pid = supervisor.snapshot().pid.unwrap();
-    let old_token = current_token.expose().to_owned();
     supervisor.force_restart_for_test();
     wait_pid_change(&supervisor, old_pid, Duration::from_secs(30)).await;
-    let stale = backend_call(
-        binding_addr,
-        &old_token,
-        &generation,
-        binding.id,
-        bound.id,
-        &hex::encode(original_hash),
-        "get",
-        br#"{"keys":["gate"]}"#,
-        None,
-    )
-    .await;
-    assert_eq!(stale.status(), StatusCode::NOT_FOUND);
     let post_restart = dispatch(
         &transport,
         &repository,
@@ -553,7 +516,7 @@ pub(super) async fn run() {
     assert_ne!(recreated, resource);
 
     let diagnostics = format!("{:?}", supervisor.last_diagnostics());
-    assert!(!diagnostics.contains(&old_token));
+    assert!(!diagnostics.contains("internal-token"));
     supervisor.shutdown().await;
     assert_eq!(supervisor.owner_registry_len(), 0);
     let _ = shutdown_tx.send(true);

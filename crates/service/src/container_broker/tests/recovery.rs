@@ -242,10 +242,14 @@ async fn pending_cleanup(pending: Pending) {
     let image = fixture.admit_image("original").await;
     broker.image(&fixture, &image).await;
     let authority = test_support::authority(&fixture.service, &fixture._artifacts, image, true);
-    let (auth, credential) = test_support::generation();
+
     let initial = fixture
         .service
-        .resolve(authority.request(true, None), 10, &auth, &credential)
+        .resolve(
+            authority.request(true, None),
+            10,
+            "container-unit-generation",
+        )
         .await
         .unwrap()
         .lease
@@ -253,7 +257,11 @@ async fn pending_cleanup(pending: Pending) {
     broker.execute(&initial).await;
     fixture
         .service
-        .resolve(authority.request(false, None), 11, &auth, &credential)
+        .resolve(
+            authority.request(false, None),
+            11,
+            "container-unit-generation",
+        )
         .await
         .unwrap();
     let identity = ContainerLeaseIdentity {
@@ -311,7 +319,7 @@ async fn pending_cleanup(pending: Pending) {
         } else {
             fixture
                 .service
-                .begin_stop(&authority.stop(&initial), 14, &auth, &credential)
+                .begin_stop(&authority.stop(&initial), 14)
                 .unwrap();
         }
         None
@@ -333,14 +341,16 @@ async fn pending_cleanup(pending: Pending) {
     );
     let before = broker.state.requests.lock().await.len();
     broker.state.delete_failure.store(true, Ordering::SeqCst);
-    let transport = crate::runtime_bridge::WorkerdTransport::for_test_endpoint(auth.clone(), 9);
+    let transport = crate::runtime_bridge::WorkerdTransport::for_test_endpoint(
+        std::path::Path::new("/tmp/missing.sock"),
+    );
     if matches!(pending, Pending::NativeStop) {
         let mut request = authority.request(false, None);
         request.for_stop = true;
         assert!(
             fixture
                 .service
-                .resolve(request, 15, &auth, &credential)
+                .resolve(request, 15, "container-unit-generation")
                 .await
                 .is_err()
         );
@@ -407,7 +417,7 @@ async fn pending_cleanup(pending: Pending) {
     assert!(
         fixture
             .service
-            .resolve(request, 16, &auth, &credential)
+            .resolve(request, 16, "container-unit-generation")
             .await
             .is_err()
     );
@@ -426,7 +436,7 @@ async fn pending_cleanup(pending: Pending) {
         assert!(
             fixture
                 .service
-                .resolve(request, 17, &auth, &credential)
+                .resolve(request, 17, "container-unit-generation")
                 .await
                 .unwrap()
                 .lease
@@ -442,11 +452,11 @@ async fn pending_cleanup(pending: Pending) {
             .count();
         fixture
             .service
-            .begin_stop(&authority.stop(&initial), 17, &auth, &credential)
+            .begin_stop(&authority.stop(&initial), 17)
             .unwrap();
         fixture
             .service
-            .stop(&authority.stop(&initial), 17, &auth, &credential)
+            .stop(&authority.stop(&initial), 17)
             .await
             .unwrap();
         assert_eq!(
@@ -476,7 +486,7 @@ async fn pending_cleanup(pending: Pending) {
         }
         fixture
             .service
-            .stop(&authority.stop(&initial), 17, &auth, &credential)
+            .stop(&authority.stop(&initial), 17)
             .await
             .unwrap();
     } else if matches!(pending, Pending::Delete) {
@@ -526,7 +536,11 @@ async fn pending_cleanup(pending: Pending) {
     if !matches!(pending, Pending::Delete) {
         let replacement = fixture
             .service
-            .resolve(authority.request(true, None), 18, &auth, &credential)
+            .resolve(
+                authority.request(true, None),
+                18,
+                "container-unit-generation",
+            )
             .await
             .unwrap()
             .lease
@@ -536,19 +550,23 @@ async fn pending_cleanup(pending: Pending) {
         assert!(
             fixture
                 .service
-                .stop(&authority.stop(&initial), 18, &auth, &credential)
+                .stop(&authority.stop(&initial), 18)
                 .await
                 .is_err()
         );
         broker.execute(&replacement).await;
         fixture
             .service
-            .resolve(authority.request(false, None), 19, &auth, &credential)
+            .resolve(
+                authority.request(false, None),
+                19,
+                "container-unit-generation",
+            )
             .await
             .unwrap();
         fixture
             .service
-            .stop(&authority.stop(&replacement), 20, &auth, &credential)
+            .stop(&authority.stop(&replacement), 20)
             .await
             .unwrap();
         assert!(broker.state.containers.lock().await.is_empty());

@@ -1,4 +1,4 @@
-//! Frozen Workflow dispatch on the authenticated dynamic-loader transport.
+//! Frozen Workflow dispatch on the private Unix dynamic-loader transport.
 
 use super::*;
 
@@ -92,7 +92,7 @@ impl std::fmt::Debug for WorkflowOutcome {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WorkflowDispatchResult {
     #[serde(skip)]
-    credential: Option<open_compute_runtime::GenerationCredential>,
+    generation: Option<open_compute_core::StartupId>,
     /// Durable control or business result observed by the system host.
     pub result: WorkflowOutcome,
     /// A logically fenced callback did not acknowledge completion before return.
@@ -201,7 +201,7 @@ impl WorkerdTransport {
         .await
         .map_err(|_| workflow_unavailable())
         .and_then(std::convert::identity);
-        let (mut response, credential) = match received {
+        let (mut response, generation) = match received {
             Ok(value) => value,
             Err(error) => {
                 self.quarantine_workflow(&admitted_generation)?;
@@ -214,7 +214,7 @@ impl WorkerdTransport {
             }
         };
         if !matches!(response.loader_outcome.as_str(), "cold" | "warm") {
-            self.quarantine_workflow(&credential)?;
+            self.quarantine_workflow(&generation)?;
             return Err(workflow_unavailable());
         }
         let valid = match &response.result {
@@ -241,17 +241,19 @@ impl WorkerdTransport {
             | WorkflowOutcome::Unknown { final_ordinal } => *final_ordinal <= 1024,
         };
         if !valid {
-            self.quarantine_workflow(&credential)?;
+            self.quarantine_workflow(&generation)?;
             return Err(workflow_unavailable());
         }
         if response.drain_incomplete != matches!(response.result, WorkflowOutcome::Unknown { .. }) {
-            self.quarantine_workflow(&credential)?;
+            self.quarantine_workflow(&generation)?;
             return Err(workflow_unavailable());
         }
         if response.drain_incomplete {
-            self.quarantine_workflow(&credential)?;
+            self.quarantine_workflow(&generation)?;
+        } else if let Some(pins) = &self.version_pins {
+            pins.release_drained(target.version_id, target.request_id);
         }
-        response.credential = Some(credential);
+        response.generation = Some(generation);
         Ok(response)
     }
 
@@ -261,32 +263,28 @@ impl WorkerdTransport {
         response: WorkflowDispatchResult,
         commit: impl FnOnce(WorkflowOutcome) -> Result<T, PlatformError>,
     ) -> Result<T, PlatformError> {
-        let credential = response
-            .credential
-            .as_ref()
-            .ok_or_else(workflow_unavailable)?;
-        self.auth
-            .with_current(credential, || commit(response.result))
-            .unwrap_or_else(|| {
-                Err(PlatformError::new(
-                    ErrorCode::WorkflowRunStale,
-                    "Workflow generation is stale",
-                ))
-            })
+        let generation = response.generation.ok_or_else(workflow_unavailable)?;
+        if self.current_generation() == Some(generation) {
+            commit(response.result)
+        } else {
+            Err(PlatformError::new(
+                ErrorCode::WorkflowRunStale,
+                "Workflow generation is stale",
+            ))
+        }
     }
 
-    fn admit_workflow(&self) -> Result<open_compute_runtime::GenerationCredential, PlatformError> {
-        // Compilation installs credentials before readiness. Their presence
-        // alone must not admit a claim or quarantine a not-yet-running child.
+    fn admit_workflow(&self) -> Result<open_compute_core::StartupId, PlatformError> {
+        // Admission requires a ready runtime generation.
         let endpoint = self.endpoint().map_err(|_| workflow_unavailable())?;
-        let current = endpoint.credential;
+        let current = endpoint.startup_id.ok_or_else(workflow_unavailable)?;
         let mut quarantine = self
             .workflow_quarantine
             .lock()
             .map_err(|_| workflow_unavailable())?;
         if quarantine
             .as_ref()
-            .is_some_and(|old| self.auth.with_current(old, || ()).is_some())
+            .is_some_and(|old| self.current_generation().as_ref() == Some(old))
         {
             return Err(workflow_unavailable());
         }
@@ -298,15 +296,15 @@ impl WorkerdTransport {
 
     fn quarantine_workflow(
         &self,
-        credential: &open_compute_runtime::GenerationCredential,
+        generation: &open_compute_core::StartupId,
     ) -> Result<(), PlatformError> {
         let mut quarantine = self
             .workflow_quarantine
             .lock()
             .map_err(|_| workflow_unavailable())?;
-        let _ = self.auth.with_current(credential, || {
-            *quarantine = Some(credential.clone());
-        });
+        if self.current_generation() == Some(*generation) {
+            *quarantine = Some(*generation);
+        }
         Ok(())
     }
 }

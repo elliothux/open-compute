@@ -362,7 +362,6 @@ async fn container_registry_manifest_failures_never_publish_partial_graph_author
 #[tokio::test]
 async fn container_registry_failed_uploads_remain_fenced_after_restart_and_expire_before_recovery()
 {
-    use crate::containers::test_support::generation;
     use crate::runtime_bridge::WorkerdTransport;
     use bytes::Bytes;
     use open_compute_core::ResourceId;
@@ -504,8 +503,8 @@ async fn container_registry_failed_uploads_remain_fenced_after_restart_and_expir
         failed.iter().map(|(id, _)| *id).collect::<Vec<_>>()
     );
     assert_eq!(repo.registry_upload_ids(account).unwrap(), vec![live]);
-    let (generation_auth, _) = generation();
-    let transport = WorkerdTransport::for_test_endpoint(generation_auth, 9);
+
+    let transport = WorkerdTransport::for_test_endpoint(std::path::Path::new("/tmp/missing.sock"));
     restarted.reconcile_rollouts(&transport).await.unwrap();
     for (id, _) in failed {
         assert!(!fixture.service.registry_upload_path(id).unwrap().exists());

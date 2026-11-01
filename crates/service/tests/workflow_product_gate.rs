@@ -23,14 +23,13 @@ fn start_backend(
     metrics: &std::sync::Arc<open_compute_service::metrics::MetricsRegistry>,
 ) -> tokio::task::JoinHandle<Result<(), open_compute_core::PlatformError>> {
     use std::sync::Arc;
-    let auth = harness.binding_auth.clone();
+
     let listener = harness.binding_listener.take().unwrap();
     let mut shutdown = harness.shutdown.subscribe();
     tokio::spawn(
         open_compute_service::binding_backend::serve_binding_backend(
             listener,
             harness.storage.clone(),
-            auth,
             open_compute_workers::ResourcePins::new(),
             Arc::new(
                 open_compute_service::kv_backend::SqliteKvBindingExecutor::new(

@@ -265,11 +265,9 @@ export function normalizeRange(value: unknown): R2Range | undefined {
       throw new Error("get: The requested range is not satisfiable (10039)");
     out.suffix = suffix;
   }
-  if (out.offset == null && out.length == null && out.suffix == null) {
-    throw new Error(
-      "get: We encountered an internal error. Please try again. (10001)",
-    );
-  }
+  // Cloudflare reads the whole object for an empty range.
+  if (out.offset == null && out.length == null && out.suffix == null)
+    return undefined;
   return out;
 }
 

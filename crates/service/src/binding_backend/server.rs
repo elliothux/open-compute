@@ -1,22 +1,16 @@
 use super::*;
 
-/// Bind the private binding backend to an ephemeral IPv4 loopback port.
-pub async fn bind_binding_backend() -> Result<TcpListener, PlatformError> {
-    TcpListener::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0))
-        .await
-        .map_err(|_| {
-            PlatformError::new(
-                ErrorCode::RuntimeUnavailable,
-                "failed to bind private binding backend listener",
-            )
-        })
+/// Bind the private binding backend to an private Unix socket.
+pub async fn bind_binding_backend(
+    path: &std::path::Path,
+) -> Result<crate::http::PrivateUnixListener, PlatformError> {
+    crate::http::PrivateUnixListener::bind(path.to_owned())
 }
 
 /// Serve every composed product plane on the private binding listener.
 pub async fn serve_binding_backend(
-    listener: TcpListener,
+    listener: crate::http::PrivateUnixListener,
     storage: Arc<PlatformStorage>,
-    auth: GenerationAuthRegistry,
     pins: ResourcePins,
     executor: Arc<dyn KvBindingExecutor>,
     metrics: Option<Arc<MetricsRegistry>>,
@@ -31,7 +25,6 @@ pub async fn serve_binding_backend(
     serve_binding_backend_inner(
         listener,
         storage,
-        auth,
         pins,
         executor,
         metrics,
@@ -57,9 +50,8 @@ pub async fn serve_binding_backend(
 
 /// Serve every product plane plus the version-scoped static-assets binding backend.
 pub async fn serve_binding_backend_with_assets(
-    listener: TcpListener,
+    listener: crate::http::PrivateUnixListener,
     storage: Arc<PlatformStorage>,
-    auth: GenerationAuthRegistry,
     pins: ResourcePins,
     executor: Arc<dyn KvBindingExecutor>,
     metrics: Option<Arc<MetricsRegistry>>,
@@ -78,7 +70,6 @@ pub async fn serve_binding_backend_with_assets(
     serve_binding_backend_inner(
         listener,
         storage,
-        auth,
         pins,
         executor,
         metrics,
@@ -103,9 +94,8 @@ pub async fn serve_binding_backend_with_assets(
 }
 
 pub(super) async fn serve_binding_backend_inner(
-    listener: TcpListener,
+    mut listener: crate::http::PrivateUnixListener,
     storage: Arc<PlatformStorage>,
-    auth: GenerationAuthRegistry,
     pins: ResourcePins,
     executor: Arc<dyn KvBindingExecutor>,
     metrics: Option<Arc<MetricsRegistry>>,
@@ -168,7 +158,6 @@ pub(super) async fn serve_binding_backend_inner(
     let browser_shutdown = browser.clone();
     let state = BackendState {
         storage,
-        auth,
         pins,
         executor,
         metrics,
@@ -240,7 +229,7 @@ pub(super) async fn serve_binding_backend_inner(
         let _ = vectorize_task.await;
         let _ = ai_search_task.await;
     };
-    axum::serve(listener, router.into_make_service())
+    axum::serve(listener.take_listener()?, router.into_make_service())
         .with_graceful_shutdown(managed_shutdown)
         .await
         .map_err(|_| {

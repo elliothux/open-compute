@@ -9,17 +9,11 @@ use axum::routing::post;
 use base64::Engine as _;
 use http_body_util::Limited;
 use hyper::body::Body as _;
-use hyper_util::client::legacy::Client;
-use hyper_util::client::legacy::connect::HttpConnector;
-use hyper_util::rt::TokioExecutor;
 use open_compute_core::{
     CronSchedule, ErrorCode, InstanceId, PlatformError, QueueMessageId, RequestId, VersionId,
     WorkerId,
 };
-use open_compute_runtime::{
-    GenerationAuthRegistry, RuntimeFailureEvidence, SupervisorState, TOKEN_HEADER,
-    WorkerdSupervisor,
-};
+use open_compute_runtime::{RuntimeFailureEvidence, SupervisorState, WorkerdSupervisor};
 use open_compute_storage::durable_objects::AuthorizedDurableObjectDelete;
 use open_compute_storage::queues::QUEUE_MAX_MESSAGE_BYTES;
 use open_compute_storage::scheduler::{ClaimedJob, QueueContentType};
@@ -31,11 +25,10 @@ use serde::Deserialize;
 use serde::Serialize;
 use std::collections::HashSet;
 use std::future::Future;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tokio::net::TcpListener;
 
 #[path = "runtime_bridge/workflow.rs"]
 mod workflow;
@@ -50,7 +43,6 @@ mod worker_loaders;
 
 const SOURCE_PATH: &str = "/internal/runtime/v1/versions/resolve";
 const ERROR_HEADER: &str = "x-open-compute-error-code";
-const GENERATION_HEADER: &str = "x-open-compute-startup-generation";
 const SERVICE_WEBSOCKET_HANDOFF_HEADER: &str = "x-open-compute-service-websocket-handoffs";
 const MAX_SOURCE_REQUEST: usize = 4096;
 /// Fixed Standard ingress baseline in decimal bytes, independent of operator policy.
@@ -301,12 +293,9 @@ impl DispatchTarget {
 mod source_server;
 mod transport;
 
-/// Loopback endpoint snapshot for one internal request: listen port, generation credential,
-/// and the [`open_compute_core::ids::StartupId`] that credential belongs to. Suspicion
-/// reports must carry the same startup id so the supervisor can fence them.
+/// Private Unix endpoint and the startup ID used to fence supervisor suspicion reports.
 pub(in crate::runtime_bridge) struct EndpointSnapshot {
-    pub(in crate::runtime_bridge) port: u16,
-    pub(in crate::runtime_bridge) credential: open_compute_runtime::GenerationCredential,
+    pub(in crate::runtime_bridge) socket_path: PathBuf,
     pub(in crate::runtime_bridge) startup_id: Option<open_compute_core::ids::StartupId>,
 }
 

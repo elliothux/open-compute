@@ -46,9 +46,8 @@ function safeAlias(value: string): string {
 
 function uuid(value: string, label: string): string {
   if (
-    !/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
-      value,
-    )
+    // The v4 API and `<worker>.<account>.localhost` hosts use the simple form.
+    !/^[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$/.test(value)
   ) {
     throw new Error(`${label} must be a UUIDv7`);
   }
@@ -133,7 +132,7 @@ export async function prepareRun(
   });
   const escapedCfVersion = CF_VERSION.replaceAll(".", "\\.");
   if (
-    !new RegExp(`(?:^|\\s)${escapedCfVersion}(?:\\s|$)`).test(
+    !new RegExp(`(?:^|\\s)v?${escapedCfVersion}(?:\\s|$)`).test(
       `${version.stdout}\n${version.stderr}`,
     )
   ) {

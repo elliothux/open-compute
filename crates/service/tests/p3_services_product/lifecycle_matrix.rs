@@ -416,7 +416,7 @@ pub(super) async fn run() {
     )
     .await;
     wait_pin_count(&version_pins, &service_invocations, target_v1.id, 0).await;
-    wait_pin_count(&version_pins, &service_invocations, caller_version.id, 1).await;
+    wait_pin_count(&version_pins, &service_invocations, caller_version.id, 0).await;
     let capability = dispatch(
         &transport,
         &repository,
@@ -436,7 +436,7 @@ pub(super) async fn run() {
         }),
     );
     wait_pin_count(&version_pins, &service_invocations, target_v1.id, 0).await;
-    wait_pin_count(&version_pins, &service_invocations, caller_version.id, 1).await;
+    wait_pin_count(&version_pins, &service_invocations, caller_version.id, 0).await;
 
     let target_v2 = deploy(
         &controller,
@@ -498,7 +498,7 @@ pub(super) async fn run() {
     }
     assert_eq!(held_tail, b"v1:held:later");
     wait_pin_count(&version_pins, &service_invocations, target_v1.id, 0).await;
-    wait_pin_count(&version_pins, &service_invocations, caller_version.id, 1).await;
+    wait_pin_count(&version_pins, &service_invocations, caller_version.id, 0).await;
     assert_body(
         &transport,
         &repository,

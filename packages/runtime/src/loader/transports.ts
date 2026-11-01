@@ -26,13 +26,7 @@ import {
   type SocketAuthorityWire,
 } from "../sockets/tunnel.js";
 import type { LoaderEnv, RuntimeObservabilityIdentity } from "./protocol.js";
-import {
-  BINDING_TOKEN_HEADER,
-  bindingError,
-  currentStartupGeneration,
-  INTERNAL_HEADERS,
-  isRecord,
-} from "./shared.js";
+import { bindingError, INTERNAL_HEADERS, isRecord } from "./shared.js";
 
 export { ArtifactsTransport } from "../artifacts/transport.js";
 export { QueueTransport } from "../queues/transport.js";
@@ -91,19 +85,11 @@ async function waitForDoConnect(
   }
 }
 
-const R2TransportBase = makeR2TransportBase(
-  bindingError,
-  currentStartupGeneration,
-  BINDING_TOKEN_HEADER,
-);
+const R2TransportBase = makeR2TransportBase(bindingError);
 
 export class R2Transport extends R2TransportBase {}
 
-const D1TransportBase = makeD1TransportBase(
-  bindingError,
-  currentStartupGeneration,
-  BINDING_TOKEN_HEADER,
-);
+const D1TransportBase = makeD1TransportBase(bindingError);
 
 export class D1Transport extends D1TransportBase {}
 
@@ -159,11 +145,7 @@ export class AssetTransport extends WorkerEntrypoint<
     const props = this.#props();
     const headers = new Headers(request.headers);
     for (const name of INTERNAL_HEADERS) headers.delete(name);
-    headers.set(BINDING_TOKEN_HEADER, this.env.BINDING_BACKEND_TOKEN);
-    headers.set(
-      "x-open-compute-startup-generation",
-      currentStartupGeneration(),
-    );
+
     headers.set("x-open-compute-version-id", props.versionId);
     headers.set("x-open-compute-descriptor-sha256", props.descriptorSha256);
     headers.set("x-open-compute-request-id", crypto.randomUUID());
@@ -234,7 +216,6 @@ function doTransportHeaders(
     throw bindingError("DO_RUNTIME_EXCEPTION");
   }
   return {
-    "x-open-compute-startup-generation": currentStartupGeneration(),
     "x-open-compute-instance-id": props.instanceId,
     "x-open-compute-worker-id": props.workerId,
     "x-open-compute-binding-id": props.bindingId,
@@ -496,8 +477,7 @@ export class AlarmIndex extends WorkerEntrypoint<BindingEnv, AlarmIdentity> {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          [BINDING_TOKEN_HEADER]: this.env.BINDING_BACKEND_TOKEN,
-          "x-open-compute-startup-generation": currentStartupGeneration(),
+
           "x-open-compute-request-id": crypto.randomUUID(),
         },
         body: JSON.stringify({

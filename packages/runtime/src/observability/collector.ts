@@ -3,9 +3,7 @@ import type {
   NativeWorkerLoaderFactory,
   RuntimeObservabilityIdentity,
 } from "../loader/protocol.js";
-import { currentStartupGeneration } from "../loader/shared.js";
 
-const TOKEN_HEADER = "x-open-compute-observability-token";
 const MAX_BATCH = 128;
 const MAX_LOGS = 1024;
 const MAX_EXCEPTIONS = 256;
@@ -266,8 +264,6 @@ export async function collectObservabilityTail(
         method: "POST",
         headers: {
           "content-type": "application/json",
-          [TOKEN_HEADER]: env.OBSERVABILITY_BACKEND_TOKEN,
-          "x-open-compute-startup-generation": currentStartupGeneration(),
         },
         body: bytes,
       },

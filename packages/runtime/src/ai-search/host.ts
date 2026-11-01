@@ -6,12 +6,7 @@ import {
   isRecord,
 } from "../bindings/private-transport.js";
 import type { BindingEnv, ResourceBindingProps } from "../bindings/protocol.js";
-import {
-  BINDING_TOKEN_HEADER,
-  bindingError,
-  currentStartupGeneration,
-  systemRequestId,
-} from "../loader/shared.js";
+import { bindingError, systemRequestId } from "../loader/shared.js";
 
 /** Private immutable AI Search resource transport. */
 export class AiSearchTransport extends WorkerEntrypoint<
@@ -31,8 +26,6 @@ export class AiSearchTransport extends WorkerEntrypoint<
     )
       throw bindingError("AI_SEARCH_PROTOCOL_ERROR");
     return {
-      [BINDING_TOKEN_HEADER]: this.env.BINDING_BACKEND_TOKEN,
-      "x-open-compute-startup-generation": currentStartupGeneration(),
       "x-open-compute-binding-id": props.bindingId,
       "x-open-compute-version-id": props.versionId,
       "x-open-compute-resource-id": props.namespaceResourceId,

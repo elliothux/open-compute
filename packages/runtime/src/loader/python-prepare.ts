@@ -1,4 +1,3 @@
-import { tokenEquals } from "../gateway/token.js";
 import { tenantEnv } from "./bindings.js";
 import { assertEnvelope } from "./envelope.js";
 import { modulesFor } from "./modules.js";
@@ -11,7 +10,6 @@ import {
   stableCode,
   systemRequestId,
   tenantGlobalOutbound,
-  TOKEN_HEADER,
 } from "./shared.js";
 
 /** Return snapshot bytes only to the authenticated, bounded host preparation caller. */
@@ -20,9 +18,6 @@ export async function preparePython(
   env: LoaderEnv,
   ctx: ExecutionContext,
 ): Promise<Response> {
-  const token = request.headers.get(TOKEN_HEADER);
-  if (!tokenEquals(token, env.INTERNAL_TOKEN))
-    return new Response(null, { status: 404 });
   try {
     if (
       request.method !== "POST" ||
@@ -30,7 +25,7 @@ export async function preparePython(
     )
       throw bindingError("VERSION_INVARIANT_VIOLATION");
     const envelope = assertEnvelope(request, true, undefined);
-    const snapshot = await resolveSnapshot(env, envelope, "preparation", token);
+    const snapshot = await resolveSnapshot(env, envelope, "preparation");
     const options = pythonPreparationCode(snapshot);
     const built = modulesFor(snapshot, false, undefined);
     const versionId = envelope.loaderKey.split("/")[2]!;

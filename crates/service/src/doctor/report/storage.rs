@@ -300,6 +300,7 @@ pub(super) async fn inspect_object_storage(
 pub(super) async fn inspect_full(
     loaded: &LoadedConfig,
     mode: DoctorMode,
+    scope: ServiceScope,
     inspect: Option<&open_compute_storage::inspect::DataRootInspect>,
     db_ok: Option<&open_compute_storage::identity::StableIdentity>,
     object_backend: Option<&ObjectBackend>,
@@ -311,6 +312,7 @@ pub(super) async fn inspect_full(
         runtime::run_full_extras(
             checks,
             loaded,
+            scope,
             root,
             object_backend,
             db_ok.map(|i| i.instance_id),

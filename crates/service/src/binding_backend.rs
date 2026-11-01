@@ -1,4 +1,4 @@
-//! Generation-authenticated private backend for typed resource-binding adapters.
+//! Unix socket private backend for typed resource-binding adapters.
 
 use crate::d1_backend::D1BindingService;
 use crate::kv_backend::{KvCommand, KvCommandResult, KvStreamPart};
@@ -15,7 +15,6 @@ use open_compute_core::{
     BindingId, BindingKind, DurableObjectId, DurableObjectsConfig, ErrorCode, OperationClass,
     PlatformError, QueuesConfig, ResourceId, VersionId,
 };
-use open_compute_runtime::GenerationAuthRegistry;
 use open_compute_storage::PlatformStorage;
 use open_compute_storage::bindings::{AuthorizedBinding, BindingRepository};
 use open_compute_storage::durable_objects::DurableObjectRepository;
@@ -23,12 +22,10 @@ use open_compute_storage::scheduler::{AlarmProjection, SchedulerStore};
 use open_compute_workers::ResourcePins;
 use serde::Deserialize;
 use std::future::Future;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::net::TcpListener;
 
 mod kv;
 mod private_http;
@@ -41,8 +38,6 @@ pub use search_composition::serve_binding_backend_with_ai_search;
 pub(crate) use search_composition::serve_binding_backend_with_ai_search_and_snapshot_pins;
 pub use search_composition::serve_binding_backend_with_document_parser;
 
-const TOKEN_HEADER: &str = "x-open-compute-binding-token";
-const GENERATION_HEADER: &str = "x-open-compute-startup-generation";
 const VERSION_HEADER: &str = "x-open-compute-version-id";
 const DESCRIPTOR_HEADER: &str = "x-open-compute-descriptor-sha256";
 const REQUEST_HEADER: &str = "x-open-compute-request-id";
@@ -107,7 +102,6 @@ impl KvBindingExecutor for UnavailableKvBindingExecutor {
 #[derive(Clone)]
 struct BackendState {
     storage: Arc<PlatformStorage>,
-    auth: GenerationAuthRegistry,
     pins: ResourcePins,
     executor: Arc<dyn KvBindingExecutor>,
     metrics: Option<Arc<MetricsRegistry>>,

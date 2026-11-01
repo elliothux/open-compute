@@ -8,7 +8,7 @@ import type {
   R2Range,
   R2RawTransport,
 } from "./protocol.js";
-import { normalizeRange } from "./validation.js";
+import { assertKey, normalizeRange } from "./validation.js";
 
 const encoder = new TextEncoder();
 const INVALID = "R2_INVALID_OPTIONS";
@@ -193,11 +193,8 @@ async function putInput(request: Request) {
       offset += count;
       if (count < next.value.byteLength) remainder = next.value.subarray(count);
     }
-    const input: unknown = JSON.parse(
-      new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(
-        prefix,
-      ),
-    );
+    // Native R2 encodes lone surrogates as invalid UTF-8; Cloudflare replaces each byte.
+    const input: unknown = JSON.parse(new TextDecoder().decode(prefix));
     const parsed = record(input);
     return {
       input: parsed,
@@ -316,6 +313,18 @@ export async function nativeR2Fetch(
     const method = input.method;
     if (get !== ["head", "get", "list"].includes(method))
       throw new TypeError(INVALID);
+    if (
+      (method === "put" || method === "createMultipartUpload") &&
+      input.storageClass !== undefined &&
+      !["Standard", "InfrequentAccess"].includes(text(input.storageClass))
+    ) {
+      await cancel?.().catch(() => {});
+      return failure(
+        "We encountered an internal error. Please try again.",
+        500,
+        10001,
+      );
+    }
     if (body && method !== "put" && method !== "uploadPart") {
       const reader = body.getReader();
       const next = await reader.read();
@@ -336,7 +345,10 @@ export async function nativeR2Fetch(
       }
       const options = {
         prefix: input.prefix === undefined ? "" : text(input.prefix),
-        limit: input.limit === undefined ? 1000 : integer(input.limit),
+        limit:
+          input.limit === undefined
+            ? 1000
+            : Math.min(1000, integer(input.limit)),
         include,
         ...(input.cursor === undefined ? {} : { cursor: text(input.cursor) }),
         ...(input.delimiter === undefined
@@ -363,10 +375,10 @@ export async function nativeR2Fetch(
       const keys =
         input.objects === undefined ? [text(input.object)] : input.objects;
       if (!Array.isArray(keys)) throw new TypeError(INVALID);
-      await bucket.delete(keys.map(text));
+      await bucket.delete(keys.map((key) => assertKey(text(key))));
       return reply({}, false);
     }
-    const key = text(input.object);
+    const key = assertKey(text(input.object));
     switch (method) {
       case "head": {
         const result = await bucket.head(key);
@@ -377,12 +389,14 @@ export async function nativeR2Fetch(
       case "get": {
         let range: R2Range | undefined;
         if (input.range !== undefined) {
-          range = Object.fromEntries(
-            Object.entries(record(input.range)).map(([field, value]) => {
-              if (!["offset", "length", "suffix"].includes(field))
-                throw new TypeError(INVALID);
-              return [field, integer(value)];
-            }),
+          range = normalizeRange(
+            Object.fromEntries(
+              Object.entries(record(input.range)).map(([field, value]) => {
+                if (!["offset", "length", "suffix"].includes(field))
+                  throw new TypeError(INVALID);
+                return [field, integer(value)];
+              }),
+            ),
           );
         }
         if (input.rangeHeader !== undefined) {
@@ -468,16 +482,20 @@ export async function nativeR2Fetch(
           const part = record(item);
           return { partNumber: integer(part.part), etag: text(part.etag) };
         });
-        return reply(
-          metadata(
-            await bucket.completeMultipartUpload(
-              key,
-              text(input.uploadId),
-              parts,
-            ),
+        // Cloudflare's complete() result omits HTTP and custom metadata;
+        // later reads return the stored values.
+        const {
+          httpFields: _http,
+          customFields: _custom,
+          ...completed
+        } = metadata(
+          await bucket.completeMultipartUpload(
+            key,
+            text(input.uploadId),
+            parts,
           ),
-          false,
         );
+        return reply(completed, false);
       }
       case "abortMultipartUpload":
         await bucket.abortMultipartUpload(key, text(input.uploadId));

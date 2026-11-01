@@ -15,9 +15,7 @@ pub struct PythonPreparationOptions {
     pub runtime: VerifiedRuntime,
     /// Verified binary config compiled from the Python preparation profile.
     pub compiled: CompiledConfig,
-    /// Borrowed instance-generation credential used by the private ingress and Source.
-    pub token: SecretString,
-    /// Bound on control-fd listen evidence and the authenticated HTTP readiness probe.
+    /// Bound on control-fd listen evidence and the Unix HTTP readiness probe.
     pub startup_timeout: Duration,
     /// Absolute private crash-recovery lease, exclusively owned by the caller.
     pub lease_path: PathBuf,
@@ -65,7 +63,6 @@ impl PythonPreparationProcess {
         let task = tokio::spawn(spawn_ready(
             ChildStartOptions {
                 runtime: options.runtime,
-                token: options.token,
                 startup: options.startup_timeout,
                 owners: OwnerRegistry::default(),
                 external_services: options.external_services.into(),
@@ -90,10 +87,10 @@ impl PythonPreparationProcess {
         }
     }
 
-    /// Private loopback port for the host's bounded preparation request.
+    /// Private Unix socket for the host's bounded preparation request.
     #[must_use]
-    pub fn listen_port(&self) -> u16 {
-        self.live.port
+    pub fn ingress_socket(&self) -> &Path {
+        &self.live.socket_path
     }
 
     /// Gracefully stop, force-stop when needed, prove reaping, and clear the private lease.
@@ -138,7 +135,6 @@ fn validate_options(options: &PythonPreparationOptions) -> Result<(), PlatformEr
     {
         return Err(invalid());
     }
-    crate::digest::validate_token(&options.token)?;
     require_absolute(&options.lease_path)?;
     let parent = options.lease_path.parent().ok_or_else(invalid)?;
     let _ = open_dir(parent)?;

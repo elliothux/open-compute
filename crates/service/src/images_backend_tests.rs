@@ -42,7 +42,6 @@ fn request(fixture: &RuntimeFeatureFixture, path: &str, body: Body) -> Request<B
             DESCRIPTOR_HEADER,
             fixture.images_descriptor_sha256.as_deref().unwrap(),
         )
-        .header(GENERATION_HEADER, "test-generation")
         .body(body)
         .unwrap()
 }
@@ -238,7 +237,7 @@ async fn images_wire_enforces_input_session_and_authority_limits() {
 }
 
 #[tokio::test]
-async fn images_sessions_are_generation_scoped_and_clear_staged_files() {
+async fn images_sessions_are_cleared_after_child_exit_and_release_staged_files() {
     let (fixture, service, png) = fixture(ImagesConfig::default()).await;
     let session = input_session(&fixture, &service, &png).await;
     let staged = service
@@ -251,14 +250,11 @@ async fn images_sessions_are_generation_scoped_and_clear_staged_files() {
         .clone();
     assert!(staged.exists());
 
-    let mut stale = request(
+    service.clear_sessions().unwrap();
+    let stale = request(
         &fixture,
         &format!("/internal/images/v1/session/{session}/transform"),
         Body::from(br#"{"width":1}"#.as_slice()),
-    );
-    stale.headers_mut().insert(
-        HeaderName::from_static(GENERATION_HEADER),
-        HeaderValue::from_static("next-generation"),
     );
     let denied = service.handle(stale).await;
     assert_eq!(denied.status(), StatusCode::BAD_REQUEST);

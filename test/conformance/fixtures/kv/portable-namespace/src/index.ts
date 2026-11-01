@@ -76,16 +76,19 @@ async function read(kv: KVNamespace): Promise<Response> {
       ["portable:json", bulkJson.get("portable:json")],
       ["portable:missing", bulkText.get("portable:missing")],
     ],
-    bulkMetadata: [...bulkMetadata].map(([name, result]) => [
-      name,
-      result === null
-        ? null
-        : {
-            value: result.value,
-            metadata: result.metadata,
-            hasCacheStatus: Object.hasOwn(result, "cacheStatus"),
-          },
-    ]),
+    // Cloudflare does not order bulk results; compare them by key.
+    bulkMetadata: [...bulkMetadata]
+      .sort(([a], [b]) => (a < b ? -1 : 1))
+      .map(([name, result]) => [
+        name,
+        result === null
+          ? null
+          : {
+              value: result.value,
+              metadata: result.metadata,
+              hasCacheStatus: Object.hasOwn(result, "cacheStatus"),
+            },
+      ]),
     singleMetadata: {
       value: singleMetadata.value,
       metadata: singleMetadata.metadata,

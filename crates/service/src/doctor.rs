@@ -2,6 +2,7 @@
 
 use crate::capabilities::platform_release_metadata;
 use crate::config_load::LoadedConfig;
+use crate::instance_registry::ServiceScope;
 use crate::metrics::MetricsRegistry;
 use crate::object_storage::connect_object_backend;
 use crate::{ai_tokenizer::AiTokenizerRegistry, auth::resolve_admin_auth};

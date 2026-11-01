@@ -32,16 +32,14 @@ async fn native_container_protocol_requires_the_verified_executable_contract() {
         if accepted {
             let assets = dir.path().join("assets");
             copy_formal_assets(&assets);
-            let token = SecretString::new(TOKEN);
+
             let platform = platform_meta();
-            let base = crate::digest::digest_for_with_tokens_and_policy(
+            let base = crate::digest::digest_for_with_policy(
                 &assets,
                 runtime.lock_bytes(),
                 &runtime,
                 &platform,
-                &token,
-                &TEST_BINDING_TOKEN,
-                &TEST_OBSERVABILITY_TOKEN,
+                Path::new("/tmp/oc-runtime.sock"),
                 &open_compute_core::DurableObjectsConfig::default(),
                 None,
                 crate::ConfigRole::Runtime,
@@ -52,14 +50,12 @@ async fn native_container_protocol_requires_the_verified_executable_contract() {
                 format!("sha256:{}", "a".repeat(64)),
             )
             .unwrap();
-            let configured = crate::digest::digest_for_with_tokens_and_policy(
+            let configured = crate::digest::digest_for_with_policy(
                 &assets,
                 runtime.lock_bytes(),
                 &runtime,
                 &platform,
-                &token,
-                &TEST_BINDING_TOKEN,
-                &TEST_OBSERVABILITY_TOKEN,
+                Path::new("/tmp/oc-runtime.sock"),
                 &open_compute_core::DurableObjectsConfig::default(),
                 Some(&provider),
                 crate::ConfigRole::Runtime,
@@ -77,6 +73,7 @@ async fn native_container_protocol_requires_the_verified_executable_contract() {
                 lock.clone(),
                 assets,
                 dir.path().join("runtime"),
+                dir.path().join("runtime").join("ingress.sock"),
                 platform,
                 Duration::from_secs(5),
                 Redactor::new(),

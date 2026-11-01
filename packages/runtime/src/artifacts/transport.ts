@@ -1,11 +1,6 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
 import type { BindingEnv, ResourceBindingProps } from "../bindings/protocol.js";
-import {
-  BINDING_TOKEN_HEADER,
-  bindingError,
-  currentStartupGeneration,
-  systemRequestId,
-} from "../loader/shared.js";
+import { bindingError, systemRequestId } from "../loader/shared.js";
 
 const OPERATIONS = new Set([
   "create",
@@ -55,8 +50,7 @@ export class ArtifactsTransport extends WorkerEntrypoint<
         method: "POST",
         headers: {
           "content-type": "application/json",
-          [BINDING_TOKEN_HEADER]: this.env.BINDING_BACKEND_TOKEN,
-          "x-open-compute-startup-generation": currentStartupGeneration(),
+
           "x-open-compute-version-id": props.versionId,
           "x-open-compute-descriptor-sha256": props.descriptorSha256,
           "x-open-compute-request-id": systemRequestId(),

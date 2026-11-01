@@ -1,8 +1,8 @@
 # 单二进制分发与部署
 
-当前正式 lock 固定用户 fork `9de631551791218aed0c4cd570163cece3c00590`，
-Release 为 `v1.20260930.0-open-compute-r24.9de631551`，见[workerd 方案](../workerd/README.md)。
-R24 的四平台原生资格与不可变 Release 的 10 项资产校验已通过；私有 Container 协议为 v4。
+当前正式 lock 固定用户 fork `2ff33d645813e1d6253f44ec312d75ee70153912`，
+Release 为 `v1.20260930.0-open-compute-r25.2ff33d645`，见[workerd 方案](../workerd/README.md)。
+R25 的四平台原生资格与不可变 Release 的 10 项资产校验已通过；私有 Container 协议为 v4。
 真实产品、完整 coverage、最终 Gate 和三宿主发行包的当前结果见 [P23 记录](../implemented/p23-cloudflare-containers.md)。
 三个正式产品平台加 macOS Intel 手动输入的 archive/binary 摘要、upstream base 与构建输入统一记录于 lock。
 四个平台的 gzip 由 workerd fork 的 GitHub Release 托管，lock 固定 URL、archive/binary digest 与构建身份；macOS Intel
@@ -109,6 +109,8 @@ workerd/Caddy。缺失 asset、摘要不符或过期生成资产均失败，不�
 2. 用 `ocd setup --yes` 初始化用户级 OCD_DIR、共享 listener 和唯一全局 admin 凭证；或由 operator 创建等义的 `ocd.toml`。系统级作用域须显式 `--system`。
 3. 用 `ocd instance setup --config /abs/compute.toml --data-dir /abs/data --yes` 创建并登记实例；已有配置先执行 `ocd --config /abs/compute.toml config check`，再用 `ocd instance add --config /abs/compute.toml` 登记。`compute.toml` 应显式包含 `[data].path`，Local 或 S3 对象后端及实例凭证属于该文件；共享监听和 admin 凭证只属于 `ocd.toml`。S3 模式还需 endpoint/bucket 和凭据。
 4. 执行 `ocd run`（系统作用域使用 `ocd --system run`）。`run` 不从 cwd、`--config` 或 `instances/` 扫描实例。
+
+内部通道使用 `<OCD_DIR>/run/<InstanceId>/` 下的 Unix socket：`ingress.sock` 承载私有 dispatch、custom event、Workflow、Browser Action、DO control 和 supervisor ready/live 探活；`source.sock` 提供 runtime source 和 Container callback；`bindings.sock` 提供 binding backend；`observability.sock` 接收 Workers Logs；`prepare.sock` 承载一次性 Python preparation。探活无需凭证，Python 子进程通过 `ingress.sock` 访问实例的 DO router。目录模式为 0700，绝对 socket 路径必须不超过 103 个编码字节，超长路径在 bind 或配置渲染前拒绝。公开 gateway 继续使用 TCP，原生扩展继续使用 fd 4 Cap'n Proto broker。
 
 对象 authority 是配置选定的 Local 目录或 S3 bucket；S3 模式需要预置 provider。
 实例创建时初始化当前 schema、身份和 key。不要在首次初始化前要求 `doctor --full` 成功。

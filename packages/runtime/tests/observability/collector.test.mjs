@@ -2,15 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { compileRuntime, moduleUrl } from "../compiled-runtime.mjs";
 
-const shared = moduleUrl(
-  'export const currentStartupGeneration = () => "generation";',
-);
 const { collectObservabilityTail } = await import(
-  moduleUrl(
-    await compileRuntime("observability/collector.ts", {
-      "../loader/shared.js": shared,
-    }),
-  )
+  moduleUrl(await compileRuntime("observability/collector.ts", {}))
 );
 
 const identity = {
@@ -37,7 +30,6 @@ const event = {
 test("collector admits canonical instance identity and rejects old UUID shape", async () => {
   const bodies = [];
   const env = {
-    OBSERVABILITY_BACKEND_TOKEN: "private-token",
     OBSERVABILITY_BACKEND: {
       async fetch(_url, init) {
         bodies.push(JSON.parse(new TextDecoder().decode(init.body)));

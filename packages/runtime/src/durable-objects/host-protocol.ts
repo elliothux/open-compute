@@ -11,7 +11,6 @@ import type {
 
 export const INTERNAL = [
   OBJECT_IDENTITY_HEADER,
-  "x-open-compute-binding-token",
   "x-open-compute-instance-id",
   "x-open-compute-worker-id",
   "x-open-compute-binding-id",

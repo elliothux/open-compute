@@ -15,15 +15,12 @@ pub(super) async fn run() {
         CREATE TABLE steps(id TEXT NOT NULL REFERENCES runs(id),ordinal INTEGER NOT NULL,descriptor TEXT NOT NULL,
             state TEXT NOT NULL,token TEXT,deadline INTEGER NOT NULL,output TEXT,code TEXT,attempt INTEGER NOT NULL,PRIMARY KEY(id,ordinal));").unwrap();
     let db = Arc::new(Mutex::new(db));
-    let backend = Backend {
-        auth: harness.binding_auth.clone(),
-        db: db.clone(),
-    };
-    let listener = harness.binding_listener.take().unwrap();
+    let backend = Backend { db: db.clone() };
+    let mut listener = harness.binding_listener.take().unwrap();
     let mut shutdown = harness.shutdown.subscribe();
     let server = tokio::spawn(async move {
         axum::serve(
-            listener,
+            listener.take_listener().unwrap(),
             Router::new()
                 .route("/internal/workflows/runs/{operation}", post(handle))
                 .with_state(backend),

@@ -1,7 +1,7 @@
 use super::*;
 
 pub(super) async fn run() {
-    let dir = TempDir::new().unwrap();
+    let dir = TempDir::new_in("/tmp").unwrap();
     let runtime = verified(dir.path()).await;
     let data = dir.path().join("d");
     fs::create_dir(&data).unwrap();
@@ -21,19 +21,18 @@ pub(super) async fn run() {
         },
         Vec::new(),
         Vec::new(),
-        Vec::new(),
     );
     sup.start();
-    let mut fingerprints = Vec::new();
+    let mut generations = Vec::new();
     let mut seen_backoff = 0u32;
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
     loop {
         clock.advance(Duration::from_millis(50));
         let snap = sup.snapshot();
-        if let Some(fp) = snap.token_fingerprint.clone()
-            && !fingerprints.contains(&fp)
+        if let Some(fp) = snap.startup_id
+            && !generations.contains(&fp)
         {
-            fingerprints.push(fp);
+            generations.push(fp);
         }
         if snap.state == SupervisorState::BackingOff {
             seen_backoff += 1;
@@ -47,8 +46,8 @@ pub(super) async fn run() {
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     assert!(
-        fingerprints.len() >= 3,
-        "fresh token each attempt {fingerprints:?}"
+        generations.len() >= 3,
+        "fresh startup ID each attempt {generations:?}"
     );
     assert!(seen_backoff >= 1);
     let final_snap = sup.snapshot();

@@ -209,7 +209,7 @@ deviation 规范文本、官方来源和边界见 [`p1-deviations.md`](p1-deviat
 `cloudflare:sockets.connect()`、`node:net`、`node:tls` 共用该 IP 能力，可达宿主允许的 public、private、
 loopback、link-local 与 metadata 地址，但不能访问 Unix socket。Service/DO `Fetcher.connect()` 仍只通过
 deployment 明确声明的 capability tunnel。runtime-source、binding backend 和 workerd 内部 listener 仅监听
-loopback 并独立验证 generation credential；operator 负责宿主 firewall／namespace／容器／VM 策略。
+0700 目录下的 Unix socket，不使用 generation credential；operator 负责宿主 firewall／namespace／容器／VM 策略。
 
 ## 关键实现说明
 
@@ -343,7 +343,7 @@ Cloudflare 的 [Service Binding HTTP contract](https://developers.cloudflare.com
 允许调用方把目标 Worker 的响应直接返回；[Durable Object WebSocket Hibernation API](https://developers.cloudflare.com/durable-objects/best-practices/websockets/)
 则要求客户端连接在对象 eviction 后继续存在，并在后续消息到达时重建对象。open-compute 因此把 Service fetch
 返回的原生 `Response.webSocket` 沿调用链直接交给最终 workerd/`ocd` upgrade tunnel，不再通过已 `accept()` 的
-普通 `WebSocketPair` 做 JavaScript 双向转发。私有 handoff handle 只在系统模块与 loopback response header
+普通 `WebSocketPair` 做 JavaScript 双向转发。私有 handoff handle 只在系统模块与 Unix socket response header
 之间传递；tenant facade 会移除该 header，最终公开响应也由 Rust sanitizer 移除。Rust tunnel 持有 Service
 operation lease，30 秒普通调用 deadline 不回收活跃 socket 的 target/caller pins；连接 EOF、upgrade 失败或
 workerd generation 退出时幂等释放。

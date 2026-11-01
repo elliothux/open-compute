@@ -34,13 +34,6 @@ pub(super) fn handle(
 ) -> Pin<Box<dyn Future<Output = Response> + Send>> {
     Box::pin(async move {
         let headers = request.headers();
-        let token = header_text(headers, TOKEN_HEADER).unwrap_or("").to_owned();
-        let generation = header_text(headers, GENERATION_HEADER)
-            .unwrap_or("")
-            .to_owned();
-        if !state.auth.authorize(&token, &generation) {
-            return StatusCode::NOT_FOUND.into_response();
-        }
         if request
             .uri()
             .path()
@@ -115,15 +108,7 @@ pub(super) fn handle(
         if request.uri().path().starts_with("/internal/services/v1/") {
             return match &state.services {
                 Some(services) => {
-                    handle_service_invocation(
-                        services,
-                        &state.auth,
-                        &token,
-                        &generation,
-                        state.metrics.as_deref(),
-                        request,
-                    )
-                    .await
+                    handle_service_invocation(services, state.metrics.as_deref(), request).await
                 }
                 None => StatusCode::NOT_FOUND.into_response(),
             };
@@ -159,7 +144,7 @@ pub(super) fn handle(
                 .starts_with("/internal/bindings/v1/workflow/")
         {
             return match &state.workflow {
-                Some(workflow) => workflow.handle(request, state.auth.clone()).await,
+                Some(workflow) => workflow.handle(request).await,
                 None => StatusCode::NOT_FOUND.into_response(),
             };
         }
@@ -336,9 +321,6 @@ pub(super) fn handle(
 
 pub(crate) async fn handle_service_invocation(
     registry: &crate::service_invocations::ServiceInvocationRegistry,
-    auth: &GenerationAuthRegistry,
-    token: &str,
-    generation: &str,
     metrics: Option<&MetricsRegistry>,
     request: Request,
 ) -> Response {
@@ -352,8 +334,7 @@ pub(crate) async fn handle_service_invocation(
     };
     let started = Instant::now();
     let mut metric_operation = None;
-    let response = auth.with_authorized(token, generation, || {
-        registry.activate_generation(generation);
+    let response = {
         match path.as_str() {
             "/internal/services/v1/resolve" => {
                 serde_json::from_slice::<ServiceResolveRequest>(&bytes)
@@ -421,18 +402,17 @@ pub(crate) async fn handle_service_invocation(
             }
             _ => Ok(StatusCode::NOT_FOUND.into_response()),
         }
-    });
+    };
     if let Some(metrics) = metrics {
         let (roots, operations, retentions) = registry.counts();
         metrics.set_service_invocation_counts(roots, operations, retentions);
-        if let (Some(operation), Some(result)) = (metric_operation, response.as_ref()) {
-            metrics.observe_service_invocation(operation, result.is_ok(), started.elapsed());
+        if let Some(operation) = metric_operation {
+            metrics.observe_service_invocation(operation, response.is_ok(), started.elapsed());
         }
     }
     match response {
-        Some(Ok(response)) => response,
-        Some(Err(error)) => platform_error(&error),
-        None => StatusCode::NOT_FOUND.into_response(),
+        Ok(response) => response,
+        Err(error) => platform_error(&error),
     }
 }
 

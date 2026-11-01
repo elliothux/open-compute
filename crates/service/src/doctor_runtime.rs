@@ -1,6 +1,6 @@
 //! Read-only embedded identity checks and explicitly mutating full runtime diagnostics.
 
-use super::{DoctorCheck, bound_value, failed, ok, skipped};
+use super::{DoctorCheck, ServiceScope, bound_value, failed, ok, skipped};
 use crate::config_load::LoadedConfig;
 use open_compute_artifacts::{ObjectBackend, preflight_object_storage, preflight_r2};
 use open_compute_core::{ErrorCode, ObjectStorageKind, PlatformError, Redactor, SystemClock};
@@ -47,6 +47,7 @@ pub(super) fn inspect(checks: &mut Vec<DoctorCheck>, loaded: &LoadedConfig) -> O
 pub(super) async fn run_full_extras(
     checks: &mut Vec<DoctorCheck>,
     loaded: &LoadedConfig,
+    scope: ServiceScope,
     root: &DataRootInspect,
     backend: Option<&ObjectBackend>,
     instance_id: Option<InstanceId>,
@@ -176,11 +177,26 @@ pub(super) async fn run_full_extras(
             return;
         }
     };
+    let Some(instance_id) = instance_id else {
+        checks.push(skipped(
+            "runtime_cycle",
+            "temporary runtime requires stored platform identity",
+        ));
+        return;
+    };
+    let sockets = match crate::instance_control::runtime_dir_for(scope, &instance_id, None) {
+        Ok(path) => path,
+        Err(error) => {
+            checks.push(failed("runtime_cycle", error.code(), error.message(), None));
+            return;
+        }
+    };
     let compiler = StaticConfigCompiler::new(
         runtime.clone(),
         package.lock_path(),
         package.assets_dir(),
         root.root.join("runtime"),
+        sockets.join("doctor.sock"),
         PlatformReleaseMeta {
             version: env!("CARGO_PKG_VERSION").to_owned(),
         },
@@ -188,72 +204,24 @@ pub(super) async fn run_full_extras(
         Redactor::new(),
     )
     .with_durable_objects_config(loaded.config.durable_objects.clone());
-    let Ok(runtime_source) = tokio::net::TcpListener::bind("127.0.0.1:0").await else {
-        checks.push(failed(
-            "runtime_cycle",
-            ErrorCode::RuntimeUnavailable,
-            "temporary runtime-source listener could not be bound",
-            None,
-        ));
-        return;
-    };
-    let Ok(runtime_source_addr) = runtime_source.local_addr() else {
-        checks.push(failed(
-            "runtime_cycle",
-            ErrorCode::RuntimeUnavailable,
-            "temporary runtime-source listener address is unavailable",
-            None,
-        ));
-        return;
-    };
-    let Ok(binding_backend) = tokio::net::TcpListener::bind("127.0.0.1:0").await else {
-        checks.push(failed(
-            "runtime_cycle",
-            ErrorCode::RuntimeUnavailable,
-            "temporary binding-backend listener could not be bound",
-            None,
-        ));
-        return;
-    };
-    let Ok(binding_backend_addr) = binding_backend.local_addr() else {
-        checks.push(failed(
-            "runtime_cycle",
-            ErrorCode::RuntimeUnavailable,
-            "temporary binding-backend listener address is unavailable",
-            None,
-        ));
-        return;
-    };
-    let runtime_external =
-        match ExternalServiceAddress::loopback("runtime-source", runtime_source_addr) {
-            Ok(external) => external,
-            Err(err) => {
-                checks.push(failed("runtime_cycle", err.code(), err.message(), None));
-                return;
-            }
-        };
-    let binding_external =
-        match ExternalServiceAddress::loopback("binding-backend", binding_backend_addr) {
-            Ok(external) => external,
-            Err(err) => {
-                checks.push(failed("runtime_cycle", err.code(), err.message(), None));
-                return;
-            }
-        };
-    let observability_external =
-        match ExternalServiceAddress::loopback("observability-backend", binding_backend_addr) {
-            Ok(external) => external,
-            Err(err) => {
-                checks.push(failed("runtime_cycle", err.code(), err.message(), None));
-                return;
-            }
-        };
-    let Some(instance_id) = instance_id else {
-        checks.push(skipped(
-            "runtime_cycle",
-            "temporary runtime requires stored platform identity",
-        ));
-        return;
+    let runtime_source_addr = sockets.join("doctor-source.sock");
+    let binding_backend_addr = sockets.join("doctor-bindings.sock");
+    let listeners = (|| {
+        let source = crate::http::PrivateUnixListener::bind(runtime_source_addr.clone())?;
+        let binding = crate::http::PrivateUnixListener::bind(binding_backend_addr.clone())?;
+        let external = vec![
+            ExternalServiceAddress::unix("runtime-source", &runtime_source_addr)?,
+            ExternalServiceAddress::unix("binding-backend", &binding_backend_addr)?,
+            ExternalServiceAddress::unix("observability-backend", &binding_backend_addr)?,
+        ];
+        Ok::<_, PlatformError>((source, binding, external))
+    })();
+    let (runtime_source, binding_backend, external) = match listeners {
+        Ok(listeners) => listeners,
+        Err(error) => {
+            checks.push(failed("runtime_cycle", error.code(), error.message(), None));
+            return;
+        }
     };
     let do_storage = match inspect_durable_object_storage(
         &loaded.config.data.path,
@@ -282,9 +250,8 @@ pub(super) async fn run_full_extras(
             jitter: Arc::new(OsJitter),
             lease_path: Some(lease_path),
         },
-        vec![runtime_external, binding_external, observability_external],
+        external,
         vec![directory],
-        Vec::new(),
     );
     supervisor.start();
     let deadline = tokio::time::Instant::now()

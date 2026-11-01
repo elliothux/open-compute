@@ -14,9 +14,9 @@ use open_compute_core::{
     RequestId, ResourceId, SchedulerConfig, SystemSchedulerClock, WorkerId,
 };
 use open_compute_runtime::{
-    DirectoryServicePath, ExternalServiceAddress, GenerationAuthRegistry, OsJitter,
-    PlatformReleaseMeta, StaticConfigCompiler, SupervisorState, WorkerdSupervisor,
-    WorkerdSupervisorOptions, verify_runtime_binary,
+    DirectoryServicePath, ExternalServiceAddress, OsJitter, PlatformReleaseMeta,
+    StaticConfigCompiler, SupervisorState, WorkerdSupervisor, WorkerdSupervisorOptions,
+    verify_runtime_binary,
 };
 use open_compute_service::runtime_bridge::{
     AlarmDispatchOutcome, DispatchTarget, WorkerdTransport, bind_runtime_source,

@@ -31,7 +31,6 @@ async fn real_compile_succeeds_when_env_set() {
         &assets,
         &data,
         &platform,
-        &token,
         &redactor,
         Duration::from_secs(20),
     ))
@@ -52,7 +51,6 @@ async fn real_compile_succeeds_when_env_set() {
         &assets,
         &data,
         &platform,
-        &token,
         &redactor,
         Duration::from_secs(20),
     );
@@ -94,7 +92,6 @@ async fn real_compile_succeeds_when_env_set() {
             &assets,
             &data,
             &platform,
-            &token,
             &redactor,
             Duration::from_secs(20),
         );

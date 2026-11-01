@@ -172,7 +172,7 @@ impl<'de> Deserialize<'de> for WorkflowToken {
     }
 }
 
-/// Exact repository run mutation fence; the workerd generation is separately authenticated.
+/// Exact repository run mutation fence, independent of the private Unix transport.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WorkflowFence {

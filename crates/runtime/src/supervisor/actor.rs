@@ -25,11 +25,7 @@ pub(super) struct Actor {
     pub(super) recovery_failed: bool,
     pub(super) external_services: Arc<[ExternalServiceAddress]>,
     pub(super) directory_services: Arc<[DirectoryServicePath]>,
-    pub(super) generation_auths: Arc<[GenerationAuthRegistry]>,
     pub(super) watchdog: Arc<std::sync::RwLock<WatchdogConfig>>,
-    /// Current attempt's internal token, retained for functional liveness probes. It always
-    /// corresponds to the most recent [`StartupId`]; command fencing discards stale probes.
-    pub(super) live_token: Option<SecretString>,
     /// Single-flight functional probe for the Running generation.
     pub(super) probe_flight: Option<StartupId>,
     /// Consecutive failed liveness probes for the Running generation.
@@ -105,15 +101,8 @@ impl Actor {
     }
 
     pub(super) fn fail_closed_after_teardown(&mut self) {
-        self.clear_generation_auths();
         self.recovery_failed = true;
         self.permanent_fail(ErrorCode::RuntimeInvalid);
-    }
-
-    fn clear_generation_auths(&self) {
-        for auth in self.generation_auths.iter() {
-            auth.clear();
-        }
     }
 
     async fn on_tick(&mut self) {
@@ -224,14 +213,7 @@ impl Actor {
         self.snap.attempt = self.snap.attempt.saturating_add(1);
         self.publish();
 
-        let token = match generate_internal_token() {
-            Ok(t) => t,
-            Err(err) => {
-                self.permanent_fail(err.code());
-                return;
-            }
-        };
-        self.begin_generation_watchdog_state(token.clone());
+        self.begin_generation_watchdog_state();
         let startup_id = StartupId::generate();
         let host_extension_fd = match &self.host_extension_broker {
             Some(registry) => match registry.prepare(startup_id) {
@@ -244,10 +226,6 @@ impl Actor {
             None => None,
         };
         self.snap.startup_id = Some(startup_id);
-        #[cfg(any(test, feature = "test-support"))]
-        {
-            self.snap.token_fingerprint = Some(token_fingerprint(&token));
-        }
         self.publish();
 
         let (cancel_tx, cancel_rx) = oneshot::channel();
@@ -259,7 +237,6 @@ impl Actor {
             startup_id,
             ChildStartOptions {
                 runtime,
-                token,
                 startup,
                 owners: self.owners.clone(),
                 external_services: self.external_services.clone(),
@@ -288,7 +265,6 @@ impl Actor {
                 self.teardown_child().await?;
             }
             Ok(AttemptOutcome::Failed(fail)) => {
-                self.clear_generation_auths();
                 if let Some(report) = fail.completion {
                     self.record_completion(report);
                 }
@@ -296,9 +272,7 @@ impl Actor {
                     assert_reaped(Some(pid))?;
                 }
             }
-            Ok(AttemptOutcome::Cancelled) | Err(_) => {
-                self.clear_generation_auths();
-            }
+            Ok(AttemptOutcome::Cancelled) | Err(_) => {}
         }
         Ok(())
     }
@@ -316,7 +290,7 @@ impl Actor {
                 self.consecutive_failures = 0;
                 self.schedule_first_periodic_probe();
                 self.snap.config_digest = live.config_digest.clone();
-                self.snap.listen_port = Some(live.port);
+                self.snap.ingress_socket = Some(live.socket_path.clone());
                 let pid = live.pid();
                 let pgid = live.pgid();
                 self.child = Some(*live);
@@ -333,7 +307,6 @@ impl Actor {
                 );
             }
             AttemptOutcome::Failed(fail) => {
-                self.clear_generation_auths();
                 let report = fail.completion.clone();
                 if let Some(report) = fail.completion {
                     self.record_completion(report);
@@ -346,7 +319,7 @@ impl Actor {
                 }
                 self.snap.pid = None;
                 self.snap.pgid = None;
-                self.snap.listen_port = None;
+                self.snap.ingress_socket = None;
                 if self.shutting_down {
                     self.transition(
                         SupervisorState::Stopped,
@@ -361,7 +334,6 @@ impl Actor {
                     .await;
             }
             AttemptOutcome::Cancelled => {
-                self.clear_generation_auths();
                 if self.shutting_down {
                     self.transition(
                         SupervisorState::Stopped,
@@ -545,7 +517,6 @@ impl Actor {
     pub(super) async fn teardown_child(
         &mut self,
     ) -> Result<Option<OwnerCompletion>, PlatformError> {
-        self.clear_generation_auths();
         self.clear_generation_watchdog_state();
         let report = if let Some(live) = self.child.take() {
             let pid = live.pid();
@@ -586,7 +557,7 @@ impl Actor {
         }
         self.snap.pid = None;
         self.snap.pgid = None;
-        self.snap.listen_port = None;
+        self.snap.ingress_socket = None;
         Ok(report)
     }
 

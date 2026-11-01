@@ -1,12 +1,12 @@
 use super::*;
 
 #[test]
-fn accepts_loopback_listen() {
+fn accepts_unix_listen() {
     let mut p = ControlParser::new();
-    p.push(br#"{"event":"listen","socket":"http","port":43123}"#)
+    p.push(br#"{"event":"listen","socket":"http","port":0}"#)
         .unwrap();
     p.push(b"\n").unwrap();
-    assert_eq!(p.listen().unwrap().port, 43123);
+    assert!(p.listen().is_some());
 }
 
 #[test]
@@ -14,25 +14,25 @@ fn rejects_malformed_duplicate_and_unknown_fields() {
     let mut p = ControlParser::new();
     assert!(p.push(b"not-json\n").is_err());
     let mut p = ControlParser::new();
-    p.push(b"{\"event\":\"listen\",\"socket\":\"http\",\"port\":9}\n")
+    p.push(b"{\"event\":\"listen\",\"socket\":\"http\",\"port\":0}\n")
         .unwrap();
     assert!(
-        p.push(b"{\"event\":\"listen\",\"socket\":\"http\",\"port\":9}\n")
+        p.push(b"{\"event\":\"listen\",\"socket\":\"http\",\"port\":0}\n")
             .is_err()
     );
     let mut p = ControlParser::new();
     assert!(
-        p.push(b"{\"event\":\"listen\",\"socket\":\"https\",\"port\":9}\n")
+        p.push(b"{\"event\":\"listen\",\"socket\":\"https\",\"port\":0}\n")
             .is_err()
     );
     let mut p = ControlParser::new();
     assert!(
-        p.push(b"{\"event\":\"listen\",\"socket\":\"http\",\"port\":9,\"address\":\"1.2.3.4\"}\n")
+        p.push(b"{\"event\":\"listen\",\"socket\":\"http\",\"port\":0,\"address\":\"1.2.3.4\"}\n")
             .is_err()
     );
     let mut p = ControlParser::new();
     assert!(
-        p.push(b"{\"event\":\"listen\",\"socket\":\"http\",\"port\":9,\"extra\":1}\n")
+        p.push(b"{\"event\":\"listen\",\"socket\":\"http\",\"port\":0,\"extra\":1}\n")
             .is_err()
     );
     let mut p = ControlParser::new();
@@ -41,28 +41,28 @@ fn rejects_malformed_duplicate_and_unknown_fields() {
     let mut p = ControlParser::new();
     assert!(
         p.push(
-            b"{\"event\":\"listen\",\"socket\":\"http\",\"port\":9,\"address\":\"not-an-addr\"}\n"
+            b"{\"event\":\"listen\",\"socket\":\"http\",\"port\":0,\"address\":\"not-an-addr\"}\n"
         )
         .is_err()
     );
     let mut p = ControlParser::new();
     assert!(
         p.push(
-            b"{\"event\":\"listen\",\"socket\":\"http\",\"port\":9,\"address\":\"127.0.0.1\"}\n"
+            b"{\"event\":\"listen\",\"socket\":\"http\",\"port\":0,\"address\":\"127.0.0.1\"}\n"
         )
         .is_err()
     );
     let mut p = ControlParser::new();
     assert!(
         p.push(
-            b"{\"event\":\"listen\",\"socket\":\"http\",\"port\":9,\"address\":\"127.0.0.1:8\"}\n"
+            b"{\"event\":\"listen\",\"socket\":\"http\",\"port\":0,\"address\":\"127.0.0.1:8\"}\n"
         )
         .is_err()
     );
     let mut p = ControlParser::new();
-    p.push(b"{\"event\":\"listen\",\"socket\":\"http\",\"port\":9,\"address\":\"127.0.0.1:9\"}\n")
+    p.push(b"{\"event\":\"listen\",\"socket\":\"http\",\"port\":0,\"address\":\"unix:/tmp/runtime.sock\"}\n")
         .unwrap();
-    assert_eq!(p.listen().unwrap().port, 9);
+    assert!(p.listen().is_some());
 }
 
 #[test]
@@ -79,12 +79,12 @@ fn lifetime_bound_counts_empty_lines_and_accepts_fragmented_listen() {
     assert!(exceeded, "empty lines must consume the lifetime bound");
 
     let mut p = ControlParser::new();
-    let msg = br#"{"event":"listen","socket":"http","port":43123}"#;
+    let msg = br#"{"event":"listen","socket":"http","port":0}"#;
     for piece in msg.chunks(3) {
         p.push(piece).unwrap();
     }
     p.push(b"\n").unwrap();
-    assert_eq!(p.listen().unwrap().port, 43123);
+    assert!(p.listen().is_some());
 }
 
 #[test]
@@ -93,13 +93,13 @@ fn crlf_empty_event_and_port_boundaries_are_rejected_or_accepted_exactly() {
     parser.push(b"\r\n").unwrap();
     assert!(!parser.accepted());
     parser
-        .push(b"{\"event\":\"listen\",\"socket\":\"http\",\"port\":9}\r\n")
+        .push(b"{\"event\":\"listen\",\"socket\":\"http\",\"port\":0}\r\n")
         .unwrap();
     assert!(parser.accepted());
 
     for line in [
-        b"{\"event\":\"ready\",\"socket\":\"http\",\"port\":9}\n".as_slice(),
-        b"{\"event\":\"listen\",\"socket\":\"http\",\"port\":0}\n".as_slice(),
+        b"{\"event\":\"ready\",\"socket\":\"http\",\"port\":0}\n".as_slice(),
+        b"{\"event\":\"listen\",\"socket\":\"http\",\"port\":1}\n".as_slice(),
         b"{\"event\":\"listen\",\"socket\":\"http\",\"port\":65536}\n".as_slice(),
     ] {
         let mut parser = ControlParser::new();

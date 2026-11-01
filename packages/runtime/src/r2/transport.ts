@@ -229,11 +229,7 @@ async function decodeFrame(
   return { meta: frame.meta, body };
 }
 
-export function makeR2TransportBase(
-  bindingError: BindingError,
-  currentStartupGeneration: () => string,
-  tokenHeader: string,
-) {
+export function makeR2TransportBase(bindingError: BindingError) {
   return class extends WorkerEntrypoint<BindingEnv, ResourceBindingProps> {
     #props() {
       const props = this.ctx.props;
@@ -265,8 +261,7 @@ export function makeR2TransportBase(
           method: "POST",
           headers: {
             "content-type": contentType,
-            [tokenHeader]: this.env.BINDING_BACKEND_TOKEN,
-            "x-open-compute-startup-generation": currentStartupGeneration(),
+
             "x-open-compute-version-id": props.versionId,
             "x-open-compute-descriptor-sha256": props.descriptorSha256,
             "x-open-compute-request-id": crypto.randomUUID(),

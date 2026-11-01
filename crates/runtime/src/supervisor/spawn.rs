@@ -12,13 +12,13 @@ use crate::lock::RuntimeLock;
 use crate::process::{assert_reaped, exec_image, exec_image_with_lease, verify_self_pgid};
 use crate::verify::VerifiedRuntime;
 use command_fds::{CommandFdExt, FdMapping};
-use open_compute_core::{ErrorCode, PlatformError, SecretString};
+use open_compute_core::{ErrorCode, PlatformError};
 use rustix::process::{Pid, getpgid};
 use std::io::Write;
 use std::os::fd::{AsFd, OwnedFd};
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
@@ -48,11 +48,11 @@ pub(crate) fn serve_argv_with_services(
     if host_extension_broker {
         args.push("--host-extension-fd=4".to_owned());
     }
-    args.push("--socket-addr=http=127.0.0.1:0".to_owned());
     for service in external_services {
         args.push(format!(
-            "--external-addr={}={}",
-            service.name, service.address
+            "--external-addr={}=unix:{}",
+            service.name,
+            service.address.display()
         ));
     }
     for service in directory_services {
@@ -68,7 +68,7 @@ pub(crate) fn serve_argv_with_services(
 /// A spawned runtime whose process group is owned by [`ChildHandle`].
 pub(crate) struct LiveRuntime {
     pub handle: ChildHandle,
-    pub port: u16,
+    pub socket_path: PathBuf,
     control_std: Option<UnixStream>,
     pub control: Option<tokio::net::UnixStream>,
     pub parser: ControlParser,
@@ -166,6 +166,16 @@ impl SpawnFailure {
 
 pub(crate) fn spawn_child(req: &SpawnRequest<'_>) -> Result<LiveRuntime, SpawnFailure> {
     wait_if_spawn_held();
+    crate::digest::validate_socket_path(req.compiled.ingress_socket())
+        .map_err(SpawnFailure::without_child)?;
+    if let Err(error) = std::fs::remove_file(req.compiled.ingress_socket())
+        && error.kind() != std::io::ErrorKind::NotFound
+    {
+        return Err(SpawnFailure::without_child(PlatformError::new(
+            ErrorCode::RuntimeInvalid,
+            "failed to remove stale runtime socket",
+        )));
+    }
     let argv = serve_argv_with_services(
         req.runtime.lock(),
         req.runtime.pyodide_bundle_cache_dir(),
@@ -187,6 +197,7 @@ pub(crate) fn spawn_child(req: &SpawnRequest<'_>) -> Result<LiveRuntime, SpawnFa
         req.host_extension_fd,
     )?;
     live.config_digest = digest;
+    live.socket_path = req.compiled.ingress_socket().to_owned();
     Ok(live)
 }
 
@@ -391,7 +402,7 @@ fn spawn_child_inner(
 
     Ok(LiveRuntime {
         handle,
-        port: 0,
+        socket_path: PathBuf::new(),
         control_std: Some(parent_ctl),
         control: None,
         parser: ControlParser::new(),
@@ -469,9 +480,8 @@ fn read_pgid(pid: i32) -> Result<i32, PlatformError> {
 
 pub(crate) async fn wait_ready(
     live: &mut LiveRuntime,
-    token: &SecretString,
     startup: Duration,
-) -> Result<u16, PlatformError> {
+) -> Result<(), PlatformError> {
     let deadline = Instant::now() + startup;
     let mut buf = [0u8; 1024];
     loop {
@@ -513,11 +523,10 @@ pub(crate) async fn wait_ready(
             }
             Err(_) => {}
         }
-        if let Some(listen) = live.parser.listen() {
+        if live.parser.listen().is_some() {
             let remain = deadline.saturating_duration_since(Instant::now());
-            probe_ready(listen.port, token, remain).await?;
-            live.port = listen.port;
-            return Ok(listen.port);
+            probe_ready(&live.socket_path, remain).await?;
+            return Ok(());
         }
     }
 }

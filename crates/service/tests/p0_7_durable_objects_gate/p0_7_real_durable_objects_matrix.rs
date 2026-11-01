@@ -6,7 +6,7 @@ pub(super) async fn run() {
         .expect("OPEN_COMPUTE_TEST_WORKERD must name the verified stock runtime");
     let root = repo_root();
     let lock = root.join("packages/runtime/workerd.lock.json");
-    let temp = tempfile::tempdir().unwrap();
+    let temp = tempfile::tempdir_in("/tmp").unwrap();
     let storage = Arc::new(
         PlatformStorage::bootstrap(&storage_config(&temp.path().join("data")), &SystemClock)
             .unwrap(),
@@ -17,12 +17,18 @@ pub(super) async fn run() {
     let runtime = verify_runtime_binary(&lock, &workerd, Duration::from_secs(10), &Redactor::new())
         .await
         .expect("formal pinned runtime");
-    let source_auth = GenerationAuthRegistry::new();
-    let binding_auth = GenerationAuthRegistry::new();
-    let source_listener = bind_runtime_source().await.unwrap();
-    let source_addr = source_listener.local_addr().unwrap();
-    let binding_listener = bind_binding_backend().await.unwrap();
-    let binding_addr = binding_listener.local_addr().unwrap();
+
+    let source_listener =
+        bind_runtime_source(&storage.data_dir().runtime_dir().join("source.sock"))
+            .await
+            .unwrap();
+    let source_addr = source_listener.path().to_owned();
+
+    let binding_listener =
+        bind_binding_backend(&storage.data_dir().runtime_dir().join("binding.sock"))
+            .await
+            .unwrap();
+    let binding_addr = binding_listener.path().to_owned();
     let resource_pins = ResourcePins::new();
     let (shutdown_tx, mut source_shutdown) = tokio::sync::watch::channel(false);
     let mut binding_shutdown = shutdown_tx.subscribe();
@@ -34,9 +40,9 @@ pub(super) async fn run() {
             open_compute_service::runtime_bridge::python_runtime_pin(&runtime),
         )
         .unwrap();
-        let auth = source_auth.clone();
+
         async move {
-            serve_runtime_source(source_listener, source, auth, None, async move {
+            serve_runtime_source(source_listener, source, None, async move {
                 let _ = source_shutdown.changed().await;
             })
             .await
@@ -45,14 +51,13 @@ pub(super) async fn run() {
     let binding_task = tokio::spawn({
         let backend_storage = storage.clone();
         let executor_storage = storage.clone();
-        let auth = binding_auth.clone();
+
         let pins = resource_pins.clone();
         let scheduler = scheduler.clone();
         async move {
             serve_binding_backend(
                 binding_listener,
                 backend_storage,
-                auth,
                 pins,
                 Arc::new(SqliteKvBindingExecutor::new(
                     executor_storage,
@@ -77,16 +82,15 @@ pub(super) async fn run() {
         lock.clone(),
         root.join("packages/runtime"),
         storage.data_dir().runtime_dir(),
+        storage.data_dir().runtime_dir().join("ingress.sock"),
         PlatformReleaseMeta {
             version: "p0.7-gate".to_owned(),
         },
         Duration::from_secs(20),
         Redactor::new(),
-    )
-    .with_generation_auth(source_auth.clone())
-    .with_binding_generation_auth(binding_auth.clone());
+    );
     let supervisor_slot = Arc::new(Mutex::new(None));
-    let transport = WorkerdTransport::new(source_auth.clone(), supervisor_slot.clone())
+    let transport = WorkerdTransport::new(supervisor_slot.clone())
         .with_test_request_body_limit(32 * 1024 * 1024);
     let do_storage = storage
         .data_dir()
@@ -105,12 +109,11 @@ pub(super) async fn run() {
             lease_path: Some(storage.data_dir().runtime_dir().join("p0-7-gate.lease")),
         },
         vec![
-            ExternalServiceAddress::loopback("runtime-source", source_addr).unwrap(),
-            ExternalServiceAddress::loopback("binding-backend", binding_addr).unwrap(),
-            ExternalServiceAddress::loopback("observability-backend", binding_addr).unwrap(),
+            ExternalServiceAddress::unix("runtime-source", &source_addr).unwrap(),
+            ExternalServiceAddress::unix("binding-backend", &binding_addr).unwrap(),
+            ExternalServiceAddress::unix("observability-backend", &binding_addr).unwrap(),
         ],
         vec![DirectoryServicePath::local("do-storage", &do_storage).unwrap()],
-        vec![source_auth, binding_auth],
     ));
     *supervisor_slot.lock().unwrap() = Some(supervisor.clone());
     supervisor.start();

@@ -30,12 +30,8 @@ impl std::fmt::Debug for BrokerControlCredentials {
 impl BrokerControlCredentials {
     pub(super) fn generate() -> Result<Self, PlatformError> {
         Ok(Self {
-            control_token: open_compute_runtime::generate_internal_token()?
-                .expose()
-                .to_owned(),
-            callback_token: open_compute_runtime::generate_internal_token()?
-                .expose()
-                .to_owned(),
+            control_token: hex::encode(rand::random::<[u8; 32]>()),
+            callback_token: hex::encode(rand::random::<[u8; 32]>()),
         })
     }
 

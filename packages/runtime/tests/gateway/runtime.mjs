@@ -10,9 +10,7 @@ const workers = moduleUrl(`
   }
 `);
 const tunnel = moduleUrl(await compileRuntime("sockets/tunnel.ts"));
-const token = moduleUrl(await compileRuntime("gateway/token.ts"));
 export const { default: Ingress } = await importRuntime("gateway/ingress.ts", {
   "cloudflare:workers": workers,
   "../sockets/tunnel.js": tunnel,
-  "./token.js": token,
 });

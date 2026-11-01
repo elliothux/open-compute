@@ -25,7 +25,7 @@ exit 0
     let runtime = verify_ok(&lock_path, &bin).await;
     let data = dir.path().join("data");
     fs::create_dir(&data).unwrap();
-    let token = SecretString::new(TOKEN);
+
     let redactor = redactor_with_token();
     let platform = platform_meta();
     let deadline = Duration::from_secs(2);
@@ -36,7 +36,6 @@ exit 0
         dir.path(),
         &data,
         &platform,
-        &token,
         &redactor,
         deadline,
     ))

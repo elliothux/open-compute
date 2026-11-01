@@ -186,7 +186,7 @@ TIMING = {
     ),
     'p5-search': ('p5_real_vectorize_ai_search_and_markdown_matrix',),
     'runtime': (
-        'argv_exact_stdin_fd3_and_auth_probe',
+        'argv_exact_stdin_fd3_and_unix_probe',
         'begin_drain_during_startup_cancels_the_attempt',
         'begin_drain_stops_a_running_generation_gracefully',
         'compile_failure_does_not_inherit_prior_exit',

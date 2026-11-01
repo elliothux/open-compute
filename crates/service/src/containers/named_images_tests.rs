@@ -20,7 +20,7 @@ fn router(fixture: &Fixture) -> Router {
     let api = WorkerApiState::new(
         Arc::clone(&fixture.service.storage),
         fixture.service.artifacts.clone(),
-        WorkerdTransport::for_test_endpoint(GenerationAuthRegistry::new(), 9),
+        WorkerdTransport::for_test_endpoint(std::path::Path::new("/tmp/missing.sock")),
         VersionPins::new(),
         BundleLimits::default(),
         std::time::Duration::from_millis(10),
@@ -297,11 +297,11 @@ async fn durable_object_scheduling_preserves_named_version_images_and_requires_e
             descriptor_sha256: declaration.descriptor_sha256,
         },
     };
-    let (auth, credential) = generation();
+
     assert!(
         fixture
             .service
-            .resolve(owner.request(true, None), 10, &auth, &credential)
+            .resolve(owner.request(true, None), 10, "container-unit-generation")
             .await
             .is_err()
     );
@@ -313,8 +313,7 @@ async fn durable_object_scheduling_preserves_named_version_images_and_requires_e
                 Some(json!({"image":reference(blue),"instanceProfile":"lite"})),
             ),
             11,
-            &auth,
-            &credential,
+            "container-unit-generation",
         )
         .await
         .unwrap()
@@ -323,7 +322,7 @@ async fn durable_object_scheduling_preserves_named_version_images_and_requires_e
     fixture.running().await;
     fixture
         .service
-        .resolve(owner.request(false, None), 12, &auth, &credential)
+        .resolve(owner.request(false, None), 12, "container-unit-generation")
         .await
         .unwrap();
     let (status, instances) = request(
@@ -344,15 +343,14 @@ async fn durable_object_scheduling_preserves_named_version_images_and_requires_e
             .resolve(
                 owner.request(true, Some(json!({"image":reference(green)}))),
                 13,
-                &auth,
-                &credential
+                "container-unit-generation"
             )
             .await
             .is_err()
     );
     let restarted = fixture.restart_service();
     let resumed = restarted
-        .resolve(owner.request(false, None), 14, &auth, &credential)
+        .resolve(owner.request(false, None), 14, "container-unit-generation")
         .await
         .unwrap()
         .lease
@@ -368,15 +366,11 @@ async fn durable_object_scheduling_preserves_named_version_images_and_requires_e
     *fixture.protocol.snapshot_rootfs.lock().await = rootfs(b"named checkpoint");
     let captured = fixture
         .service
-        .capture_snapshot(
-            SnapshotRequest {
-                directory: None,
-                source: owner.stop(&first),
-                name: Some("blue".into()),
-            },
-            auth.clone(),
-            credential.clone(),
-        )
+        .capture_snapshot(SnapshotRequest {
+            directory: None,
+            source: owner.stop(&first),
+            name: Some("blue".into()),
+        })
         .await
         .unwrap();
     let saved = repo
@@ -393,18 +387,13 @@ async fn durable_object_scheduling_preserves_named_version_images_and_requires_e
             .await
             .is_err()
     );
-    fixture
-        .service
-        .stop(&owner.stop(&first), 15, &auth, &credential)
-        .await
-        .unwrap();
+    fixture.service.stop(&owner.stop(&first), 15).await.unwrap();
     owner.object.object_id = insert_object(&fixture.service, namespace, 72);
     let second = restarted
         .resolve(
             owner.request(true, Some(json!({"image":reference(green)}))),
             16,
-            &auth,
-            &credential,
+            "container-unit-generation",
         )
         .await
         .unwrap()
@@ -419,7 +408,7 @@ async fn durable_object_scheduling_preserves_named_version_images_and_requires_e
     );
     fixture
         .service
-        .stop(&owner.stop(&second), 17, &auth, &credential)
+        .stop(&owner.stop(&second), 17)
         .await
         .unwrap();
     owner.object.object_id = insert_object(&fixture.service, namespace, 73);
@@ -427,8 +416,7 @@ async fn durable_object_scheduling_preserves_named_version_images_and_requires_e
         .resolve(
             owner.request(true, Some(json!({"containerSnapshotId":saved.id}))),
             18,
-            &auth,
-            &credential,
+            "container-unit-generation",
         )
         .await
         .unwrap()
@@ -441,10 +429,7 @@ async fn durable_object_scheduling_preserves_named_version_images_and_requires_e
             .effective_image_sha256,
         saved.image_sha256.unwrap()
     );
-    restarted
-        .stop(&owner.stop(&restored), 19, &auth, &credential)
-        .await
-        .unwrap();
+    restarted.stop(&owner.stop(&restored), 19).await.unwrap();
     assert!(
         repo.application_leases(instance, namespace)
             .unwrap()

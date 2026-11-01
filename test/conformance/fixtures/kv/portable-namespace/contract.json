@@ -29,6 +29,7 @@
             ["portable:missing", null]
           ],
           "bulkMetadata": [
+            ["portable:missing", null],
             [
               "portable:text",
               {
@@ -36,8 +37,7 @@
                 "metadata": { "tag": "text" },
                 "value": "hello"
               }
-            ],
-            ["portable:missing", null]
+            ]
           ],
           "list": {
             "cacheStatusValid": true,

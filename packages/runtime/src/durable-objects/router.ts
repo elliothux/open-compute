@@ -1,6 +1,6 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
 import type { RuntimeObservabilityIdentity } from "../loader/protocol.js";
-import { currentStartupGeneration, stableCode } from "../loader/shared.js";
+import { stableCode } from "../loader/shared.js";
 import { collectObservabilityTail } from "../observability/collector.js";
 import {
   inboundSocketAddress,
@@ -57,7 +57,6 @@ export class ObservabilityTail extends WorkerEntrypoint<
   }
 }
 
-const TOKEN_HEADER = "x-open-compute-binding-token";
 const ERROR_HEADER = "x-open-compute-error-code";
 const FORBIDDEN_RPC = new Set([
   "constructor",
@@ -161,14 +160,8 @@ function boundedBody(
   );
 }
 
-function backendHeaders(request: Request, env: DoHostEnv) {
+function backendHeaders(request: Request) {
   return {
-    [TOKEN_HEADER]: env.BINDING_BACKEND_TOKEN,
-    "x-open-compute-startup-generation": value(
-      request.headers,
-      "x-open-compute-startup-generation",
-      /^[^\x00-\x1f]{1,128}$/,
-    ),
     "x-open-compute-version-id": value(
       request.headers,
       "x-open-compute-version-id",
@@ -207,7 +200,7 @@ async function authorize(
     "x-open-compute-object-id",
     /^[0-9a-f]{64}$/,
   );
-  const headers = backendHeaders(request, env);
+  const headers = backendHeaders(request);
   const response = await env.BINDING_BACKEND.fetch(
     `http://binding-backend/internal/bindings/v1/do/${bindingId}/resolve`,
     { method: "POST", headers, body: JSON.stringify({ objectId }) },
@@ -241,7 +234,7 @@ async function acknowledge(
     `http://binding-backend/internal/bindings/v1/do/${bindingId}/ready`,
     {
       method: "POST",
-      headers: backendHeaders(request, env),
+      headers: backendHeaders(request),
       body: JSON.stringify({
         namespaceResourceId: authority.namespaceResourceId,
         objectId: authority.objectId,
@@ -471,10 +464,6 @@ async function alarmAuthority(
     {
       method: "POST",
       headers: {
-        [TOKEN_HEADER]: env.BINDING_BACKEND_TOKEN,
-        "x-open-compute-startup-generation": currentStartupGeneration(
-          env.INTERNAL_TOKEN,
-        ),
         "x-open-compute-request-id": crypto.randomUUID(),
         "content-type": "application/json",
       },

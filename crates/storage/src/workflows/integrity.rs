@@ -120,6 +120,7 @@ pub(crate) fn verify_catalog(conn: &Connection) -> Result<(), PlatformError> {
     // nor silently adopt dangling/mismatched references as healthy persisted authority. A fenced
     // retry can leave older immutable binding/version rows behind; only the definition's current
     // owner/fence can publish, so those stale rows are evidence rather than live authority.
+    // Deleted Workers retain immutable binding rows after releasing their live referrers.
     let valid: bool = conn.query_row(
         "WITH expected_version(version_id,kind,ref_id,created_at_ms) AS (
             SELECT worker_version_id,'workflow_version',id,created_at_ms FROM workflow_versions
@@ -127,7 +128,9 @@ pub(crate) fn verify_catalog(conn: &Connection) -> Result<(), PlatformError> {
             UNION ALL SELECT worker_version_id,'workflow_instance',instance_id,created_at_ms
               FROM workflow_instance_referrers WHERE state!='released'
          ), expected_definition(definition_id,referrer_kind,referrer_id,created_at_ms) AS (
-            SELECT definition_id,'binding',id,created_at_ms FROM workflow_bindings
+            SELECT b.definition_id,'binding',b.id,b.created_at_ms FROM workflow_bindings b
+              JOIN worker_versions d ON d.id=b.version_id JOIN workers w ON w.id=d.worker_id
+              WHERE w.deleted_at_ms IS NULL
             UNION ALL SELECT definition_id,'instance',instance_id,created_at_ms
               FROM workflow_instance_referrers WHERE state!='released'
          )
@@ -144,13 +147,14 @@ pub(crate) fn verify_catalog(conn: &Connection) -> Result<(), PlatformError> {
              JOIN worker_versions d ON d.id=v.worker_version_id JOIN workers w ON w.id=d.worker_id
              WHERE w.id!=v.worker_id OR d.worker_code_sha256!=v.worker_code_sha256
                OR d.loader_schema_version!=v.loader_schema_version
-               OR (v.state NOT IN ('deleting','tombstoned') AND (d.state!='ready' OR w.deleted_at_ms IS NOT NULL)))
+               OR (v.state NOT IN ('deleting','tombstoned') AND (d.state!='ready'
+                 OR (w.deleted_at_ms IS NOT NULL AND v.id=f.current_version_id AND f.availability!='unavailable'))))
            AND NOT EXISTS(SELECT 1 FROM workflow_bindings b JOIN workflow_definitions f ON f.id=b.definition_id
              JOIN worker_versions d ON d.id=b.version_id JOIN workers w ON w.id=d.worker_id
              WHERE f.lifecycle_generation!=b.definition_lifecycle_generation
-               OR f.state NOT IN ('creating','ready')
-               OR (f.state='creating' AND NOT (f.current_version_id IS NULL
-                     AND b.reservation_owner IS NOT NULL AND b.reservation_fence IS NOT NULL)))
+               OR (w.deleted_at_ms IS NULL AND (f.state NOT IN ('creating','ready')
+                 OR (f.state='creating' AND NOT (f.current_version_id IS NULL
+                     AND b.reservation_owner IS NOT NULL AND b.reservation_fence IS NOT NULL)))))
            AND NOT EXISTS(SELECT 1 FROM workflow_versions v JOIN workflow_definitions f ON f.id=v.definition_id
              WHERE v.reservation_owner IS NOT NULL
                AND f.reservation_owner=v.reservation_owner AND f.reservation_fence=v.reservation_fence

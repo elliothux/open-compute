@@ -2,7 +2,6 @@ use super::super::ERROR_HEADER;
 use super::super::tests::{authorized_binding, storage};
 use super::*;
 use open_compute_core::{DurableObjectsConfig, MetricsConfig};
-use open_compute_runtime::GenerationAuthRegistry;
 use open_compute_workers::ResourcePins;
 
 #[derive(Default)]
@@ -499,7 +498,7 @@ async fn frame_dispatch_releases_pins_on_protocol_executor_and_timeout_failures(
     ) -> Response {
         let state = BackendState {
             storage,
-            auth: GenerationAuthRegistry::new(),
+
             pins: pins.clone(),
             executor,
             metrics: None,
@@ -633,7 +632,7 @@ async fn rejected_streaming_put_advertises_connection_close() {
     let binding = authorized_binding();
     let state = BackendState {
         storage: storage.clone(),
-        auth: GenerationAuthRegistry::new(),
+
         pins: ResourcePins::new(),
         executor: Arc::new(RecordingExecutor::default()),
         metrics: None,

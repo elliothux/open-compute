@@ -42,7 +42,22 @@ export async function sourceIdentity(): Promise<string> {
     if (!path.startsWith(`${ROOT}/`))
       throw new Error("working-tree source identity escapes the repository");
     try {
-      if (!(await stat(path)).isFile())
+      const info = await stat(path);
+      if (info.isDirectory()) {
+        // A submodule gitlink: identify it by its checked-out commit.
+        const head = await command("git", ["rev-parse", "HEAD"], {
+          cwd: path,
+          env,
+          timeout: 30_000,
+        });
+        digest
+          .update("gitlink\0")
+          .update(name)
+          .update("\0")
+          .update(head.stdout);
+        continue;
+      }
+      if (!info.isFile())
         throw new Error("working-tree source identity is not a regular file");
       digest
         .update("file\0")

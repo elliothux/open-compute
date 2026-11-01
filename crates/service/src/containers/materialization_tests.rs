@@ -72,10 +72,14 @@ async fn admitted_image_materializes_only_on_cache_absence_and_survives_service_
         .lock()
         .await
         .insert(image_id, rootfs);
-    let (auth, credential) = generation();
+
     fixture
         .service
-        .resolve(authority.request(true, None), 10, &auth, &credential)
+        .resolve(
+            authority.request(true, None),
+            10,
+            "container-unit-generation",
+        )
         .await
         .unwrap();
     assert_eq!(fixture.protocol.imports.load(Ordering::SeqCst), 2);
@@ -102,12 +106,16 @@ async fn missing_image_import_failure_preserves_reservation_and_retry_identity()
     let fixture = fixture().await;
     let image = fixture.admit_image("failed-import").await;
     let authority = authority(&fixture.service, &fixture._artifacts, image, true);
-    let (auth, credential) = generation();
+
     fixture.protocol.import_fail.store(true, Ordering::SeqCst);
     assert!(
         fixture
             .service
-            .resolve(authority.request(true, None), 10, &auth, &credential)
+            .resolve(
+                authority.request(true, None),
+                10,
+                "container-unit-generation"
+            )
             .await
             .is_err()
     );
@@ -124,7 +132,7 @@ async fn missing_image_import_failure_preserves_reservation_and_retry_identity()
     assert!(
         fixture
             .service
-            .resolve(other, 11, &auth, &credential)
+            .resolve(other, 11, "container-unit-generation")
             .await
             .is_err()
     );
@@ -143,7 +151,11 @@ async fn missing_image_import_failure_preserves_reservation_and_retry_identity()
     assert!(
         fixture
             .restart_service()
-            .resolve(authority.request(true, None), 12, &auth, &credential)
+            .resolve(
+                authority.request(true, None),
+                12,
+                "container-unit-generation"
+            )
             .await
             .is_err()
     );
@@ -162,7 +174,11 @@ async fn missing_image_import_failure_preserves_reservation_and_retry_identity()
         .store(false, Ordering::SeqCst);
     let recovered = fixture
         .restart_service()
-        .resolve(authority.request(true, None), 13, &auth, &credential)
+        .resolve(
+            authority.request(true, None),
+            13,
+            "container-unit-generation",
+        )
         .await
         .unwrap()
         .lease

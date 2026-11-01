@@ -5,7 +5,7 @@ use open_compute_core::clock::SystemClock;
 use open_compute_core::config::{DataConfig, DurableObjectsConfig, MetricsConfig, QueuesConfig};
 use open_compute_core::{
     CanonicalBindingConfig, CanonicalPermissions, InstanceId, RequestId, ResourceAvailability,
-    ResourceId, ResourceState, SecretString,
+    ResourceId, ResourceState,
 };
 use open_compute_storage::bindings::VersionBindingRecord;
 use open_compute_storage::resources::ResourceRecord;
@@ -166,14 +166,12 @@ async fn error_envelope_exposes_only_stable_retry_semantics() {
 }
 
 #[tokio::test]
-async fn authenticated_boundary_rejects_before_lookup_and_observes_metrics() {
+async fn private_boundary_rejects_before_lookup_and_observes_metrics() {
     let (_temp, storage) = storage();
-    let auth = GenerationAuthRegistry::new();
-    let token = "ab".repeat(32);
-    auth.activate_for_test(SecretString::new(&token));
+
     let state = BackendState {
         storage,
-        auth,
+
         pins: ResourcePins::new(),
         executor: Arc::new(UnavailableKvBindingExecutor),
         metrics: Some(Arc::new(
@@ -198,16 +196,9 @@ async fn authenticated_boundary_rejects_before_lookup_and_observes_metrics() {
     let binding_id = BindingId::generate();
     let path = format!("/internal/bindings/v1/kv/{binding_id}/get");
 
-    let unauthenticated = handle(
-        State(state.clone()),
-        Request::builder().uri(&path).body(Body::empty()).unwrap(),
-    )
-    .await;
-    assert_eq!(unauthenticated.status(), StatusCode::NOT_FOUND);
-
     let wrong_method = handle(
         State(state.clone()),
-        base_request(Method::GET, &path, &token, "generation")
+        base_request(Method::GET, &path)
             .body(Body::empty())
             .unwrap(),
     )
@@ -216,7 +207,7 @@ async fn authenticated_boundary_rejects_before_lookup_and_observes_metrics() {
 
     let too_large = handle(
         State(state.clone()),
-        base_request(Method::POST, &path, &token, "generation")
+        base_request(Method::POST, &path)
             .header(header::CONTENT_LENGTH, MAX_FRAME_BODY_BYTES + 1)
             .body(Body::empty())
             .unwrap(),
@@ -226,7 +217,7 @@ async fn authenticated_boundary_rejects_before_lookup_and_observes_metrics() {
 
     let invalid_path = handle(
         State(state.clone()),
-        base_request(Method::POST, "/invalid", &token, "generation")
+        base_request(Method::POST, "/invalid")
             .body(Body::empty())
             .unwrap(),
     )
@@ -235,7 +226,7 @@ async fn authenticated_boundary_rejects_before_lookup_and_observes_metrics() {
 
     let missing_version = handle(
         State(state.clone()),
-        base_request(Method::POST, &path, &token, "generation")
+        base_request(Method::POST, &path)
             .body(Body::empty())
             .unwrap(),
     )
@@ -245,7 +236,7 @@ async fn authenticated_boundary_rejects_before_lookup_and_observes_metrics() {
     let version = VersionId::generate();
     let invalid_request_id = handle(
         State(state.clone()),
-        base_request(Method::POST, &path, &token, "generation")
+        base_request(Method::POST, &path)
             .header(VERSION_HEADER, version.to_string())
             .header(REQUEST_HEADER, "bad")
             .body(Body::empty())
@@ -256,7 +247,7 @@ async fn authenticated_boundary_rejects_before_lookup_and_observes_metrics() {
 
     let invalid_digest = handle(
         State(state.clone()),
-        authorized_request(&path, &token, version)
+        authorized_request(&path, version)
             .header(DESCRIPTOR_HEADER, "bad")
             .body(Body::empty())
             .unwrap(),
@@ -266,7 +257,7 @@ async fn authenticated_boundary_rejects_before_lookup_and_observes_metrics() {
 
     let wrong_content_type = handle(
         State(state.clone()),
-        authorized_request(&path, &token, version)
+        authorized_request(&path, version)
             .header(DESCRIPTOR_HEADER, "ab".repeat(32))
             .header(header::CONTENT_TYPE, "text/plain")
             .body(Body::empty())
@@ -292,7 +283,7 @@ async fn authenticated_boundary_rejects_before_lookup_and_observes_metrics() {
     ] {
         let response = handle(
             State(state.clone()),
-            base_request(Method::POST, unavailable_product, &token, "generation")
+            base_request(Method::POST, unavailable_product)
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -306,7 +297,7 @@ async fn authenticated_boundary_rejects_before_lookup_and_observes_metrics() {
 
     let missing_binding = handle(
         State(state),
-        authorized_request(&path, &token, version)
+        authorized_request(&path, version)
             .header(DESCRIPTOR_HEADER, "ab".repeat(32))
             .header(header::CONTENT_TYPE, FRAME_CONTENT_TYPE)
             .body(Body::from(r#"{"key":"x"}"#))
@@ -319,12 +310,10 @@ async fn authenticated_boundary_rejects_before_lookup_and_observes_metrics() {
 #[tokio::test]
 async fn alarm_and_durable_object_protocols_reject_malformed_frames() {
     let (_temp, storage) = storage();
-    let auth = GenerationAuthRegistry::new();
-    let token = "ab".repeat(32);
-    auth.activate_for_test(SecretString::new(&token));
+
     let state = BackendState {
         storage,
-        auth,
+
         pins: ResourcePins::new(),
         executor: Arc::new(UnavailableKvBindingExecutor),
         metrics: None,
@@ -349,7 +338,7 @@ async fn alarm_and_durable_object_protocols_reject_malformed_frames() {
 
     let valid_request_id = "550e8400-e29b-41d4-a716-446655440000";
     let alarm_request = |path: &str, body: Body| {
-        base_request(Method::POST, path, &token, "generation")
+        base_request(Method::POST, path)
             .header(header::CONTENT_TYPE, "application/json")
             .header(REQUEST_HEADER, valid_request_id)
             .body(body)
@@ -357,14 +346,9 @@ async fn alarm_and_durable_object_protocols_reject_malformed_frames() {
     };
     for (request, status) in [
         (
-            base_request(
-                Method::POST,
-                "/internal/alarms/v1/resolve",
-                &token,
-                "generation",
-            )
-            .body(Body::empty())
-            .unwrap(),
+            base_request(Method::POST, "/internal/alarms/v1/resolve")
+                .body(Body::empty())
+                .unwrap(),
             StatusCode::BAD_REQUEST,
         ),
         (
@@ -385,7 +369,7 @@ async fn alarm_and_durable_object_protocols_reject_malformed_frames() {
 
     let ready_path = format!("/internal/bindings/v1/do/{binding_id}/ready");
     let ready_request = |body: Body| {
-        authorized_request(&ready_path, &token, version)
+        authorized_request(&ready_path, version)
             .header(header::CONTENT_TYPE, "application/json")
             .header(DESCRIPTOR_HEADER, "ab".repeat(32))
             .body(body)
@@ -393,24 +377,19 @@ async fn alarm_and_durable_object_protocols_reject_malformed_frames() {
     };
     for (request, status) in [
         (
-            base_request(
-                Method::POST,
-                "/internal/bindings/v1/do/invalid/ready",
-                &token,
-                "generation",
-            )
-            .body(Body::empty())
-            .unwrap(),
+            base_request(Method::POST, "/internal/bindings/v1/do/invalid/ready")
+                .body(Body::empty())
+                .unwrap(),
             StatusCode::NOT_FOUND,
         ),
         (
-            base_request(Method::POST, &ready_path, &token, "generation")
+            base_request(Method::POST, &ready_path)
                 .body(Body::empty())
                 .unwrap(),
             StatusCode::BAD_REQUEST,
         ),
         (
-            base_request(Method::POST, &ready_path, &token, "generation")
+            base_request(Method::POST, &ready_path)
                 .header(header::CONTENT_TYPE, "application/json")
                 .header(REQUEST_HEADER, valid_request_id)
                 .body(Body::empty())
@@ -418,7 +397,7 @@ async fn alarm_and_durable_object_protocols_reject_malformed_frames() {
             StatusCode::BAD_REQUEST,
         ),
         (
-            authorized_request(&ready_path, &token, version)
+            authorized_request(&ready_path, version)
                 .header(header::CONTENT_TYPE, "application/json")
                 .body(Body::empty())
                 .unwrap(),
@@ -435,7 +414,7 @@ async fn alarm_and_durable_object_protocols_reject_malformed_frames() {
 
     let resolve_path = format!("/internal/bindings/v1/do/{binding_id}/resolve");
     let resolve_request = |body: Body| {
-        authorized_request(&resolve_path, &token, version)
+        authorized_request(&resolve_path, version)
             .header("x-open-compute-do-operation", "fetch")
             .header(header::CONTENT_TYPE, "application/json")
             .header(DESCRIPTOR_HEADER, "ab".repeat(32))
@@ -444,32 +423,27 @@ async fn alarm_and_durable_object_protocols_reject_malformed_frames() {
     };
     for (request, status) in [
         (
-            base_request(Method::POST, &resolve_path, &token, "generation")
+            base_request(Method::POST, &resolve_path)
                 .body(Body::empty())
                 .unwrap(),
             StatusCode::BAD_REQUEST,
         ),
         (
-            base_request(
-                Method::POST,
-                "/internal/bindings/v1/do/invalid/resolve",
-                &token,
-                "generation",
-            )
-            .header("x-open-compute-do-operation", "fetch")
-            .body(Body::empty())
-            .unwrap(),
+            base_request(Method::POST, "/internal/bindings/v1/do/invalid/resolve")
+                .header("x-open-compute-do-operation", "fetch")
+                .body(Body::empty())
+                .unwrap(),
             StatusCode::NOT_FOUND,
         ),
         (
-            base_request(Method::POST, &resolve_path, &token, "generation")
+            base_request(Method::POST, &resolve_path)
                 .header("x-open-compute-do-operation", "fetch")
                 .body(Body::empty())
                 .unwrap(),
             StatusCode::BAD_REQUEST,
         ),
         (
-            authorized_request(&resolve_path, &token, version)
+            authorized_request(&resolve_path, version)
                 .header("x-open-compute-do-operation", "fetch")
                 .header(header::CONTENT_TYPE, "application/json")
                 .body(Body::empty())
@@ -477,7 +451,7 @@ async fn alarm_and_durable_object_protocols_reject_malformed_frames() {
             StatusCode::BAD_REQUEST,
         ),
         (
-            base_request(Method::POST, &resolve_path, &token, "generation")
+            base_request(Method::POST, &resolve_path)
                 .header("x-open-compute-do-operation", "fetch")
                 .header(header::CONTENT_TYPE, "application/json")
                 .header(REQUEST_HEADER, valid_request_id)
@@ -502,12 +476,15 @@ async fn alarm_and_durable_object_protocols_reject_malformed_frames() {
 #[tokio::test]
 async fn listener_wrappers_bind_and_shutdown_cleanly() {
     let (_temp, storage) = storage();
-    let listener = bind_binding_backend().await.unwrap();
-    assert!(listener.local_addr().unwrap().ip().is_loopback());
+    let listener_dir = tempfile::tempdir_in("/tmp").unwrap();
+
+    let listener = bind_binding_backend(&listener_dir.path().join("backend.sock"))
+        .await
+        .unwrap();
+    assert!(listener.path().is_absolute());
     serve_binding_backend(
         listener,
         storage,
-        GenerationAuthRegistry::new(),
         ResourcePins::new(),
         Arc::new(UnavailableKvBindingExecutor),
         None,
@@ -552,11 +529,14 @@ async fn document_parser_composition_wrapper_binds_every_owned_product_authority
         )
         .unwrap(),
     );
-    let listener = bind_binding_backend().await.unwrap();
+    let listener_dir = tempfile::tempdir_in("/tmp").unwrap();
+
+    let listener = bind_binding_backend(&listener_dir.path().join("backend.sock"))
+        .await
+        .unwrap();
     serve_binding_backend_with_document_parser(
         listener,
         fixture.storage,
-        GenerationAuthRegistry::new(),
         ResourcePins::new(),
         Arc::new(UnavailableKvBindingExecutor),
         None,
@@ -578,54 +558,27 @@ async fn document_parser_composition_wrapper_binds_every_owned_product_authority
 }
 
 #[tokio::test]
-async fn service_invocation_boundary_rejects_unknown_unauthorized_and_malformed_requests() {
+async fn service_invocation_boundary_rejects_unknown_and_malformed_requests() {
     let (_temp, storage) = storage();
     let registry = crate::service_invocations::ServiceInvocationRegistry::new(
         storage,
         open_compute_workers::VersionPins::new(),
     );
-    let auth = GenerationAuthRegistry::new();
-    let token = "ab".repeat(32);
-    auth.activate_for_test(SecretString::new(&token));
+
     let metrics = MetricsRegistry::new(&MetricsConfig::default(), "test", "workerd").unwrap();
 
     let unknown = handle_service_invocation(
         &registry,
-        &auth,
-        &token,
-        "generation",
         Some(&metrics),
-        base_request(
-            Method::POST,
-            "/internal/services/v1/unknown",
-            &token,
-            "generation",
-        )
-        .body(Body::empty())
-        .unwrap(),
-    )
-    .await;
-    assert_eq!(unknown.status(), StatusCode::NOT_FOUND);
-
-    let unauthorized = handle_service_invocation(
-        &registry,
-        &auth,
-        "cdcd",
-        "generation",
-        Some(&metrics),
-        Request::builder()
-            .uri("/internal/services/v1/unknown")
+        base_request(Method::POST, "/internal/services/v1/unknown")
             .body(Body::empty())
             .unwrap(),
     )
     .await;
-    assert_eq!(unauthorized.status(), StatusCode::NOT_FOUND);
+    assert_eq!(unknown.status(), StatusCode::NOT_FOUND);
 
     let malformed = handle_service_invocation(
         &registry,
-        &auth,
-        &token,
-        "generation",
         Some(&metrics),
         Request::builder()
             .uri("/internal/services/v1/capabilities/begin")
@@ -637,9 +590,6 @@ async fn service_invocation_boundary_rejects_unknown_unauthorized_and_malformed_
 
     let oversized = handle_service_invocation(
         &registry,
-        &auth,
-        &token,
-        "generation",
         None,
         Request::builder()
             .uri("/internal/services/v1/resolve")
@@ -650,21 +600,12 @@ async fn service_invocation_boundary_rejects_unknown_unauthorized_and_malformed_
     assert_eq!(oversized.status(), StatusCode::BAD_REQUEST);
 }
 
-fn base_request(
-    method: Method,
-    path: &str,
-    token: &str,
-    generation: &str,
-) -> axum::http::request::Builder {
-    Request::builder()
-        .method(method)
-        .uri(path)
-        .header(TOKEN_HEADER, token)
-        .header(GENERATION_HEADER, generation)
+fn base_request(method: Method, path: &str) -> axum::http::request::Builder {
+    Request::builder().method(method).uri(path)
 }
 
-fn authorized_request(path: &str, token: &str, version: VersionId) -> axum::http::request::Builder {
-    base_request(Method::POST, path, token, "generation")
+fn authorized_request(path: &str, version: VersionId) -> axum::http::request::Builder {
+    base_request(Method::POST, path)
         .header(VERSION_HEADER, version.to_string())
         .header(REQUEST_HEADER, "550e8400-e29b-41d4-a716-446655440000")
 }

@@ -20,8 +20,7 @@ const { QueueTransport } = await import(
       "cloudflare:workers": moduleUrl(
         "export class WorkerEntrypoint { constructor(ctx,env) { this.ctx=ctx;this.env=env; } }",
       ),
-      "../loader/shared.js":
-        moduleUrl(`export const BINDING_TOKEN_HEADER="x-open-compute-binding-token";
+      "../loader/shared.js": moduleUrl(`
     export const bindingError=(code)=>Object.assign(new Error(code),{stableCode:code});
     export const currentStartupGeneration=()=>"generation";`),
       "./native-adapter.js": adapterUrl,
@@ -77,7 +76,6 @@ test("Queue transport pins authority, retains outbox operations and denies unqua
   };
   const env = {
     QUEUE_WIRE_CODEC: wireCodec,
-    BINDING_BACKEND_TOKEN: "private-token",
     BINDING_BACKEND: {
       async fetch(url, init) {
         calls.push({ url, ...init });
@@ -95,10 +93,7 @@ test("Queue transport pins authority, retains outbox operations and denies unqua
     calls[0].url,
     "http://binding-backend/internal/bindings/v1/queue/binding/send",
   );
-  assert.equal(
-    calls[0].headers["x-open-compute-binding-token"],
-    "private-token",
-  );
+  assert.equal(calls[0].headers["x-open-compute-binding-token"], undefined);
   assert.equal(calls[0].headers["x-open-compute-version-id"], "version");
   assert.equal(
     calls[0].headers["x-open-compute-descriptor-sha256"],
@@ -106,7 +101,7 @@ test("Queue transport pins authority, retains outbox operations and denies unqua
   );
   assert.equal(
     calls[0].headers["x-open-compute-startup-generation"],
-    "generation",
+    undefined,
   );
   assert.equal(calls[0].headers["x-open-compute-output-gate"], "0");
   assert.equal(queueFrame(calls[0].body).messages[0].contentType, 2);

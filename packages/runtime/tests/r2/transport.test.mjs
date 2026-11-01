@@ -22,6 +22,7 @@ const nativeAdapter = moduleUrl(
     "./validation.js": moduleUrl(await compileRuntime("r2/validation.ts")),
   }),
 );
+const { nativeR2Fetch } = await import(nativeAdapter);
 const compiled = await mkdtemp(join(tmpdir(), "oc-r2-runtime-"));
 await writeFile(
   join(compiled, "transport.mjs"),
@@ -56,16 +57,101 @@ const meta = {
   checksums: { md5: "5d41402abc4b2a76b9719d911017c592" },
   storageClass: "Standard",
 };
-const Transport = makeR2TransportBase(
-  (code) => Object.assign(new Error(code), { stableCode: code }),
-  () => "generation",
-  "private-token",
+const Transport = makeR2TransportBase((code) =>
+  Object.assign(new Error(code), { stableCode: code }),
 );
 const transport = (fetch) =>
-  new Transport(
-    { props },
-    { BINDING_BACKEND: { fetch }, BINDING_BACKEND_TOKEN: "token" },
+  new Transport({ props }, { BINDING_BACKEND: { fetch } });
+
+test("native R2 list caps oversized limits and preserves zero", async () => {
+  const limits = [];
+  const source = transport(async (_url, init) => {
+    limits.push(JSON.parse(init.body).limit);
+    return Response.json({
+      objects: [],
+      truncated: false,
+      delimitedPrefixes: [],
+    });
+  });
+  for (const limit of [0, 1, 1000, 1001, 4294967295]) {
+    const response = await source.fetch(
+      new Request("https://fake-host/", {
+        headers: {
+          "cf-r2-request": JSON.stringify({
+            version: 1,
+            method: "list",
+            limit,
+          }),
+        },
+      }),
+    );
+    assert.equal(response.status, 200);
+    await response.arrayBuffer();
+  }
+  assert.deepEqual(limits, [0, 1, 1000, 1000, 1000]);
+});
+
+test("native R2 accepts empty ranges and native surrogate bytes and reports storage errors", async () => {
+  const calls = [];
+  const bucket = {
+    async get(key, options) {
+      calls.push({ key, options });
+      return { meta, body: new Blob(["abc"]).stream() };
+    },
+    async put(key, body) {
+      calls.push({ key, body: await new Response(body).text() });
+      return { ...meta, key };
+    },
+  };
+  const get = await nativeR2Fetch(
+    new Request("https://fake-host/", {
+      headers: {
+        "cf-r2-request": JSON.stringify({
+          version: 1,
+          method: "get",
+          object: "asset",
+          range: {},
+        }),
+      },
+    }),
+    bucket,
   );
+  assert.equal(get.status, 200);
+  await get.arrayBuffer();
+  assert.deepEqual(calls, [{ key: "asset", options: {} }]);
+  for (const storageClass of [undefined, "Banana"]) {
+    const prefix = Buffer.concat([
+      Buffer.from('{"version":1,"method":"put","object":"portable:'),
+      Buffer.from([0xed, 0xa0, 0x80]),
+      Buffer.from(
+        `"${storageClass === undefined ? "" : ',"storageClass":"Banana"'}}`,
+      ),
+    ]);
+    const response = await nativeR2Fetch(
+      new Request("https://fake-host/", {
+        method: "PUT",
+        headers: { "cf-r2-metadata-size": String(prefix.length) },
+        body: Buffer.concat([prefix, Buffer.from("value")]),
+      }),
+      bucket,
+    );
+    if (storageClass === undefined) {
+      assert.equal(response.status, 200);
+      assert.equal((await response.json()).name, "portable:\ufffd\ufffd\ufffd");
+      assert.deepEqual(calls.at(-1), {
+        key: "portable:\ufffd\ufffd\ufffd",
+        body: "value",
+      });
+    } else {
+      assert.equal(response.status, 500);
+      assert.equal(
+        JSON.parse(response.headers.get("cf-r2-error")).message,
+        "We encountered an internal error. Please try again.",
+      );
+      assert.equal(calls.length, 2);
+    }
+  }
+});
 
 test("native R2 list shrinks oversized metadata pages without losing authority cursors", async () => {
   const calls = [];

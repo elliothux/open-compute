@@ -216,12 +216,7 @@ export class DoHost extends DurableObject<DoHostEnv> {
       loaderKey: `${authority.instanceId}/${authority.workerId}/${authority.versionId}`,
       expected: authority.workerCodeSha256,
     };
-    const snapshot = await resolveSnapshot(
-      this.env,
-      envelope,
-      "runtime",
-      this.env.INTERNAL_TOKEN,
-    );
+    const snapshot = await resolveSnapshot(this.env, envelope, "runtime");
     if (snapshot.routeGeneration !== authority.routeGeneration) {
       throw bindingError("DO_VERSION_STALE");
     }
@@ -237,12 +232,7 @@ export class DoHost extends DurableObject<DoHostEnv> {
     const getCode = async () => {
       const built = modulesFor(snapshot, false, entrypoint, true);
       const code = {
-        ...(await snapshotWorkerCode(
-          this.env,
-          snapshot,
-          "runtime",
-          this.env.INTERNAL_TOKEN,
-        )),
+        ...(await snapshotWorkerCode(this.env, snapshot, "runtime")),
         mainModule: built.mainModule,
         modules: built.modules,
         ...tenantEnv(

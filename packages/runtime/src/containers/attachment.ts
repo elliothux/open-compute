@@ -6,11 +6,7 @@ import type {
   NativeHostContainer,
   RuntimeContainerClass,
 } from "../loader/protocol.js";
-import {
-  bindingError,
-  currentStartupGeneration,
-  TOKEN_HEADER,
-} from "../loader/shared.js";
+import { bindingError, currentStartupGeneration } from "../loader/shared.js";
 
 function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -314,10 +310,7 @@ export function containerAttachment(
         method: "POST",
         headers: {
           "content-type": "application/json",
-          [TOKEN_HEADER]: env.INTERNAL_TOKEN,
-          "x-open-compute-startup-generation": currentStartupGeneration(
-            env.INTERNAL_TOKEN,
-          ),
+          "x-open-compute-startup-generation": currentStartupGeneration(),
         },
         body: JSON.stringify(body),
       },

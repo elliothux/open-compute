@@ -31,7 +31,7 @@ async fn compile_stdout_streams_into_partial_before_exit() {
         let assets = dir.path().to_path_buf();
         let data = data.clone();
         let platform = platform.clone();
-        let token = SecretString::new(TOKEN);
+
         async move {
             compile_static_config(compile_req(
                 &runtime,
@@ -39,7 +39,6 @@ async fn compile_stdout_streams_into_partial_before_exit() {
                 &assets,
                 &data,
                 &platform,
-                &token,
                 &redactor_with_token(),
                 Duration::from_secs(8),
             ))

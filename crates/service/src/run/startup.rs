@@ -37,15 +37,12 @@ pub(super) struct PreparedPlatform {
     pub(super) response_cache_manager: Arc<CacheManager>,
     pub(super) images: Arc<ImageBindingService>,
     pub(super) document_parser: Arc<DocumentParserBindingService>,
-    pub(super) generation_auth: GenerationAuthRegistry,
-    pub(super) binding_generation_auth: GenerationAuthRegistry,
-    pub(super) observability_generation_auth: GenerationAuthRegistry,
-    pub(super) runtime_source_listener: tokio::net::TcpListener,
-    pub(super) runtime_source_addr: SocketAddr,
-    pub(super) binding_backend_listener: tokio::net::TcpListener,
-    pub(super) binding_backend_addr: SocketAddr,
-    pub(super) observability_backend_listener: tokio::net::TcpListener,
-    pub(super) observability_backend_addr: SocketAddr,
+    pub(super) runtime_source_listener: http::PrivateUnixListener,
+    pub(super) runtime_source_addr: std::path::PathBuf,
+    pub(super) binding_backend_listener: http::PrivateUnixListener,
+    pub(super) binding_backend_addr: std::path::PathBuf,
+    pub(super) observability_backend_listener: http::PrivateUnixListener,
+    pub(super) observability_backend_addr: std::path::PathBuf,
     pub(super) compiler: StaticConfigCompiler,
 }
 
@@ -520,29 +517,42 @@ struct PreparedCache {
 }
 
 async fn bind_private_runtime(base: PreparedCache) -> Result<PreparedPlatform, PlatformError> {
-    let generation_auth = GenerationAuthRegistry::new();
-    let binding_generation_auth = GenerationAuthRegistry::new();
-    let observability_generation_auth = GenerationAuthRegistry::new();
-    let runtime_source_listener = bind_runtime_source().await?;
-    let runtime_source_addr = private_addr(&runtime_source_listener)?;
-    let binding_backend_listener = bind_binding_backend().await?;
-    let binding_backend_addr = private_addr(&binding_backend_listener)?;
-    let observability_backend_listener = bind_observability_backend().await?;
-    let observability_backend_addr = private_addr(&observability_backend_listener)?;
+    let platform = &base.base.base.base;
+    let scope = platform
+        .opts
+        .scope
+        .ok_or_else(|| PlatformError::new(ErrorCode::ConfigInvalid, "OCD scope is missing"))?;
+    let run_root = platform
+        .opts
+        .instance_registry
+        .as_ref()
+        .map(|registry| registry.root_for(scope).join("run"));
+    let sockets = crate::instance_control::runtime_dir_for(
+        scope,
+        &platform.storage.identity().instance_id,
+        run_root.as_deref(),
+    )?;
+    // Validate the longest named socket before acquiring any listener.
+    open_compute_runtime::validate_socket_path(&sockets.join("observability.sock"))?;
+    let runtime_source_addr = sockets.join("source.sock");
+    let binding_backend_addr = sockets.join("bindings.sock");
+    let observability_backend_addr = sockets.join("observability.sock");
+    let runtime_source_listener = bind_runtime_source(&runtime_source_addr).await?;
+    let binding_backend_listener = bind_binding_backend(&binding_backend_addr).await?;
+    let observability_backend_listener =
+        bind_observability_backend(&observability_backend_addr).await?;
     let compiler = StaticConfigCompiler::new(
         base.base.base.runtime.clone(),
         base.base.base.package.lock_path(),
         base.base.base.package.assets_dir(),
         base.base.base.base.storage.data_dir().runtime_dir(),
+        sockets.join("ingress.sock"),
         PlatformReleaseMeta {
             version: env!("CARGO_PKG_VERSION").to_owned(),
         },
         Duration::from_millis(base.base.base.base.loaded.config.runtime.startup_timeout_ms),
         base.base.base.redactor.clone(),
     )
-    .with_generation_auth(generation_auth.clone())
-    .with_binding_generation_auth(binding_generation_auth.clone())
-    .with_observability_generation_auth(observability_generation_auth.clone())
     .with_durable_objects_config(base.base.base.base.loaded.config.durable_objects.clone());
     record(&base.base.base.base.opts, "compile");
     #[cfg(any(test, feature = "test-support"))]
@@ -564,9 +574,6 @@ async fn bind_private_runtime(base: PreparedCache) -> Result<PreparedPlatform, P
         response_cache_manager: base.response_cache_manager,
         images: base.images,
         document_parser: base.document_parser,
-        generation_auth,
-        binding_generation_auth,
-        observability_generation_auth,
         runtime_source_listener,
         runtime_source_addr,
         binding_backend_listener,
@@ -574,14 +581,5 @@ async fn bind_private_runtime(base: PreparedCache) -> Result<PreparedPlatform, P
         observability_backend_listener,
         observability_backend_addr,
         compiler,
-    })
-}
-
-fn private_addr(listener: &tokio::net::TcpListener) -> Result<SocketAddr, PlatformError> {
-    listener.local_addr().map_err(|_| {
-        PlatformError::new(
-            ErrorCode::RuntimeUnavailable,
-            "failed to inspect private runtime listener",
-        )
     })
 }

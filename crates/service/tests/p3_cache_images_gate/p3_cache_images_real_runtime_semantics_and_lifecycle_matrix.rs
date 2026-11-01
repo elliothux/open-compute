@@ -6,7 +6,7 @@ pub(super) async fn run() {
         .expect("OPEN_COMPUTE_TEST_WORKERD must name the verified stock runtime");
     let root = repo_root();
     let lock = root.join("packages/runtime/workerd.lock.json");
-    let temp = tempfile::tempdir().unwrap();
+    let temp = tempfile::tempdir_in("/tmp").unwrap();
     let storage = Arc::new(
         PlatformStorage::bootstrap(&storage_config(&temp.path().join("data")), &SystemClock)
             .unwrap(),
@@ -24,12 +24,18 @@ pub(super) async fn run() {
     let runtime = verify_runtime_binary(&lock, &workerd, Duration::from_secs(10), &Redactor::new())
         .await
         .unwrap();
-    let source_auth = GenerationAuthRegistry::new();
-    let binding_auth = GenerationAuthRegistry::new();
-    let source_listener = bind_runtime_source().await.unwrap();
-    let binding_listener = bind_binding_backend().await.unwrap();
-    let source_addr = source_listener.local_addr().unwrap();
-    let binding_addr = binding_listener.local_addr().unwrap();
+
+    let source_listener =
+        bind_runtime_source(&storage.data_dir().runtime_dir().join("source.sock"))
+            .await
+            .unwrap();
+
+    let binding_listener =
+        bind_binding_backend(&storage.data_dir().runtime_dir().join("binding.sock"))
+            .await
+            .unwrap();
+    let source_addr = source_listener.path().to_owned();
+    let binding_addr = binding_listener.path().to_owned();
     let version_pins = VersionPins::new();
     let (shutdown, mut source_shutdown) = tokio::sync::watch::channel(false);
     let mut binding_shutdown = shutdown.subscribe();
@@ -43,9 +49,9 @@ pub(super) async fn run() {
         .unwrap()
         .with_cache(artifact_cache.clone())
         .with_cache_fail_open(true);
-        let auth = source_auth.clone();
+
         async move {
-            serve_runtime_source(source_listener, source, auth, None, async move {
+            serve_runtime_source(source_listener, source, None, async move {
                 let _ = source_shutdown.changed().await;
             })
             .await
@@ -74,9 +80,13 @@ pub(super) async fn run() {
         storage.clone(),
         ImagesConfig::default(),
     ));
+    let services = Arc::new(ServiceInvocationRegistry::new(
+        storage.clone(),
+        version_pins.clone(),
+    ));
     let binding_task = tokio::spawn({
         let storage = storage.clone();
-        let auth = binding_auth.clone();
+
         let pins = version_pins.clone();
         let cache_service = cache_service.clone();
         let images = image_service.clone();
@@ -86,12 +96,11 @@ pub(super) async fn run() {
             artifact_cache.clone(),
             pins.clone(),
         ));
-        let services = Arc::new(ServiceInvocationRegistry::new(storage.clone(), pins));
+        let services = services.clone();
         async move {
             serve_binding_backend_with_assets(
                 binding_listener,
                 storage.clone(),
-                auth,
                 ResourcePins::new(),
                 Arc::new(SqliteKvBindingExecutor::new(
                     storage.clone(),
@@ -120,17 +129,16 @@ pub(super) async fn run() {
         lock,
         root.join("packages/runtime"),
         storage.data_dir().runtime_dir(),
+        storage.data_dir().runtime_dir().join("ingress.sock"),
         PlatformReleaseMeta {
             version: "p3-cache-images-gate".to_owned(),
         },
         Duration::from_secs(20),
         Redactor::new(),
-    )
-    .with_generation_auth(source_auth.clone())
-    .with_binding_generation_auth(binding_auth.clone());
+    );
     let supervisor_slot = Arc::new(Mutex::new(None));
-    let transport = WorkerdTransport::new(source_auth.clone(), supervisor_slot.clone())
-        .with_version_pins(version_pins.clone());
+    let transport =
+        WorkerdTransport::new(supervisor_slot.clone()).with_version_pins(version_pins.clone());
     let do_storage = storage
         .data_dir()
         .prepare_durable_object_storage(
@@ -153,16 +161,48 @@ pub(super) async fn run() {
             ),
         },
         vec![
-            ExternalServiceAddress::loopback("runtime-source", source_addr).unwrap(),
-            ExternalServiceAddress::loopback("binding-backend", binding_addr).unwrap(),
-            ExternalServiceAddress::loopback("observability-backend", binding_addr).unwrap(),
+            ExternalServiceAddress::unix("runtime-source", &source_addr).unwrap(),
+            ExternalServiceAddress::unix("binding-backend", &binding_addr).unwrap(),
+            ExternalServiceAddress::unix("observability-backend", &binding_addr).unwrap(),
         ],
         vec![DirectoryServicePath::local("do-storage", &do_storage).unwrap()],
-        vec![source_auth.clone(), binding_auth.clone()],
     ));
     *supervisor_slot.lock().unwrap() = Some(supervisor.clone());
     supervisor.start();
     wait_running(&supervisor, Duration::from_secs(30)).await;
+
+    // Standalone component Gates must wire the same generation cleanup as the daemon.
+    let (generation_applied, mut generation_updates) = tokio::sync::watch::channel(None);
+    let generation_task = tokio::spawn({
+        let mut snapshots = supervisor.subscribe();
+        let mut lifecycle_shutdown = shutdown.subscribe();
+        let images = image_service.clone();
+        let mut resources =
+            open_compute_service::runtime_generation::RuntimeGenerationResources::new(
+                services.as_ref().clone(),
+                version_pins.clone(),
+            );
+        resources.observe(&snapshots.borrow().clone());
+        async move {
+            loop {
+                let snapshot = snapshots.borrow_and_update().clone();
+                if resources.observe(&snapshot).resources_cleared {
+                    images.clear_sessions().unwrap();
+                }
+                generation_applied.send_replace(
+                    snapshot
+                        .startup_id
+                        .filter(|_| snapshot.state == SupervisorState::Running),
+                );
+                tokio::select! {
+                    changed = snapshots.changed() => { if changed.is_err() { break; } }
+                    changed = lifecycle_shutdown.changed() => {
+                        if changed.is_err() || *lifecycle_shutdown.borrow() { break; }
+                    }
+                }
+            }
+        }
+    });
 
     let account = storage.identity().instance_id;
     let repo = WorkerRepository::new(storage.db());
@@ -201,12 +241,7 @@ pub(super) async fn run() {
     let first = dispatch(&transport, &repo, account, target.id, &a, "/auto").await;
     assert_eq!(first.0, 200, "first automatic cache response: {first:?}");
     assert_eq!(first.1, "A:1");
-    assert_eq!(
-        first.2.as_deref(),
-        Some("MISS"),
-        "binding generation claim: {:?}",
-        binding_auth.claimed_generation_for_test()
-    );
+    assert_eq!(first.2.as_deref(), Some("MISS"));
     assert!(first.3.is_none(), "Cache-Tag must not reach the client");
     wait_cache_entries(
         &cache_manager,
@@ -566,7 +601,6 @@ pub(super) async fn run() {
         account,
         target.id,
         &a,
-        &binding_auth.claimed_generation_for_test().unwrap(),
         &base64::engine::general_purpose::STANDARD
             .decode(&pixel)
             .unwrap(),
@@ -575,18 +609,16 @@ pub(super) async fn run() {
     assert_eq!(image_service.capacity().unwrap().active_sessions, 1);
 
     let old_pid = supervisor.snapshot().pid.unwrap();
-    let old_source_fingerprint = source_auth.active_fingerprint().unwrap();
-    let old_binding_fingerprint = binding_auth.active_fingerprint().unwrap();
     supervisor.force_restart_for_test();
     wait_pid_change(&supervisor, old_pid, Duration::from_secs(30)).await;
-    assert_ne!(
-        source_auth.active_fingerprint().as_deref(),
-        Some(old_source_fingerprint.as_str())
-    );
-    assert_ne!(
-        binding_auth.active_fingerprint().as_deref(),
-        Some(old_binding_fingerprint.as_str())
-    );
+    let restarted_generation = supervisor.snapshot().startup_id;
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        generation_updates.wait_for(|applied| *applied == restarted_generation),
+    )
+    .await
+    .unwrap()
+    .unwrap();
     let after_restart = dispatch(&transport, &repo, account, target.id, &a, "/auto").await;
     assert_eq!(
         (after_restart.1.as_str(), after_restart.2.as_deref()),
@@ -643,4 +675,5 @@ pub(super) async fn run() {
     let _ = shutdown.send(true);
     source_task.await.unwrap().unwrap();
     binding_task.await.unwrap().unwrap();
+    generation_task.await.unwrap();
 }

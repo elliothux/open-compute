@@ -309,15 +309,6 @@ pub(crate) fn registration(
     service.registration(&lease).unwrap()
 }
 
-pub(crate) fn generation() -> (GenerationAuthRegistry, GenerationCredential) {
-    let auth = GenerationAuthRegistry::new();
-    auth.activate_for_test(open_compute_core::SecretString::new(
-        "container-unit-generation",
-    ));
-    let credential = auth.credential().unwrap();
-    (auth, credential)
-}
-
 pub(crate) struct Fixture {
     pub(crate) _artifacts: RuntimeFeatureFixture,
     pub(crate) _socket: tempfile::TempDir,

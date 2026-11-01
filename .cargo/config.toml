@@ -1,2 +1,5 @@
 [env]
 TESSERACT_RS_CACHE_DIR = { value = "share/xberg-tesseract-cache", relative = true, force = true }
+# SQLite's default memory statistics take a process-wide mutex on every
+# allocation; parallel connections parsing the control schema serialize on it.
+LIBSQLITE3_FLAGS = "-DSQLITE_DEFAULT_MEMSTATUS=0"

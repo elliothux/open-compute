@@ -6,7 +6,7 @@ const { resolveSnapshot, snapshotWorkerCode, pythonPreparationCode } =
   await importRuntime("loader/shared.ts", {
     "./snapshot.js": moduleUrl("export function assertSnapshot() {}"),
     "./python-snapshot.js": moduleUrl(
-      "export function resolvePythonSnapshot(env, snapshot, scope, token) { return env.snapshotRead(snapshot, scope, token); }",
+      "export function resolvePythonSnapshot(env, snapshot, scope) { return env.snapshotRead(snapshot, scope); }",
     ),
   });
 
@@ -20,7 +20,6 @@ test("dynamic Worker validation delegates experimental flags to workerd", async 
         limits: { cpuMs: 30_000, subRequests: 1_000 },
       },
       "runtime",
-      "generation",
     ),
     {
       compatibilityDate: "2026-09-08",
@@ -54,18 +53,17 @@ test("runtime snapshot rejects a route generation changed during source resoluti
     routeGeneration: 1,
   };
   await assert.rejects(
-    resolveSnapshot(env, envelope, "runtime", "generation"),
+    resolveSnapshot(env, envelope, "runtime"),
     /VERSION_INVARIANT_VIOLATION/,
   );
   generation = 1;
   assert.equal(
-    (await resolveSnapshot(env, envelope, "runtime", "generation"))
-      .routeGeneration,
+    (await resolveSnapshot(env, envelope, "runtime")).routeGeneration,
     1,
   );
   assert.equal(
     requests[0].headers["x-open-compute-startup-generation"],
-    "generation",
+    undefined,
   );
   assert.equal(JSON.parse(requests[0].body).startupGeneration, undefined);
 });
@@ -82,7 +80,6 @@ test("deployment startup rejects raw Python before any runtime preparation or do
           limits: { cpuMs: 30_000, subRequests: 1_000 },
         },
         "runtime",
-        "generation",
       ),
     /PYTHON_PREPARED_ARTIFACT_MISSING/,
   );
@@ -103,10 +100,9 @@ test("Python artifact is read only during cold assembly, never metadata resoluti
   const bytes = new Uint8Array(16);
   const env = {
     RUNTIME_SOURCE: { fetch: async () => Response.json(snapshot) },
-    snapshotRead(value, scope, token) {
+    snapshotRead(value, scope) {
       assert.deepEqual(value, snapshot);
       assert.equal(scope, "runtime");
-      assert.equal(token, "generation");
       reads += 1;
       return bytes;
     },
@@ -117,13 +113,12 @@ test("Python artifact is read only during cold assembly, never metadata resoluti
         env,
         { loaderKey: snapshot.loaderKey, expected: snapshot.workerCodeSha256 },
         "runtime",
-        "generation",
       ),
       snapshot,
     );
   assert.equal(reads, 0);
   assert.equal(
-    (await snapshotWorkerCode(env, snapshot, "runtime", "generation"))
+    (await snapshotWorkerCode(env, snapshot, "runtime"))
       .openComputePythonSnapshot,
     bytes,
   );
@@ -137,13 +132,8 @@ test("Python artifact is read only during cold assembly, never metadata resoluti
       env,
       { ...snapshot, pythonPreparedSha256: "A".repeat(64) },
       "runtime",
-      "generation",
     ),
     /VERSION_INVARIANT_VIOLATION/,
-  );
-  await assert.rejects(
-    snapshotWorkerCode(env, snapshot, "runtime", null),
-    /BINDING_PROTOCOL_ERROR/,
   );
   assert.equal(reads, 1);
   const { pythonPreparedSha256, ...raw } = snapshot;

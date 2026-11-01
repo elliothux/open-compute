@@ -1,17 +1,14 @@
 use super::*;
-use open_compute_runtime::{
-    GenerationAuthRegistry, PythonPreparationOptions, PythonPreparationProcess,
-};
+use open_compute_runtime::{PythonPreparationOptions, PythonPreparationProcess};
 
 fn options(
     runtime: &open_compute_runtime::VerifiedRuntime,
     root: &Path,
-    token: &str,
     mode: &str,
 ) -> PythonPreparationOptions {
     fs::create_dir_all(root.join("runtime")).unwrap();
     let config = serde_json::json!({
-        "mode": mode, "token": token,
+        "mode": mode, "socket": root.join("configs/ingress.sock"),
         "argv_path": root.join("argv.json"),
         "stdin_marker_path": root.join("stdin.json"),
     });
@@ -24,7 +21,6 @@ fn options(
     PythonPreparationOptions {
         runtime: runtime.clone(),
         compiled,
-        token: SecretString::new(token),
         startup_timeout: Duration::from_secs(5),
         lease_path: root.join("runtime/prepare.lease"),
         external_services: [
@@ -33,7 +29,7 @@ fn options(
             "observability-backend",
             "do-router",
         ]
-        .map(|name| ExternalServiceAddress::loopback(name, "127.0.0.1:1".parse().unwrap()).unwrap())
+        .map(|name| ExternalServiceAddress::unix(name, Path::new("/tmp/missing.sock")).unwrap())
         .to_vec(),
         host_extension_fd: None,
     }
@@ -56,7 +52,7 @@ async fn lease_pgid(path: &Path) -> i32 {
 }
 
 pub(super) async fn run() {
-    let dir = TempDir::new().unwrap();
+    let dir = TempDir::new_in("/tmp").unwrap();
     let runtime = verified(dir.path()).await;
     fs::create_dir(dir.path().join("runtime")).unwrap();
     let parent_stdin = dir.path().join("parent-stdin.json");
@@ -76,30 +72,20 @@ pub(super) async fn run() {
         },
         Vec::new(),
         Vec::new(),
-        Vec::new(),
     );
     parent.start();
     let before = wait_state(&parent, SupervisorState::Running).await;
-    let body: serde_json::Value = serde_json::from_slice(&fs::read(parent_stdin).unwrap()).unwrap();
-    let token = body["token"].as_str().unwrap();
-    let auth = GenerationAuthRegistry::new();
-    auth.activate_for_test(SecretString::new(token));
-    assert!(auth.authorize(token, "instance-generation"));
-    let credential = auth.credential().unwrap();
-    let launch = options(&runtime, dir.path(), token, "ignore_term");
+    let launch = options(&runtime, dir.path(), "ignore_term");
     let lease = launch.lease_path.clone();
-    assert!(!format!("{launch:?}").contains(token));
+
     let child = PythonPreparationProcess::start(launch).await.unwrap();
     let pid = lease_pgid(&lease).await;
     assert_ne!(pid, before.pid.unwrap());
-    assert!(!format!("{child:?}").contains(token));
-    assert!(!format!("{child:?}").contains(&child.listen_port().to_string()));
-    probe_ready_with_raw_token(child.listen_port(), token, Duration::from_secs(1))
+
+    assert!(!format!("{child:?}").contains(&child.ingress_socket().display().to_string()));
+    probe_ready(child.ingress_socket(), Duration::from_secs(1))
         .await
         .unwrap();
-    probe_ready_with_raw_token(child.listen_port(), &"0".repeat(64), Duration::from_secs(1))
-        .await
-        .unwrap_err();
     let argv: Vec<String> =
         serde_json::from_slice(&fs::read(dir.path().join("argv.json")).unwrap()).unwrap();
     assert!(argv.contains(&"--control-fd=3".to_owned()));
@@ -110,13 +96,8 @@ pub(super) async fn run() {
             .count(),
         4
     );
-    assert!(
-        !argv
-            .iter()
-            .any(|arg| arg.starts_with("--directory-path=") || arg.contains(token))
-    );
-    assert!(auth.with_current(&credential, || ()).is_some());
-    assert!(!auth.authorize(token, "other-generation"));
+    assert!(!argv.iter().any(|arg| arg.starts_with("--directory-path=")));
+
     child
         .shutdown(Duration::from_millis(10), Duration::from_millis(50))
         .await
@@ -124,19 +105,22 @@ pub(super) async fn run() {
     assert_reaped(Some(pid)).unwrap();
     assert!(!lease.exists());
     assert_eq!(parent.snapshot().startup_id, before.startup_id);
-    probe_ready_with_raw_token(before.listen_port.unwrap(), token, Duration::from_secs(1))
-        .await
-        .unwrap();
+    probe_ready(
+        before.ingress_socket.as_ref().unwrap(),
+        Duration::from_secs(1),
+    )
+    .await
+    .unwrap();
 
     // Drop still owns cleanup; the retained dead lease is recovered on the next start.
-    let child = PythonPreparationProcess::start(options(&runtime, dir.path(), token, "ready"))
+    let child = PythonPreparationProcess::start(options(&runtime, dir.path(), "ready"))
         .await
         .unwrap();
     let dropped_pid = lease_pgid(&lease).await;
     drop(child);
     wait_reaped(dropped_pid, Duration::from_secs(3)).unwrap();
     assert!(lease.exists());
-    let child = PythonPreparationProcess::start(options(&runtime, dir.path(), token, "ready"))
+    let child = PythonPreparationProcess::start(options(&runtime, dir.path(), "ready"))
         .await
         .unwrap();
     assert_ne!(lease_pgid(&lease).await, dropped_pid);
@@ -156,7 +140,7 @@ pub(super) async fn run() {
         }
     }
     let _held = ReleaseHeldSpawn;
-    let launch = options(&runtime, dir.path(), token, "ready");
+    let launch = options(&runtime, dir.path(), "ready");
     let task = tokio::spawn(PythonPreparationProcess::start(launch));
     let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
     while !blocking_spawn_is_waiting() {
@@ -185,21 +169,19 @@ pub(super) async fn run() {
 }
 
 pub(super) async fn rejection_matrix() {
-    let dir = TempDir::new().unwrap();
+    let dir = TempDir::new_in("/tmp").unwrap();
     let runtime = verified(dir.path()).await;
-    let token = "a".repeat(64);
     for fault in [
         "role",
         "services",
         "duplicate",
-        "token",
         "deadline",
         "overflow",
         "path",
         "symlink",
         "corrupt",
     ] {
-        let mut launch = options(&runtime, dir.path(), &token, "ready");
+        let mut launch = options(&runtime, dir.path(), "ready");
         match fault {
             "role" => {
                 launch.compiled = CompiledConfig::from_bytes_for_test(
@@ -213,7 +195,6 @@ pub(super) async fn rejection_matrix() {
                 launch.external_services.pop();
             }
             "duplicate" => launch.external_services[0] = launch.external_services[1].clone(),
-            "token" => launch.token = SecretString::new("invalid"),
             "deadline" => launch.startup_timeout = Duration::ZERO,
             "overflow" => launch.startup_timeout = Duration::MAX,
             "path" => launch.lease_path = PathBuf::from("relative.lease"),
@@ -225,8 +206,7 @@ pub(super) async fn rejection_matrix() {
             "corrupt" => fs::write(launch.compiled.path(), b"changed").unwrap(),
             _ => unreachable!(),
         }
-        let error = PythonPreparationProcess::start(launch).await.unwrap_err();
-        assert!(!format!("{error:?}").contains(&token));
+        PythonPreparationProcess::start(launch).await.unwrap_err();
         assert!(!dir.path().join("runtime/prepare.lease").exists());
         assert!(
             !dir.path().join("stdin.json").exists(),
@@ -234,7 +214,7 @@ pub(super) async fn rejection_matrix() {
         );
     }
     for mode in ["early_exit", "malformed_control", "timeout", "slow_probe"] {
-        let mut launch = options(&runtime, dir.path(), &token, mode);
+        let mut launch = options(&runtime, dir.path(), mode);
         launch.startup_timeout = Duration::from_millis(300);
         PythonPreparationProcess::start(launch).await.unwrap_err();
         assert!(!dir.path().join("runtime/prepare.lease").exists());
@@ -242,7 +222,7 @@ pub(super) async fn rejection_matrix() {
             assert_reaped(Some(pid)).unwrap();
         }
     }
-    let child = PythonPreparationProcess::start(options(&runtime, dir.path(), &token, "ready"))
+    let child = PythonPreparationProcess::start(options(&runtime, dir.path(), "ready"))
         .await
         .unwrap();
     let lease = dir.path().join("runtime/prepare.lease");
@@ -256,7 +236,7 @@ pub(super) async fn rejection_matrix() {
         "failed reap proof must retain recovery authority"
     );
     wait_reaped(pid, Duration::from_secs(2)).unwrap();
-    let child = PythonPreparationProcess::start(options(&runtime, dir.path(), &token, "ready"))
+    let child = PythonPreparationProcess::start(options(&runtime, dir.path(), "ready"))
         .await
         .unwrap();
     child
@@ -265,8 +245,7 @@ pub(super) async fn rejection_matrix() {
         .unwrap();
     assert!(!lease.exists());
     set_reader_fail_point();
-    let started =
-        PythonPreparationProcess::start(options(&runtime, dir.path(), &token, "ready")).await;
+    let started = PythonPreparationProcess::start(options(&runtime, dir.path(), "ready")).await;
     let child = started.unwrap();
     let reader_failure = child.shutdown(Duration::ZERO, Duration::from_secs(1)).await;
     assert!(

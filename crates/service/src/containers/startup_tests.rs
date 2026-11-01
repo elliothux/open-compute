@@ -76,7 +76,7 @@ async fn omitted_durable_object_lite_exceeding_policy_never_reserves_or_calls_pr
     };
     let authority =
         do_authority_with_resources(&fixture.service, &fixture._artifacts, image, false, policy);
-    let (auth, credential) = generation();
+
     for instance in [json!({}), json!({"instanceProfile":"lite"})] {
         let mut startup = instance;
         startup["image"] = json!(format!("app@sha256:{}", hex::encode(image)));
@@ -86,8 +86,7 @@ async fn omitted_durable_object_lite_exceeding_policy_never_reserves_or_calls_pr
                 .resolve(
                     authority.request(true, Some(startup)),
                     10,
-                    &auth,
-                    &credential
+                    "container-unit-generation"
                 )
                 .await
                 .is_err()
@@ -132,7 +131,7 @@ async fn invalid_startup_never_reserves_capacity_or_registers_engine_identity() 
     let fixture = fixture().await;
     let image = fixture.admit_image("main").await;
     let authority = do_authority(&fixture.service, &fixture._artifacts, image, false);
-    let (auth, credential) = generation();
+
     for startup in [
         json!({"image":"registry.example.test/app:latest"}),
         json!({"image":format!("app@sha256:{}","f".repeat(64))}),
@@ -157,8 +156,7 @@ async fn invalid_startup_never_reserves_capacity_or_registers_engine_identity() 
                 .resolve(
                     authority.request(true, Some(startup)),
                     10,
-                    &auth,
-                    &credential
+                    "container-unit-generation"
                 )
                 .await
                 .is_err()
@@ -181,14 +179,13 @@ async fn startup_ciphertext_binds_owner_key_and_replays_frozen_options_after_ser
     let authority = do_authority(&fixture.service, &fixture._artifacts, image, true);
     let startup = json!({"image":format!("app@sha256:{}",hex::encode(override_image)),"instanceProfile":"lite","enableInternet":false,
         "entrypoint":["/app","serve"],"environmentVariables":["API_TOKEN=unit-secret-value"],"labels":[{"name":"app.mode","value":"unit"}]});
-    let (auth, credential) = generation();
+
     let first = fixture
         .service
         .resolve(
             authority.request(true, Some(startup.clone())),
             10,
-            &auth,
-            &credential,
+            "container-unit-generation",
         )
         .await
         .unwrap()
@@ -238,7 +235,11 @@ async fn startup_ciphertext_binds_owner_key_and_replays_frozen_options_after_ser
     );
     let restarted = fixture.restart_service();
     let replay = restarted
-        .resolve(authority.request(true, None), 11, &auth, &credential)
+        .resolve(
+            authority.request(true, None),
+            11,
+            "container-unit-generation",
+        )
         .await
         .unwrap()
         .lease
@@ -273,8 +274,7 @@ async fn startup_ciphertext_binds_owner_key_and_replays_frozen_options_after_ser
                 .resolve(
                     authority.request(true, Some(changed)),
                     12,
-                    &auth,
-                    &credential
+                    "container-unit-generation"
                 )
                 .await
                 .is_err()
@@ -330,12 +330,16 @@ async fn corrupt_persisted_startup_rejects_service_recovery_without_releasing_ca
         .lease(fixture.service.instance_id(), lease.identity)
         .unwrap();
     let restarted = fixture.restart_service();
-    let (auth, credential) = generation();
+
     for service in [fixture.service.as_ref(), &restarted] {
         assert!(service.start_options(&persisted).is_err());
         assert!(
             service
-                .resolve(authority.request(true, None), 11, &auth, &credential)
+                .resolve(
+                    authority.request(true, None),
+                    11,
+                    "container-unit-generation"
+                )
                 .await
                 .is_err()
         );
@@ -365,7 +369,7 @@ async fn default_scheduling_uses_configuration_and_rejects_explicit_image_and_re
         .unwrap();
     assert_eq!(default.image_sha256, image);
     assert_eq!(default.resources, fixture.service.provider.resources());
-    let (auth, credential) = generation();
+
     for startup in [
         json!({"image":format!("app@sha256:{}",hex::encode(image))}),
         json!({"instanceProfile":"lite"}),
@@ -377,8 +381,7 @@ async fn default_scheduling_uses_configuration_and_rejects_explicit_image_and_re
                 .resolve(
                     authority.request(true, Some(startup)),
                     10,
-                    &auth,
-                    &credential
+                    "container-unit-generation"
                 )
                 .await
                 .is_err()

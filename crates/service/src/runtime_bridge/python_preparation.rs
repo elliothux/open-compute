@@ -4,9 +4,9 @@ use super::*;
 use crate::host_extension_broker::HostExtensionBroker;
 use http_body_util::BodyExt as _;
 use open_compute_artifacts::ArtifactStore;
-use open_compute_core::{DurableObjectsConfig, RuntimeConfig, SecretBytes, SecretString};
+use open_compute_core::{DurableObjectsConfig, RuntimeConfig, SecretBytes};
 use open_compute_runtime::{
-    CompileRequest, ConfigRole, ExternalServiceAddress, GenerationCredential, PlatformReleaseMeta,
+    CompileRequest, ConfigRole, ExternalServiceAddress, PlatformReleaseMeta,
     PythonPreparationOptions, PythonPreparationProcess, RuntimePackage, compile_static_config,
 };
 use open_compute_storage::PlatformStorage;
@@ -28,7 +28,7 @@ pub(crate) struct PythonPreparation {
     pub(crate) package: RuntimePackage,
     pub(crate) runtime_config: RuntimeConfig,
     pub(crate) durable_objects: DurableObjectsConfig,
-    pub(crate) services: [(GenerationAuthRegistry, ExternalServiceAddress); 3],
+    pub(crate) services: [ExternalServiceAddress; 3],
     pub(crate) broker: Arc<HostExtensionBroker>,
     pub(crate) serial: tokio::sync::Mutex<()>,
 }
@@ -79,15 +79,6 @@ impl PythonPreparation {
         let deadline = Instant::now() + PREPARATION_TIMEOUT;
         let endpoint = transport.endpoint()?;
         let generation = endpoint.startup_id.ok_or_else(runtime_unavailable)?;
-        let credentials = self
-            .services
-            .each_ref()
-            .map(|(auth, _)| auth.credential().ok_or_else(runtime_unavailable));
-        let [source, binding, observability] = credentials;
-        let credentials = [source?, binding?, observability?];
-        if credentials[0].expose() != endpoint.credential.expose() {
-            return Err(runtime_unavailable());
-        }
         let key = loader_key(
             candidate.instance_id,
             candidate.worker_id,
@@ -114,18 +105,13 @@ impl PythonPreparation {
             )
             .await
             .map_err(|_| runtime_unavailable())??;
-            return self.with_generation(&credentials, &transport, generation, || {
+            return self.with_generation(&transport, generation, || {
                 ensure_not_cancelled(&mut cancelled)
             });
         }
         let runtime_dir = self.storage.data_dir().runtime_dir();
-        let mut redactor = open_compute_core::Redactor::new();
-        let tokens = credentials
-            .each_ref()
-            .map(|credential| SecretString::new(credential.expose()));
-        for token in &tokens {
-            redactor.register_secret_string(token);
-        }
+        let redactor = open_compute_core::Redactor::new();
+        let ingress_socket = endpoint.socket_path.with_file_name("prepare.sock");
         let runtime = self
             .package
             .verify(
@@ -146,16 +132,14 @@ impl PythonPreparation {
             platform: &PlatformReleaseMeta {
                 version: env!("CARGO_PKG_VERSION").to_owned(),
             },
-            token: &tokens[0],
-            binding_token: &tokens[1],
-            observability_token: &tokens[2],
+            ingress_socket: &ingress_socket,
             durable_objects: self.durable_objects.clone(),
             container_provider: None,
             deadline: remaining(deadline)?,
             redactor: &redactor,
         })
         .await?;
-        self.with_generation(&credentials, &transport, generation, || {
+        self.with_generation(&transport, generation, || {
             ensure_not_cancelled(&mut cancelled)
         })?;
         let (server, child) = StdUnixStream::pair().map_err(|_| runtime_unavailable())?;
@@ -166,19 +150,14 @@ impl PythonPreparation {
         let broker = self.broker.clone();
         let mut brokers = JoinSet::new();
         brokers.spawn(async move { broker.serve_generation(server).await });
-        let mut services = self
-            .services
-            .each_ref()
-            .map(|(_, service)| service.clone())
-            .to_vec();
-        services.push(ExternalServiceAddress::loopback(
+        let mut services = self.services.to_vec();
+        services.push(ExternalServiceAddress::unix(
             "do-router",
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), endpoint.port),
+            &endpoint.socket_path,
         )?);
         let process = PythonPreparationProcess::start(PythonPreparationOptions {
             runtime,
             compiled,
-            token: tokens[0].clone(),
             startup_timeout: remaining(deadline)?.min(Duration::from_millis(
                 self.runtime_config.startup_timeout_ms,
             )),
@@ -187,14 +166,9 @@ impl PythonPreparation {
             host_extension_fd: Some(child.into()),
         })
         .await?;
-        let response = Self::request_snapshot(
-            &transport,
-            process.listen_port(),
-            &candidate,
-            &endpoint.credential,
-            deadline,
-        )
-        .await;
+        let response =
+            Self::request_snapshot(&transport, process.ingress_socket(), &candidate, deadline)
+                .await;
         // Always reap before either returning the request error or committing a snapshot.
         process
             .shutdown(
@@ -216,7 +190,7 @@ impl PythonPreparation {
             &snapshot,
             open_compute_core::wall_time_ms(),
             |publish| {
-                self.with_generation(&credentials, &transport, generation, || {
+                self.with_generation(&transport, generation, || {
                     ensure_not_cancelled(&mut cancelled)?;
                     remaining(deadline)?;
                     publish()
@@ -229,43 +203,25 @@ impl PythonPreparation {
 
     fn with_generation<T>(
         &self,
-        credentials: &[GenerationCredential; 3],
         transport: &WorkerdTransport,
         generation: open_compute_core::StartupId,
         operation: impl FnOnce() -> Result<T, PlatformError>,
     ) -> Result<T, PlatformError> {
-        self.services[0]
-            .0
-            .with_current(&credentials[0], || {
-                self.services[1]
-                    .0
-                    .with_current(&credentials[1], || {
-                        self.services[2]
-                            .0
-                            .with_current(&credentials[2], || {
-                                if transport.current_generation() != Some(generation) {
-                                    return Err(runtime_unavailable());
-                                }
-                                operation()
-                            })
-                            .ok_or_else(runtime_unavailable)?
-                    })
-                    .ok_or_else(runtime_unavailable)?
-            })
-            .ok_or_else(runtime_unavailable)?
+        if transport.current_generation() != Some(generation) {
+            return Err(runtime_unavailable());
+        }
+        operation()
     }
 
     async fn request_snapshot(
         transport: &WorkerdTransport,
-        port: u16,
+        socket: &Path,
         candidate: &ValidationCandidate,
-        credential: &GenerationCredential,
         deadline: Instant,
     ) -> Result<SecretBytes, PlatformError> {
         let request = Request::builder()
             .method(Method::POST)
-            .uri(format!("http://127.0.0.1:{port}/internal/prepare-python"))
-            .header(TOKEN_HEADER, credential.expose())
+            .uri("http://runtime/internal/prepare-python")
             .header(
                 "x-open-compute-instance-id",
                 candidate.instance_id.to_string(),
@@ -287,8 +243,7 @@ impl PythonPreparation {
             .map_err(|_| runtime_unavailable())?;
         tokio::time::timeout(remaining(deadline)?, async {
             let response = transport
-                .body_client
-                .request(request)
+                .request(socket, request)
                 .await
                 .map_err(|_| runtime_unavailable())?;
             collect_snapshot(response.map(Body::new)).await

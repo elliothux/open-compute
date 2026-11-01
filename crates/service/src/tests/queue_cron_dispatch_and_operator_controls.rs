@@ -45,7 +45,8 @@ struct RuntimeFixture {
     clock: Arc<open_compute_core::DeterministicSchedulerClock>,
     scheduler: Arc<SchedulerService>,
     custom_event_task: tokio::task::JoinHandle<()>,
-    custom_event_port: u16,
+    _custom_event_listener_dir: TempDir,
+    custom_event_port: PathBuf,
 }
 
 #[tokio::test]
@@ -209,10 +210,11 @@ async fn establish_initial_products(scenario: &Scenario<'_, '_>) -> RuntimeFixtu
             "noRetry": false
         }))),
     };
-    let custom_event_listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
-        .await
-        .unwrap();
-    let custom_event_port = custom_event_listener.local_addr().unwrap().port();
+    let custom_event_listener_dir = tempfile::tempdir_in("/tmp").unwrap();
+    let custom_event_listener_path = custom_event_listener_dir.path().join("runtime.sock");
+    let custom_event_listener =
+        tokio::net::UnixListener::bind(&custom_event_listener_path).unwrap();
+    let custom_event_port = custom_event_listener_path.clone();
     let server_responses = responses.clone();
     let custom_event_task = tokio::spawn(async move {
         axum::serve(
@@ -226,9 +228,8 @@ async fn establish_initial_products(scenario: &Scenario<'_, '_>) -> RuntimeFixtu
         .await
         .unwrap();
     });
-    let auth = GenerationAuthRegistry::new();
-    auth.activate_for_test(SecretString::new("11".repeat(32)));
-    let transport = WorkerdTransport::for_test_endpoint(auth, custom_event_port);
+
+    let transport = WorkerdTransport::for_test_endpoint(&custom_event_port);
     let clock = Arc::new(open_compute_core::DeterministicSchedulerClock::new(300_000));
     let metrics =
         Arc::new(MetricsRegistry::new(&MetricsConfig::default(), "test", "test").unwrap());
@@ -326,6 +327,7 @@ async fn establish_initial_products(scenario: &Scenario<'_, '_>) -> RuntimeFixtu
         clock,
         scheduler,
         custom_event_task,
+        _custom_event_listener_dir: custom_event_listener_dir,
         custom_event_port,
     }
 }
@@ -615,8 +617,7 @@ async fn exercise_dispatch_timeouts(scenario: &Scenario<'_, '_>, runtime: &Runti
         )
         .unwrap();
     runtime.clock.set_wall_time_ms(now);
-    let auth = GenerationAuthRegistry::new();
-    auth.activate_for_test(SecretString::new("11".repeat(32)));
+
     let config = SchedulerConfig {
         claim_lease_ms: 50,
         ..Default::default()
@@ -624,7 +625,7 @@ async fn exercise_dispatch_timeouts(scenario: &Scenario<'_, '_>, runtime: &Runti
     let scheduler = Arc::new(SchedulerService::new(
         Arc::clone(store),
         Arc::clone(scenario.storage),
-        WorkerdTransport::for_test_endpoint(auth, runtime.custom_event_port),
+        WorkerdTransport::for_test_endpoint(&runtime.custom_event_port),
         config,
         open_compute_core::WorkflowsConfig::default(),
         runtime.clock.clone(),

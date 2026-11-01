@@ -10,7 +10,6 @@ use open_compute_core::{
     BindingId, ErrorCode, PlatformError, SchedulerClock as _, VersionId, WorkflowFence,
     WorkflowInstanceId, WorkflowOperationId, WorkflowsConfig,
 };
-use open_compute_runtime::GenerationAuthRegistry;
 use open_compute_storage::PlatformStorage;
 use open_compute_storage::scheduler::{
     SchedulerStore, WorkflowStepAttempt, WorkflowStepGrant, WorkflowStepOutcome,
@@ -62,8 +61,8 @@ impl WorkflowBindingService {
         self
     }
 
-    /// Handle an already authenticated request, rechecking generation after reading its bounded body.
-    pub async fn handle(&self, request: Request, auth: GenerationAuthRegistry) -> Response {
+    /// Handle a bounded request from the private Unix listener; Workflow run tokens fence stale callbacks.
+    pub async fn handle(&self, request: Request) -> Response {
         let Ok(permit) = self.concurrency.clone().try_acquire_owned() else {
             return response_error(ErrorCode::WorkflowRuntimeUnavailable);
         };
@@ -84,19 +83,16 @@ impl WorkflowBindingService {
         let service = self.clone();
         let task = tokio::task::spawn_blocking(move || {
             let _permit = permit;
-            let token = header(&parts.headers, "x-open-compute-binding-token")?;
-            let generation = header(&parts.headers, "x-open-compute-startup-generation")?;
             let body: Value = serde_json::from_slice(&bytes)
                 .map_err(|_| failure(ErrorCode::WorkflowSerializationUnsupported))?;
-            auth.with_authorized(token, generation, || {
+            {
                 service.execute(
                     parts.uri.path(),
                     &parts.headers,
                     body,
                     open_compute_core::SystemSchedulerClock.wall_time_ms(),
                 )
-            })
-            .unwrap_or_else(|| Err(failure(ErrorCode::WorkflowRunStale)))
+            }
         });
         match tokio::time::timeout(TIMEOUT, task).await {
             Ok(Ok(Ok(value))) => axum::Json(value).into_response(),

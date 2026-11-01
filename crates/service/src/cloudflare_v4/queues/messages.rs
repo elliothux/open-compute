@@ -237,7 +237,6 @@ mod tests {
     use open_compute_core::{
         DeterministicSchedulerClock, QueueId, SchedulerConfig, SecretString, WorkflowsConfig,
     };
-    use open_compute_runtime::GenerationAuthRegistry;
     use open_compute_storage::queues::{QueueConfig, QueueRepository};
     use open_compute_storage::scheduler::{QueueProjection, SchedulerStore};
     use std::sync::{Arc, Mutex};
@@ -300,10 +299,7 @@ mod tests {
         let scheduler = Arc::new(crate::SchedulerService::new(
             scheduler_store.clone(),
             storage.clone(),
-            crate::runtime_bridge::WorkerdTransport::new(
-                GenerationAuthRegistry::new(),
-                Arc::new(Mutex::new(None)),
-            ),
+            crate::runtime_bridge::WorkerdTransport::new(Arc::new(Mutex::new(None))),
             SchedulerConfig::default(),
             WorkflowsConfig::default(),
             Arc::new(DeterministicSchedulerClock::new(10)),

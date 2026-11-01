@@ -1,9 +1,8 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
 import type { BindingEnv, ResourceBindingProps } from "../bindings/protocol.js";
-import { bindingError, currentStartupGeneration } from "../loader/shared.js";
+import { bindingError } from "../loader/shared.js";
 import { nativeKvFetch } from "./native-adapter.js";
 
-const BINDING_TOKEN_HEADER = "x-open-compute-binding-token";
 const BINDING_FRAME_CONTENT_TYPE = "application/vnd.open-compute.kv.v1+frame";
 const MAX_BINDING_KEY_BYTES = 512;
 const MAX_KV_VALUE_BYTES = 25 * 1024 * 1024;
@@ -585,8 +584,7 @@ export class KVNamespace extends WorkerEntrypoint<
         method: "POST",
         headers: {
           "content-type": BINDING_FRAME_CONTENT_TYPE,
-          [BINDING_TOKEN_HEADER]: this.env.BINDING_BACKEND_TOKEN,
-          "x-open-compute-startup-generation": currentStartupGeneration(),
+
           "x-open-compute-version-id": props.versionId,
           "x-open-compute-descriptor-sha256": props.descriptorSha256,
           "x-open-compute-request-id": crypto.randomUUID(),

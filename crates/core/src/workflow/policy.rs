@@ -245,7 +245,7 @@ impl WorkflowRetention {
     pub fn validate(&self) -> Result<(), PlatformError> {
         if [self.success_retention_ms, self.error_retention_ms]
             .into_iter()
-            .any(|duration| !(3_600_000..=WORKFLOW_MAX_DURATION_MS).contains(&duration))
+            .any(|duration| duration > WORKFLOW_MAX_DURATION_MS)
         {
             return Err(error(ErrorCode::WorkflowDurationInvalid));
         }

@@ -1,6 +1,11 @@
 use super::*;
 use axum::extract::ws::WebSocketUpgrade;
+use hyper_util::{
+    client::legacy::{Client, connect::HttpConnector},
+    rt::TokioExecutor,
+};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
 
 fn upgrade_request(uri: String) -> Request {
     Request::builder()
@@ -61,8 +66,10 @@ fn websocket_handshake_rejects_invalid_method_key_and_body() {
 
 #[tokio::test]
 async fn public_websocket_tunnels_frames_close_and_rejected_handshakes() {
-    let backend = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let backend_port = backend.local_addr().unwrap().port();
+    let backend_dir = tempfile::tempdir_in("/tmp").unwrap();
+    let backend_path = backend_dir.path().join("runtime.sock");
+    let backend = tokio::net::UnixListener::bind(&backend_path).unwrap();
+    let backend_port = backend_path.clone();
     let backend_task = tokio::spawn(async move {
         axum::serve(
             backend,
@@ -90,9 +97,10 @@ async fn public_websocket_tunnels_frames_close_and_rejected_handshakes() {
         .await
         .unwrap();
     });
-    let auth = GenerationAuthRegistry::new();
-    auth.activate_for_test(open_compute_core::SecretString::new("aa".repeat(32)));
-    let transport = WorkerdTransport::for_test_endpoint(auth, backend_port);
+
+    let pins = VersionPins::new();
+    let transport =
+        WorkerdTransport::for_test_endpoint(&backend_port).with_version_pins(pins.clone());
     let target = DispatchTarget {
         instance_id: InstanceId::generate(),
         worker_id: WorkerId::generate(),
@@ -102,6 +110,7 @@ async fn public_websocket_tunnels_frames_close_and_rejected_handshakes() {
         route_generation: 1,
         request_id: RequestId::generate(),
     };
+    let version = target.version_id;
     let public = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let public_port = public.local_addr().unwrap().port();
     let public_task = tokio::spawn(async move {
@@ -141,6 +150,10 @@ async fn public_websocket_tunnels_frames_close_and_rejected_handshakes() {
         "websocket"
     );
     let mut socket = TokioIo::new(hyper::upgrade::on(&mut response).await.unwrap());
+    assert!(
+        pins.count(version) > 0,
+        "the live tunnel must retain its version"
+    );
     for opcode in [0x81, 0x82] {
         socket
             .write_all(&[opcode, 0x82, 1, 2, 3, 4, b'h' ^ 1, b'i' ^ 2])
@@ -159,6 +172,11 @@ async fn public_websocket_tunnels_frames_close_and_rejected_handshakes() {
         .await
         .unwrap()
         .unwrap();
+    drop(socket);
+    pins.fence_and_wait(version, Duration::from_secs(2))
+        .await
+        .unwrap();
+    assert_eq!(pins.count(version), 0);
     backend_task.abort();
     public_task.abort();
     let _ = backend_task.await;

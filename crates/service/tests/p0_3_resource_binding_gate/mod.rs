@@ -6,9 +6,6 @@
 
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode, header};
-use hyper_util::client::legacy::Client;
-use hyper_util::client::legacy::connect::HttpConnector;
-use hyper_util::rt::TokioExecutor;
 use open_compute_artifacts::{
     ArtifactStore, MapEnv, MockS3, ObjectBackend, resolve_s3_credentials_with,
 };
@@ -19,9 +16,9 @@ use open_compute_core::{
     PlatformError, Redactor, RequestId, ResourceAvailability, ResourceId, ResourceState,
 };
 use open_compute_runtime::{
-    DirectoryServicePath, ExternalServiceAddress, GenerationAuthRegistry, OsJitter,
-    PlatformReleaseMeta, StaticConfigCompiler, SupervisorState, WorkerdSupervisor,
-    WorkerdSupervisorOptions, verify_runtime_binary,
+    DirectoryServicePath, ExternalServiceAddress, OsJitter, PlatformReleaseMeta,
+    StaticConfigCompiler, SupervisorState, WorkerdSupervisor, WorkerdSupervisorOptions,
+    verify_runtime_binary,
 };
 use open_compute_service::runtime_bridge::{
     DispatchTarget, LoaderOutcome, WorkerdTransport, bind_runtime_source, serve_runtime_source,
@@ -382,9 +379,7 @@ async fn dispatch(
 }
 
 async fn backend_call(
-    address: std::net::SocketAddr,
-    token: &str,
-    generation: &str,
+    address: &Path,
     binding_id: open_compute_core::BindingId,
     version_id: open_compute_core::VersionId,
     descriptor_sha256: &str,
@@ -395,11 +390,9 @@ async fn backend_call(
     let mut request = Request::builder()
         .method("POST")
         .uri(format!(
-            "http://{address}/internal/bindings/v1/kv/{binding_id}/{operation}"
+            "http://runtime/internal/bindings/v1/kv/{binding_id}/{operation}"
         ))
         .header("content-type", "application/vnd.open-compute.kv.v1+frame")
-        .header("x-open-compute-binding-token", token)
-        .header("x-open-compute-startup-generation", generation)
         .header("x-open-compute-version-id", version_id.to_string())
         .header("x-open-compute-descriptor-sha256", descriptor_sha256)
         .header(
@@ -409,10 +402,16 @@ async fn backend_call(
     if let Some(length) = content_length {
         request = request.header(header::CONTENT_LENGTH, length);
     }
-    let client: Client<HttpConnector, Body> =
-        Client::builder(TokioExecutor::new()).build(HttpConnector::new());
-    client
-        .request(request.body(Body::from(body.to_vec())).unwrap())
+    let stream = tokio::net::UnixStream::connect(address).await.unwrap();
+    let (mut sender, connection) =
+        hyper::client::conn::http1::handshake(hyper_util::rt::TokioIo::new(stream))
+            .await
+            .unwrap();
+    tokio::spawn(async move {
+        let _ = connection.await;
+    });
+    sender
+        .send_request(request.body(Body::from(body.to_vec())).unwrap())
         .await
         .unwrap()
 }

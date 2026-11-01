@@ -1,9 +1,5 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
-import {
-  BINDING_TOKEN_HEADER,
-  bindingError,
-  currentStartupGeneration,
-} from "../loader/shared.js";
+import { bindingError } from "../loader/shared.js";
 import { nativeQueueFailure, nativeQueueFetch } from "./native-adapter.js";
 import type { QueueBindingProps, QueueTransportEnv } from "./protocol.js";
 
@@ -53,8 +49,7 @@ export class QueueTransport extends WorkerEntrypoint<
             body === undefined
               ? "application/json"
               : "application/vnd.open-compute.queue.v1+frame",
-          [BINDING_TOKEN_HEADER]: this.env.BINDING_BACKEND_TOKEN,
-          "x-open-compute-startup-generation": currentStartupGeneration(),
+
           "x-open-compute-version-id": props.versionId,
           "x-open-compute-descriptor-sha256": props.descriptorSha256,
           "x-open-compute-request-id": operationId ?? crypto.randomUUID(),

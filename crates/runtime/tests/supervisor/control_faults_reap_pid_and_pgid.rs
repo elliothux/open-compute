@@ -12,7 +12,7 @@ pub(super) async fn run() {
         "bind_fail",
         "no_control",
     ] {
-        let dir = TempDir::new().unwrap();
+        let dir = TempDir::new_in("/tmp").unwrap();
         let runtime = verified(dir.path()).await;
         let data = dir.path().join("d");
         fs::create_dir(&data).unwrap();
@@ -28,7 +28,6 @@ pub(super) async fn run() {
                 jitter: Arc::new(SequenceJitter::new(vec![0])),
                 lease_path: None,
             },
-            Vec::new(),
             Vec::new(),
             Vec::new(),
         );

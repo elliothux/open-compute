@@ -103,20 +103,11 @@ pub(super) fn retain_failure(round: &Round) {
         let _ = file.seek(SeekFrom::Start(len.saturating_sub(MAX_RETAINED_STDERR)));
         let mut raw = Vec::new();
         let _ = file.take(MAX_RETAINED_STDERR).read_to_end(&mut raw);
-        let mut redacted = String::from_utf8_lossy(&raw)
+        let redacted = String::from_utf8_lossy(&raw)
             .replace("gate-secret-value", "[redacted]")
             .replace("gate-access", "[redacted]");
-        for token in &round.known_tokens {
-            redacted = redacted.replace(token, "[redacted-token]");
-        }
         assert!(!redacted.contains("gate-secret-value"));
         assert!(!redacted.contains("gate-access"));
-        assert!(
-            round
-                .known_tokens
-                .iter()
-                .all(|token| !redacted.contains(token))
-        );
         let _ = fs::write(dest.join("ocd.log"), redacted);
     }
     let control = round.data.join("control.sqlite");

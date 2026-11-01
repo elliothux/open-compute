@@ -64,8 +64,8 @@ fn coalesced_watch_transitions_and_draining_terminal() {
         config_digest: "y".into(),
         startup_id: None,
         last_suspicion: None,
-        token_fingerprint: None,
-        listen_port: Some(1),
+
+        ingress_socket: Some(PathBuf::from("/tmp/runtime.sock")),
     });
     assert_eq!(st, ComponentState::Draining);
     assert_eq!(reason, ReadinessReason::Draining);

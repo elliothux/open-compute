@@ -28,7 +28,13 @@ async fn initialized_local_doctor_reports_backend_specific_checks() {
     drop(connected);
     drop(storage);
 
-    let report = doctor_report(&loaded, DoctorMode::Basic, None).await;
+    let report = doctor_report(
+        &loaded,
+        DoctorMode::Basic,
+        crate::instance_registry::ServiceScope::User,
+        None,
+    )
+    .await;
     assert_eq!(check(&report, "local_root").status, CheckStatus::Ok);
     assert_eq!(check(&report, "local_format").status, CheckStatus::Ok);
     assert_eq!(check(&report, "local_free_space").status, CheckStatus::Ok);

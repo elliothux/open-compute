@@ -36,9 +36,6 @@ const { encodeWorkflowBase64 } = await import(workflowCodec);
 const controllerModule = moduleUrl(
   await compileRuntime("workflows/controller.ts", {
     "cloudflare:workers": workerModule,
-    "../loader/shared.js": moduleUrl(
-      'export const currentStartupGeneration = () => "current-generation";',
-    ),
   }),
 );
 const workflowErrors = moduleUrl(
@@ -87,7 +84,6 @@ function controller(t, fetch) {
   const value = new WorkflowRunController(
     {
       BINDING_BACKEND: { fetch },
-      BINDING_BACKEND_TOKEN: "private-backend-token",
     },
     identity,
     10_000,
@@ -137,7 +133,7 @@ test("compiled Workflow controller keeps grants private and fences duplicate com
   assert.equal(calls[1].body.runToken, identity.runToken);
   assert.equal(
     calls[1].headers["x-open-compute-startup-generation"],
-    "current-generation",
+    undefined,
   );
   assert.deepEqual(await result, {
     state: "complete",

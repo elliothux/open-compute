@@ -7,7 +7,6 @@ use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode, header};
 use open_compute_core::config::MetricsConfig;
 use open_compute_core::{DataConfig, InstanceId, RequestId, SecretString, SystemClock, VersionId};
-use open_compute_runtime::GenerationAuthRegistry;
 use open_compute_storage::PlatformStorage;
 use open_compute_storage::scheduler::SchedulerStore;
 use open_compute_storage::worker_repository::{
@@ -124,7 +123,7 @@ fn fixture() -> Fixture {
     .with_workflow_api(Some(WorkflowApiState::new(
         storage.clone(),
         scheduler.clone(),
-        WorkerdTransport::new(GenerationAuthRegistry::new(), Arc::new(Mutex::new(None))),
+        WorkerdTransport::new(Arc::new(Mutex::new(None))),
         Default::default(),
     )));
     let app = crate::cloudflare_v4::router(state.clone(), router()).with_state(state);

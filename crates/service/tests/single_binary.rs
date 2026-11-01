@@ -206,8 +206,11 @@ impl Process {
                 "ocd exited: {}",
                 fs::read_to_string(&self.log).unwrap()
             );
-            if let Ok(Ok(true)) =
-                tokio::time::timeout(Duration::from_secs(1), ready_request(address)).await
+            if let Ok(Ok(true)) = tokio::time::timeout(
+                Duration::from_secs(1),
+                health_request(address, "/health/ready"),
+            )
+            .await
                 && let Ok(output) = command(&self.binary).args(["instances", "--json"]).output()
                 && output.status.success()
                 && let Ok(value) = serde_json::from_slice::<serde_json::Value>(&output.stdout)
@@ -279,10 +282,13 @@ impl Drop for Process {
     }
 }
 
-async fn ready_request(address: SocketAddr) -> std::io::Result<bool> {
+async fn health_request(address: SocketAddr, path: &str) -> std::io::Result<bool> {
     let mut stream = tokio::net::TcpStream::connect(address).await?;
     stream
-        .write_all(b"GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        .write_all(
+            format!("GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+                .as_bytes(),
+        )
         .await?;
     let mut bytes = Vec::new();
     stream.take(16384).read_to_end(&mut bytes).await?;
@@ -1851,7 +1857,7 @@ async fn single_file_first_start_restart_orphan_recovery_and_corruption_failure(
         );
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
-    assert!(ready_request(address).await.unwrap());
+    assert!(health_request(address, "/health/ready").await.unwrap());
     rejected.stop().await;
     rusqlite::Connection::open(&observability_path)
         .unwrap()
@@ -1867,29 +1873,41 @@ async fn single_file_first_start_restart_orphan_recovery_and_corruption_failure(
     let mut failed_instance = Process::spawn(&binary, &data, &failed_log);
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     loop {
-        assert!(failed_instance.child.try_wait().unwrap().is_none());
-        let output = command(&binary)
-            .args(["instances", "--json"])
-            .output()
-            .unwrap();
-        if output.status.success()
-            && let Ok(value) = serde_json::from_slice::<serde_json::Value>(&output.stdout)
-            && value["instances"].as_array().is_some_and(|instances| {
-                instances.len() == 1
-                    && instances[0]["state"] == "failed"
-                    && instances[0]["error"] == "RUNTIME_UNAVAILABLE"
-            })
+        assert!(
+            failed_instance.child.try_wait().unwrap().is_none(),
+            "failed-instance daemon exited: {}",
+            fs::read_to_string(&failed_log).unwrap_or_default()
+        );
+        // Wait for the daemon to own its scope before an offline CLI lock probe can race it.
+        if let Ok(Ok(true)) = tokio::time::timeout(
+            Duration::from_secs(1),
+            health_request(address, "/health/live"),
+        )
+        .await
         {
-            break;
+            let output = command(&binary)
+                .args(["instances", "--json"])
+                .output()
+                .unwrap();
+            if output.status.success()
+                && let Ok(value) = serde_json::from_slice::<serde_json::Value>(&output.stdout)
+                && value["instances"].as_array().is_some_and(|instances| {
+                    instances.len() == 1
+                        && instances[0]["state"] == "failed"
+                        && instances[0]["error"] == "RUNTIME_UNAVAILABLE"
+                })
+            {
+                break;
+            }
         }
         assert!(
             tokio::time::Instant::now() < deadline,
             "corrupt config was not rejected: {}",
-            String::from_utf8_lossy(&output.stdout)
+            fs::read_to_string(&failed_log).unwrap_or_default()
         );
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
-    assert!(!ready_request(address).await.unwrap());
+    assert!(!health_request(address, "/health/ready").await.unwrap());
     failed_instance.stop().await;
     assert_eq!(fs::read(&asset).unwrap(), b"corrupt");
     assert_eq!(fs::read_dir(package.parent().unwrap()).unwrap().count(), 1);

@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) async fn run_round(n: u32, s3: &MockS3, lock: &RuntimeLock) {
+pub(super) async fn run_round(n: u32, s3: &MockS3, _lock: &RuntimeLock) {
     let mut round = setup_round(n, s3);
     let bin = env!("CARGO_BIN_EXE_ocd");
     let env_id = format!("OC_S3_ID_{n}");
@@ -63,38 +63,24 @@ pub(super) async fn run_round(n: u32, s3: &MockS3, lock: &RuntimeLock) {
 
     wait_path(&round.data.join("runtime/child.lease"), 10);
     let workerd_pid = leased_workerd_pid(&round.data, pid as i32);
-    let workerd_deadline = Instant::now() + Duration::from_secs(20);
-    let runtime_port = loop {
-        if let Some(port) = sole_listen_port(workerd_pid) {
-            break port;
-        }
-        assert!(Instant::now() < workerd_deadline, "workerd never listened");
-        std::thread::sleep(Duration::from_millis(50));
-    };
-    assert_ne!(
-        runtime_port, port,
-        "workerd must bind an ephemeral loopback port"
-    );
-    let token = extract_token(&round.data, lock, runtime_port).expect("token in compiled config");
-    round.known_tokens.push(token.clone());
-    assert_token_absent(
-        &token,
-        pid as i32,
-        workerd_pid,
-        &status.1,
-        &metrics.1,
-        &round.stderr,
-    );
     assert!(
-        probe_workerd(runtime_port, &token),
-        "authenticated workerd readiness must succeed"
+        listen_ports(workerd_pid).is_empty(),
+        "workerd must not expose internal TCP listeners"
     );
-
+    let socket = round
+        ._dir
+        .path()
+        .join("home/test-ocd/user/run")
+        .join(instance_id(&round.data))
+        .join("ingress.sock");
+    assert!(
+        probe_workerd(&socket),
+        "credential-free Unix readiness must succeed"
+    );
     note_tree(&mut round, pid as i32);
     if let Some(p) = public_port {
         round.tracked_ports.push(p);
     }
-    round.tracked_ports.push(runtime_port);
     assert_round_preflight(s3, &round.prefix);
 
     cache_survives_s3_outage(s3, &round.data).await;
@@ -175,11 +161,8 @@ pub(super) async fn run_round(n: u32, s3: &MockS3, lock: &RuntimeLock) {
         .find(|&p| p != platform_pid)
         .expect("restarted workerd");
     assert_ne!(new_wpid, wpid, "restart must use a new PID");
-    let new_port = sole_listen_port(new_wpid).expect("new port");
-    assert_ne!(new_port, runtime_port);
-    let new_token = extract_token(&round.data, lock, new_port).expect("new token");
-    round.known_tokens.push(new_token.clone());
-    assert_ne!(new_token, token, "restart must mint a new internal token");
+    assert!(listen_ports(new_wpid).is_empty());
+    assert!(probe_workerd(&socket));
 
     rapid_crash_budget(&mut round, bin, &env_id, &env_secret);
     term_ignore_kill_deadline(&mut round, bin, &env_id, &env_secret);

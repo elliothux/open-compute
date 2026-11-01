@@ -11,6 +11,15 @@ function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+// Cloudflare's D1 service reports a malformed statement list with this exact message.
+class D1MalformedInput extends TypeError {
+  constructor(queries: unknown[]) {
+    super(
+      `Malformed input: ${JSON.stringify(queries)}, should be {sql: string, params?: any[]} or an array of these query objects`,
+    );
+  }
+}
+
 function statements(value: unknown): D1StatementDto[] {
   if (Array.isArray(value) && value.length === 0)
     throw new TypeError("D1_NO_SQL_STATEMENTS");
@@ -22,7 +31,7 @@ function statements(value: unknown): D1StatementDto[] {
       typeof entry.sql !== "string" ||
       (entry.params !== undefined && !Array.isArray(entry.params))
     )
-      throw new TypeError("D1_TYPE_ERROR");
+      throw new D1MalformedInput(value);
     const params: D1Value[] = [];
     if (Array.isArray(entry.params))
       for (const param of entry.params as unknown[]) {
@@ -63,6 +72,7 @@ export function nativeD1Error(error: unknown): string {
       : error instanceof Error
         ? Object.getOwnPropertyDescriptor(error, "stableCode")?.value
         : undefined;
+  if (error instanceof D1MalformedInput) return error.message;
   if (code === "D1_NO_SQL_STATEMENTS") return "No SQL statements detected.";
   return typeof code === "string" &&
     /^(?:D1|BINDING)_[A-Z0-9_]{1,127}$/.test(code)

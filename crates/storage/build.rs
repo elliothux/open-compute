@@ -80,6 +80,17 @@ fn main() -> Result<(), Box<dyn Error>> {
         ),
     ];
     let mut generated = String::new();
+    // Refinery's macro reads SQL outside rustc's tracked inputs; cached builds must include it.
+    let mut refinery_sql = Vec::new();
+    for directory in fs::read_dir(manifest_dir.join("refinery-migrations"))? {
+        for entry in fs::read_dir(directory?.path())? {
+            refinery_sql.push(entry?.path());
+        }
+    }
+    refinery_sql.sort();
+    for path in refinery_sql {
+        generated.push_str(&format!("const _: &str = include_str!({path:?});\n"));
+    }
     for (directory, file, constant) in migrations {
         let sql_path = manifest_dir.join(directory).join(format!("{file}.sql"));
         println!("cargo:rerun-if-changed={}", sql_path.display());

@@ -52,9 +52,9 @@ use open_compute_core::{
     PlatformError, ReadinessReason, Redactor, RequestId, StartupId, SystemSchedulerClock,
 };
 use open_compute_runtime::{
-    DirectoryServicePath, ExternalServiceAddress, GenerationAuthRegistry,
-    HostExtensionBrokerRegistry, OsJitter, PlatformReleaseMeta, StaticConfigCompiler,
-    SupervisorState, WorkerdSupervisor, WorkerdSupervisorOptions,
+    DirectoryServicePath, ExternalServiceAddress, HostExtensionBrokerRegistry, OsJitter,
+    PlatformReleaseMeta, StaticConfigCompiler, SupervisorState, WorkerdSupervisor,
+    WorkerdSupervisorOptions,
 };
 use open_compute_storage::PlatformStorage;
 use open_compute_storage::cache::CacheManager;

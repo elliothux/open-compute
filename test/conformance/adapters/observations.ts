@@ -77,8 +77,7 @@ export async function observe(
   requestHeaders: Readonly<Record<string, string>> = {},
 ): Promise<unknown[]> {
   const results: unknown[] = [];
-  for (let index = 0; index < fixture.observations.length; index++) {
-    const observation = fixture.observations[index]!;
+  for (const observation of fixture.observations) {
     const activationDeadline = Date.now() + 30_000;
     let activationDelayMs = 250;
     let response: Response;
@@ -97,9 +96,10 @@ export async function observe(
         },
       );
       text = await response.text();
+      // A new workers.dev route can still answer an edge 404 page after the
+      // first request succeeds; the Worker did not run, so retry is safe.
       const activating =
         target === "cloudflare" &&
-        index === 0 &&
         response.status === 404 &&
         response.headers.get("content-type")?.startsWith("text/html") === true;
       if (!activating || Date.now() >= activationDeadline) break;

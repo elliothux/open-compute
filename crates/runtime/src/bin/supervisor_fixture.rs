@@ -5,7 +5,7 @@ use std::fs;
 #[cfg(not(target_os = "linux"))]
 use std::fs::File;
 use std::io::{Read, Write};
-use std::net::TcpListener;
+use std::os::unix::net::UnixListener;
 #[cfg(not(target_os = "linux"))]
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
@@ -15,7 +15,6 @@ use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 const READY_PATH: &str = "/internal/ready";
-const TOKEN_HEADER: &str = "x-open-compute-internal-token";
 const VERSION: &str = "workerd 2026-08-26";
 
 #[derive(Debug, Deserialize, Default)]
@@ -23,7 +22,7 @@ struct FixtureConfig {
     #[serde(default = "default_mode")]
     mode: String,
     #[serde(default)]
-    token: String,
+    socket: PathBuf,
     #[serde(default)]
     argv_path: Option<PathBuf>,
     #[serde(default)]
@@ -94,14 +93,14 @@ fn main() {
             eprintln!("  File \"/session/metadata/main.py\", line 38, in fetch");
             eprintln!("RuntimeError: unregistered-tenant-secret");
             println!("tenant source and unregistered-tenant-secret");
-            eprintln!("token={}", cfg.token);
-            eprintln!("Authorization: Bearer {}", cfg.token);
-            eprintln!("x-open-compute-internal-token: {}", cfg.token);
+            eprintln!("token=tenant-secret");
+            eprintln!("Authorization: Bearer tenant-secret");
+
             eprintln!("path=/secret/token-path");
             let _ = std::io::stderr().write_all(&[0xff, 0xfe, b'\n']);
             let oversized = "A".repeat(16 * 1024);
             eprintln!("{oversized}");
-            println!("stdout secret {}", cfg.token);
+            println!("stdout secret tenant-secret");
             let _ = std::io::stdout().write_all(&[0x80, 0x81, b'\n']);
             serve_ready_then_exit(&cfg, 42);
         }
@@ -134,8 +133,8 @@ fn main() {
         "late_duplicate_control" => serve_ready_then_control(&cfg, true),
         "late_malformed_control" => serve_ready_then_control(&cfg, false),
         "slow_probe" => {
-            let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
-            let port = listener.local_addr().expect("addr").port();
+            let _listener = UnixListener::bind(&cfg.socket).expect("bind");
+            let port = 0;
             write_listen(port);
             hang();
         }
@@ -232,11 +231,11 @@ fn spawn_descendant(path: Option<&std::path::Path>) {
 }
 
 fn serve_ready_then_control(cfg: &FixtureConfig, duplicate: bool) {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
-    let port = listener.local_addr().expect("addr").port();
+    let listener = UnixListener::bind(&cfg.socket).expect("bind");
+    let port = 0;
     write_listen(port);
     listener.set_nonblocking(false).expect("blocking");
-    let token = cfg.token.clone();
+
     let mut extra_sent = false;
     loop {
         match listener.accept() {
@@ -244,9 +243,7 @@ fn serve_ready_then_control(cfg: &FixtureConfig, duplicate: bool) {
                 let mut buf = [0u8; 4096];
                 let n = stream.read(&mut buf).unwrap_or(0);
                 let req = String::from_utf8_lossy(&buf[..n]);
-                let ok = req.starts_with("GET /internal/ready ")
-                    && req.contains(&format!("{TOKEN_HEADER}: {token}"))
-                    && req.contains("\r\n\r\n");
+                let ok = req.starts_with("GET /internal/ready ") && req.contains("\r\n\r\n");
                 let resp = if ok {
                     "HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n"
                 } else {
@@ -268,20 +265,18 @@ fn serve_ready_then_control(cfg: &FixtureConfig, duplicate: bool) {
 }
 
 fn serve_ready_then_exit(cfg: &FixtureConfig, code: i32) {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
-    let port = listener.local_addr().expect("addr").port();
+    let listener = UnixListener::bind(&cfg.socket).expect("bind");
+    let port = 0;
     write_listen(port);
     listener.set_nonblocking(false).expect("blocking");
-    let token = cfg.token.clone();
+
     loop {
         match listener.accept() {
             Ok((mut stream, _)) => {
                 let mut buf = [0u8; 4096];
                 let n = stream.read(&mut buf).unwrap_or(0);
                 let req = String::from_utf8_lossy(&buf[..n]);
-                let ok = req.starts_with("GET /internal/ready ")
-                    && req.contains(&format!("{TOKEN_HEADER}: {token}"))
-                    && req.contains("\r\n\r\n");
+                let ok = req.starts_with("GET /internal/ready ") && req.contains("\r\n\r\n");
                 let resp = if ok {
                     "HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n"
                 } else {
@@ -300,11 +295,11 @@ fn serve_ready_then_exit(cfg: &FixtureConfig, code: i32) {
 /// Serves `/internal/ready` for startup, then accepts every later connection without ever
 /// responding: the port and control channel stay alive while the event loop is wedged.
 fn serve_ready_then_stall(cfg: &FixtureConfig) {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
-    let port = listener.local_addr().expect("addr").port();
+    let listener = UnixListener::bind(&cfg.socket).expect("bind");
+    let port = 0;
     write_listen(port);
     listener.set_nonblocking(false).expect("blocking");
-    let token = cfg.token.clone();
+
     let mut ready_answered = false;
     loop {
         match listener.accept() {
@@ -313,8 +308,8 @@ fn serve_ready_then_stall(cfg: &FixtureConfig) {
                 let n = stream.read(&mut buf).unwrap_or(0);
                 let req = String::from_utf8_lossy(&buf[..n]);
                 let is_ready = req.starts_with("GET /internal/ready ");
-                let authenticated = req.contains(&format!("{TOKEN_HEADER}: {token}"));
-                if is_ready && authenticated && !ready_answered {
+
+                if is_ready && !ready_answered {
                     ready_answered = true;
                     let _ =
                         stream.write_all(b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n");
@@ -331,11 +326,11 @@ fn serve_ready_then_stall(cfg: &FixtureConfig) {
 }
 
 fn serve_ready(cfg: &FixtureConfig, persist: bool) {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
-    let port = listener.local_addr().expect("addr").port();
+    let listener = UnixListener::bind(&cfg.socket).expect("bind");
+    let port = 0;
     write_listen(port);
     listener.set_nonblocking(false).expect("blocking");
-    let token = cfg.token.clone();
+
     let crash = cfg.mode == "crash_after_ready";
     loop {
         match listener.accept() {
@@ -345,7 +340,6 @@ fn serve_ready(cfg: &FixtureConfig, persist: bool) {
                 let req = String::from_utf8_lossy(&buf[..n]);
                 let ok = (req.starts_with("GET /internal/ready ")
                     || req.starts_with("GET /internal/live "))
-                    && req.contains(&format!("{TOKEN_HEADER}: {token}"))
                     && !req.to_ascii_lowercase().contains("content-type:")
                     && req.contains("\r\n\r\n");
                 let _ = READY_PATH;

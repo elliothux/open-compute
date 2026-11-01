@@ -8,7 +8,6 @@ use open_compute_core::{
     DURABLE_OBJECT_ID_BYTES, DURABLE_OBJECT_NAMESPACE_PREFIX_BYTES, DeterministicSchedulerClock,
     VersionId, durable_object_namespace_prefix,
 };
-use open_compute_runtime::GenerationAuthRegistry;
 use open_compute_storage::queues::QueueConfig;
 use open_compute_storage::scheduler::{
     AlarmProjection, ClaimedQueueBatch, ClaimedQueueMessage, QueueCompletionAction,
@@ -80,8 +79,7 @@ async fn kernel_run_claims_releases_and_shuts_down_without_polling() {
 
     let clock = Arc::new(DeterministicSchedulerClock::new(10));
     let fault_count = Arc::new(AtomicUsize::new(0));
-    let transport =
-        WorkerdTransport::new(GenerationAuthRegistry::new(), Arc::new(Mutex::new(None)));
+    let transport = WorkerdTransport::new(Arc::new(Mutex::new(None)));
     let scheduler = Arc::new(
         SchedulerService::new(
             store.clone(),
@@ -151,7 +149,7 @@ async fn kernel_run_reports_disabled_and_globally_paused_pools() {
         let scheduler = Arc::new(SchedulerService::new(
             store,
             storage,
-            WorkerdTransport::new(GenerationAuthRegistry::new(), Arc::new(Mutex::new(None))),
+            WorkerdTransport::new(Arc::new(Mutex::new(None))),
             config,
             open_compute_core::WorkflowsConfig::default(),
             Arc::new(DeterministicSchedulerClock::new(10)),
@@ -420,8 +418,7 @@ async fn queue_retention_adapter_observes_pause_metrics_and_successful_sweeps() 
     let clock = Arc::new(DeterministicSchedulerClock::new(60_001));
     let metrics =
         Arc::new(MetricsRegistry::new(&MetricsConfig::default(), "test", "workerd").unwrap());
-    let transport =
-        WorkerdTransport::new(GenerationAuthRegistry::new(), Arc::new(Mutex::new(None)));
+    let transport = WorkerdTransport::new(Arc::new(Mutex::new(None)));
     let scheduler = Arc::new(
         SchedulerService::new(
             store.clone(),

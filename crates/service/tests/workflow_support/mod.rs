@@ -8,9 +8,9 @@ use open_compute_core::clock::SystemClock;
 use open_compute_core::config::{CacheConfig, DataConfig, PlatformConfig, RuntimeConfig};
 use open_compute_core::{Redactor, RequestId, StartupId};
 use open_compute_runtime::{
-    DirectoryServicePath, ExternalServiceAddress, GenerationAuthRegistry, OsJitter,
-    PlatformReleaseMeta, StaticConfigCompiler, SupervisorState, WorkerdSupervisor,
-    WorkerdSupervisorOptions, verify_runtime_binary,
+    DirectoryServicePath, ExternalServiceAddress, OsJitter, PlatformReleaseMeta,
+    StaticConfigCompiler, SupervisorState, WorkerdSupervisor, WorkerdSupervisorOptions,
+    verify_runtime_binary,
 };
 use open_compute_service::runtime_bridge::{
     DispatchTarget, WorkerdTransport, bind_runtime_source, serve_runtime_source,
@@ -145,8 +145,8 @@ pub(crate) struct Harness {
     pub cache: Arc<ArtifactCache>,
     pub transport: WorkerdTransport,
     pub supervisor: Arc<WorkerdSupervisor>,
-    pub binding_auth: GenerationAuthRegistry,
-    pub binding_listener: Option<tokio::net::TcpListener>,
+
+    pub binding_listener: Option<open_compute_service::http::PrivateUnixListener>,
     pub shutdown: tokio::sync::watch::Sender<bool>,
     source_task: Option<tokio::task::JoinHandle<Result<(), open_compute_core::PlatformError>>>,
     // The hard-Gate binary only needs ownership to keep S3 alive; restore/process Gates reuse it.
@@ -156,6 +156,7 @@ pub(crate) struct Harness {
     )]
     pub(crate) mock: Arc<MockS3>,
     pub(crate) temp: Option<tempfile::TempDir>,
+    _sockets: tempfile::TempDir,
 }
 
 impl Harness {
@@ -240,12 +241,18 @@ request_timeout_ms = 3000
             verify_runtime_binary(&lock, &workerd, Duration::from_secs(30), &Redactor::new())
                 .await
                 .unwrap();
-        let source_auth = GenerationAuthRegistry::new();
-        let binding_auth = GenerationAuthRegistry::new();
-        let source_listener = bind_runtime_source().await.unwrap();
-        let source_addr = source_listener.local_addr().unwrap();
-        let binding_listener = bind_runtime_source().await.unwrap();
-        let binding_addr = binding_listener.local_addr().unwrap();
+
+        // Socket names must stay short even when retained database evidence has a long path.
+        let sockets = tempfile::tempdir_in("/tmp").unwrap();
+        let source_listener = bind_runtime_source(&sockets.path().join("source.sock"))
+            .await
+            .unwrap();
+        let source_addr = source_listener.path().to_owned();
+
+        let binding_listener = bind_runtime_source(&sockets.path().join("binding.sock"))
+            .await
+            .unwrap();
+        let binding_addr = binding_listener.path().to_owned();
         let (shutdown, mut receiver) = tokio::sync::watch::channel(false);
         let cache = Arc::new(
             ArtifactCache::open(
@@ -270,9 +277,9 @@ request_timeout_ms = 3000
             )
             .unwrap()
             .with_cache(cache.clone());
-            let auth = source_auth.clone();
+
             async move {
-                serve_runtime_source(source_listener, source, auth, None, async move {
+                serve_runtime_source(source_listener, source, None, async move {
                     let _ = receiver.changed().await;
                 })
                 .await
@@ -283,16 +290,15 @@ request_timeout_ms = 3000
             lock.clone(),
             root.join("packages/runtime"),
             storage.data_dir().runtime_dir(),
+            sockets.path().join("ingress.sock"),
             PlatformReleaseMeta {
                 version: "workflow-gate".into(),
             },
             Duration::from_secs(20),
             Redactor::new(),
-        )
-        .with_generation_auth(source_auth.clone())
-        .with_binding_generation_auth(binding_auth.clone());
+        );
         let supervisor_slot = Arc::new(Mutex::new(None));
-        let transport = WorkerdTransport::new(source_auth.clone(), supervisor_slot.clone());
+        let transport = WorkerdTransport::new(supervisor_slot.clone());
         let do_storage = storage
             .data_dir()
             .prepare_durable_object_storage(
@@ -319,12 +325,11 @@ request_timeout_ms = 3000
                 lease_path: Some(storage.data_dir().runtime_dir().join("workflow.lease")),
             },
             vec![
-                ExternalServiceAddress::loopback("runtime-source", source_addr).unwrap(),
-                ExternalServiceAddress::loopback("binding-backend", binding_addr).unwrap(),
-                ExternalServiceAddress::loopback("observability-backend", binding_addr).unwrap(),
+                ExternalServiceAddress::unix("runtime-source", &source_addr).unwrap(),
+                ExternalServiceAddress::unix("binding-backend", &binding_addr).unwrap(),
+                ExternalServiceAddress::unix("observability-backend", &binding_addr).unwrap(),
             ],
             vec![DirectoryServicePath::local("do-storage", &do_storage).unwrap()],
-            vec![source_auth, binding_auth.clone()],
         ));
         *supervisor_slot.lock().unwrap() = Some(supervisor.clone());
         supervisor.start();
@@ -335,12 +340,13 @@ request_timeout_ms = 3000
             cache,
             transport,
             supervisor,
-            binding_auth,
+
             binding_listener: Some(binding_listener),
             shutdown,
             source_task: Some(source_task),
             mock,
             temp: Some(temp),
+            _sockets: sockets,
         }
     }
 

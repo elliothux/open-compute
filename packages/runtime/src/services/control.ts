@@ -1,10 +1,6 @@
 import { RpcTarget, waitUntil } from "cloudflare:workers";
 import type { BindingEnv } from "../bindings/protocol.js";
-import {
-  BINDING_TOKEN_HEADER,
-  bindingError,
-  currentStartupGeneration,
-} from "../loader/shared.js";
+import { bindingError } from "../loader/shared.js";
 import { activateServiceCapabilities } from "./capability-transfer.js";
 import type { ServiceFrame } from "./scope.js";
 
@@ -40,8 +36,6 @@ export async function serviceControl<T>(
       method: "POST",
       headers: {
         "content-type": "application/json",
-        [BINDING_TOKEN_HEADER]: env.BINDING_BACKEND_TOKEN,
-        "x-open-compute-startup-generation": currentStartupGeneration(),
       },
       body: JSON.stringify(body),
     },
@@ -67,8 +61,6 @@ export async function holdServiceWebSocketHandoff(
       method: "POST",
       headers: {
         "content-type": "application/json",
-        [BINDING_TOKEN_HEADER]: env.BINDING_BACKEND_TOKEN,
-        "x-open-compute-startup-generation": currentStartupGeneration(),
       },
       body: JSON.stringify({ handles }),
     },

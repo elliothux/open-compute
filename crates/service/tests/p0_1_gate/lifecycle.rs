@@ -108,7 +108,6 @@ max_artifact_bytes = 65536
         child: None,
         tracked_pids: Vec::new(),
         tracked_ports: Vec::new(),
-        known_tokens: Vec::new(),
         ok: false,
     }
 }

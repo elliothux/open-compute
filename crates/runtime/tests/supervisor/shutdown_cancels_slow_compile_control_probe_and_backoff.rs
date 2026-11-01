@@ -1,7 +1,7 @@
 use super::*;
 
 pub(super) async fn run() {
-    let dir = TempDir::new().unwrap();
+    let dir = TempDir::new_in("/tmp").unwrap();
     let runtime = verified(dir.path()).await;
     let data = dir.path().join("d");
     fs::create_dir(&data).unwrap();
@@ -9,7 +9,7 @@ pub(super) async fn run() {
     let slow = WorkerdSupervisor::new(
         WorkerdSupervisorOptions {
             runtime: runtime.clone(),
-            compiler: FnCompiler(|_t, _id| {
+            compiler: FnCompiler(|_id| {
                 Box::pin(async {
                     tokio::time::sleep(Duration::from_secs(60)).await;
                     Err(open_compute_core::PlatformError::new(
@@ -35,7 +35,6 @@ pub(super) async fn run() {
         },
         Vec::new(),
         Vec::new(),
-        Vec::new(),
     );
     slow.start();
     tokio::time::sleep(Duration::from_millis(30)).await;
@@ -57,7 +56,6 @@ pub(super) async fn run() {
                 jitter: Arc::new(SequenceJitter::new(vec![0])),
                 lease_path: None,
             },
-            Vec::new(),
             Vec::new(),
             Vec::new(),
         );
@@ -87,7 +85,6 @@ pub(super) async fn run() {
             jitter: Arc::new(SequenceJitter::new(vec![0])),
             lease_path: None,
         },
-        Vec::new(),
         Vec::new(),
         Vec::new(),
     );

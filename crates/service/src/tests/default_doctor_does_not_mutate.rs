@@ -14,7 +14,13 @@ async fn default_doctor_does_not_mutate() {
     let shm = data.join("control.sqlite-shm");
     assert!(!wal.exists());
     let loaded = load_fixture_platform_config(&path);
-    let report = doctor_report(&loaded, DoctorMode::Basic, None).await;
+    let report = doctor_report(
+        &loaded,
+        DoctorMode::Basic,
+        crate::instance_registry::ServiceScope::User,
+        None,
+    )
+    .await;
     assert!(!wal.exists());
     assert!(!shm.exists());
     let after = snapshot(dir.path());

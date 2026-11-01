@@ -11,9 +11,7 @@ import type {
 } from "../loader/protocol.js";
 import {
   assembleOnce,
-  BINDING_TOKEN_HEADER,
   bindingError,
-  currentStartupGeneration,
   doPolicy,
   INTERNAL_HEADERS,
   resolveSnapshot,
@@ -485,12 +483,7 @@ async function loadedServiceTarget(
     const stub = env.LOADER.get(extension.loaderKey, async () => {
       const built = modulesFor(snapshot, false, entrypoint);
       return {
-        ...(await snapshotWorkerCode(
-          env,
-          snapshot,
-          "runtime",
-          env.INTERNAL_TOKEN,
-        )),
+        ...(await snapshotWorkerCode(env, snapshot, "runtime")),
         mainModule: built.mainModule,
         modules: built.modules,
         ...extensionEnvironment(
@@ -527,12 +520,7 @@ async function loadedServiceTarget(
     expected: worker.workerCodeSha256,
     routeGeneration: worker.routeGeneration,
   };
-  const snapshot = await resolveSnapshot(
-    env,
-    envelope,
-    "runtime",
-    env.INTERNAL_TOKEN,
-  );
+  const snapshot = await resolveSnapshot(env, envelope, "runtime");
   if (
     snapshot.routeGeneration !== worker.routeGeneration ||
     snapshot.contentKind !== worker.contentKind
@@ -550,12 +538,7 @@ async function loadedServiceTarget(
       const built = modulesFor(snapshot, false, entrypoint);
       const versionId = worker.loaderKey.split("/")[2]!;
       return {
-        ...(await snapshotWorkerCode(
-          env,
-          snapshot,
-          "runtime",
-          env.INTERNAL_TOKEN,
-        )),
+        ...(await snapshotWorkerCode(env, snapshot, "runtime")),
         mainModule: built.mainModule,
         modules: built.modules,
         ...tenantEnv(
@@ -643,11 +626,7 @@ export class PrivateHttpTransport extends WorkerEntrypoint<
       this.ctx.props.sessionIdentity,
     );
     headers.set("x-open-compute-private-path", `${url.pathname}${url.search}`);
-    headers.set(BINDING_TOKEN_HEADER, this.env.BINDING_BACKEND_TOKEN);
-    headers.set(
-      "x-open-compute-startup-generation",
-      currentStartupGeneration(),
-    );
+
     return this.env.BINDING_BACKEND.fetch(
       "http://binding-backend/internal/services/v1/private-http",
       {
@@ -944,7 +923,6 @@ export class ServiceTransport extends WorkerEntrypoint<
                     routeGeneration: target.routeGeneration,
                   },
                   "runtime",
-                  this.env.INTERNAL_TOKEN,
                 ),
               deadlineAt,
             )

@@ -16,23 +16,19 @@ impl WorkerdTransport {
         if expected_generation.is_some_and(|expected| endpoint.startup_id != Some(expected)) {
             return Err(runtime_unavailable());
         }
-        let (port, credential) = (endpoint.port, endpoint.credential);
         let mut evidence = None;
         let result = async {
             for batch in prefixes.chunks(128) {
                 let body = serde_json::to_vec(batch).map_err(|_| runtime_unavailable())?;
                 let request = hyper::Request::builder()
                     .method(Method::POST)
-                    .uri(format!(
-                        "http://127.0.0.1:{port}/internal/worker-loaders/revoke"
-                    ))
-                    .header(TOKEN_HEADER, credential.expose())
+                    .uri("http://runtime/internal/worker-loaders/revoke")
                     .header(header::CONTENT_TYPE, "application/json")
                     .body(Body::from(body))
                     .map_err(|_| runtime_unavailable())?;
                 let response = match tokio::time::timeout(
                     RESPONSE_HEADER_TIMEOUT,
-                    self.client.request(request),
+                    self.request(&endpoint.socket_path, request),
                 )
                 .await
                 {
@@ -63,14 +59,14 @@ impl WorkerdTransport {
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .clone();
             if let Some(supervisor) = supervisor {
-                let _ = self.auth.with_current(&credential, || {
+                {
                     if let Some(startup_id) = endpoint.startup_id {
                         supervisor.suspect_unhealthy(
                             startup_id,
                             evidence.unwrap_or(RuntimeFailureEvidence::ConnectFailed),
                         );
                     }
-                });
+                }
             }
         }
         result?;

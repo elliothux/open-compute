@@ -55,24 +55,16 @@ impl ContainerService {
     pub(crate) async fn capture_snapshot(
         self: &Arc<Self>,
         request: SnapshotRequest,
-        auth: GenerationAuthRegistry,
-        credential: GenerationCredential,
     ) -> Result<SnapshotResponse, PlatformError> {
         let service = Arc::clone(self);
-        tokio::spawn(async move {
-            service
-                .capture_snapshot_inner(request, &auth, &credential)
-                .await
-        })
-        .await
-        .map_err(|_| unavailable())?
+        tokio::spawn(async move { service.capture_snapshot_inner(request).await })
+            .await
+            .map_err(|_| unavailable())?
     }
 
     async fn capture_snapshot_inner(
         self: &Arc<Self>,
         request: SnapshotRequest,
-        auth: &GenerationAuthRegistry,
-        credential: &GenerationCredential,
     ) -> Result<SnapshotResponse, PlatformError> {
         #[cfg(feature = "test-support")]
         let diagnostic_started = std::time::Instant::now();
@@ -138,24 +130,21 @@ impl ContainerService {
                 .snapshot_captures
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            auth.with_current(credential, || {
-                repo.reserve_snapshot(
-                    &authority,
-                    &NewContainerSnapshot {
-                        directory: request.directory.clone(),
-                        id,
-                        source: source.clone(),
-                        name: request.name,
-                        reserved_bytes: budget,
-                    },
-                    ContainerSnapshotLimits {
-                        max_snapshots: self.provider.max_snapshots(),
-                        max_bytes: self.provider.max_snapshot_bytes(),
-                    },
-                    open_compute_core::wall_time_ms(),
-                )
-            })
-            .ok_or_else(unavailable)??;
+            repo.reserve_snapshot(
+                &authority,
+                &NewContainerSnapshot {
+                    directory: request.directory.clone(),
+                    id,
+                    source: source.clone(),
+                    name: request.name,
+                    reserved_bytes: budget,
+                },
+                ContainerSnapshotLimits {
+                    max_snapshots: self.provider.max_snapshots(),
+                    max_bytes: self.provider.max_snapshot_bytes(),
+                },
+                open_compute_core::wall_time_ms(),
+            )?;
             active.insert(id);
         }
         #[cfg(feature = "test-support")]
@@ -275,20 +264,14 @@ impl ContainerService {
         .map_err(|_| unavailable())??;
         #[cfg(feature = "test-support")]
         diagnostic_phase("snapshot-archive-hashed");
-        auth.with_current(credential, || {
-            repo.stage_snapshot_artifact(self.instance_id(), id, &source, &image)
-        })
-        .ok_or_else(unavailable)??;
+        repo.stage_snapshot_artifact(self.instance_id(), id, &source, &image)?;
         #[cfg(feature = "test-support")]
         diagnostic_phase("snapshot-artifact-staged");
         let expected = image_artifact(&image)?;
         let published = self
             .artifacts
             .put_verified_open_file(output, &expected.sha256_hex(), expected.size(), || {
-                auth.with_current(credential, || {
-                    repo.mark_snapshot_put_attempted(self.instance_id(), id, &source)
-                })
-                .ok_or_else(unavailable)?
+                repo.mark_snapshot_put_attempted(self.instance_id(), id, &source)
             })
             .await?;
         #[cfg(feature = "test-support")]
@@ -306,17 +289,13 @@ impl ContainerService {
         };
         #[cfg(feature = "test-support")]
         diagnostic_phase("snapshot-image-materialized");
-        let snapshot = auth
-            .with_current(credential, || {
-                repo.finish_snapshot_capture(
-                    &authority,
-                    id,
-                    &source,
-                    size,
-                    open_compute_core::wall_time_ms(),
-                )
-            })
-            .ok_or_else(unavailable)??;
+        let snapshot = repo.finish_snapshot_capture(
+            &authority,
+            id,
+            &source,
+            size,
+            open_compute_core::wall_time_ms(),
+        )?;
         drop(guard);
         Ok(SnapshotResponse {
             snapshot: SnapshotMetadata {

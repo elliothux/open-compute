@@ -7,13 +7,11 @@ export interface LoaderEnv extends QueueTransportEnv, DoPolicyEnv {
   WORKER_LOADER_FACTORY: NativeWorkerLoaderFactory;
   HOST_EXTENSION_FACTORY: NativeHostExtensionFactory;
   RUNTIME_SOURCE: Fetcher;
-  INTERNAL_TOKEN: string;
   DO_ROUTER: DoRouterRpc;
   OUTBOUND_NETWORK: Fetcher;
   SYSTEM_COMPATIBILITY_DATE: string;
   SYSTEM_COMPATIBILITY_FLAGS: string[];
   OBSERVABILITY_BACKEND: Fetcher;
-  OBSERVABILITY_BACKEND_TOKEN: string;
 }
 
 /** Host-only factory. Only the trusted loader can mint an extension session port. */

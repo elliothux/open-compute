@@ -12,7 +12,7 @@ async fn same_digest_cache_lookup_cannot_delete_publish_window() {
     let runtime = verify_ok(&lock_path, &bin).await;
     let data = dir.path().join("data");
     fs::create_dir(&data).unwrap();
-    let token = SecretString::new(TOKEN);
+
     let platform = platform_meta();
     let dest_name = {
         let (digest, _, _) = digest_for(
@@ -20,9 +20,7 @@ async fn same_digest_cache_lookup_cannot_delete_publish_window() {
             runtime.lock_bytes(),
             &runtime,
             &platform,
-            &token,
-            &TEST_BINDING_TOKEN,
-            &TEST_OBSERVABILITY_TOKEN,
+            Path::new("/tmp/oc-runtime.sock"),
         )
         .unwrap();
         format!("config.{digest}.bin")
@@ -54,7 +52,7 @@ async fn same_digest_cache_lookup_cannot_delete_publish_window() {
         let assets = dir.path().to_path_buf();
         let data = data.clone();
         let platform = platform.clone();
-        let token = SecretString::new(TOKEN);
+
         async move {
             let redactor = redactor_with_token();
             compile_static_config(compile_req(
@@ -63,7 +61,6 @@ async fn same_digest_cache_lookup_cannot_delete_publish_window() {
                 &assets,
                 &data,
                 &platform,
-                &token,
                 &redactor,
                 Duration::from_secs(8),
             ))
@@ -91,7 +88,7 @@ async fn same_digest_cache_lookup_cannot_delete_publish_window() {
         let assets = dir.path().to_path_buf();
         let data = data.clone();
         let platform = platform.clone();
-        let token = SecretString::new(TOKEN);
+
         let c_started = c_started.clone();
         async move {
             c_started.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -102,7 +99,6 @@ async fn same_digest_cache_lookup_cannot_delete_publish_window() {
                 &assets,
                 &data,
                 &platform,
-                &token,
                 &redactor,
                 Duration::from_secs(8),
             ))

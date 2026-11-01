@@ -3,11 +3,7 @@ use open_compute_storage::containers::{CONTAINER_SNAPSHOT_RETENTION_MS, Containe
 use serde_json::json;
 use std::sync::atomic::Ordering;
 
-async fn running(
-    fixture: &Fixture,
-    authority: &Authority,
-) -> (GenerationAuthRegistry, GenerationCredential, ResolvedLease) {
-    let (auth, credential) = generation();
+async fn running(fixture: &Fixture, authority: &Authority) -> ResolvedLease {
     let startup = if authority.app.scheduling_policy
         == open_compute_storage::containers::ContainerSchedulingPolicy::DurableObject
     {
@@ -24,20 +20,28 @@ async fn running(
     };
     fixture
         .service
-        .resolve(authority.request(true, startup), 10, &auth, &credential)
+        .resolve(
+            authority.request(true, startup),
+            10,
+            "container-unit-generation",
+        )
         .await
         .unwrap();
     fixture.running().await;
     let lease = fixture
         .service
-        .resolve(authority.request(false, None), 11, &auth, &credential)
+        .resolve(
+            authority.request(false, None),
+            11,
+            "container-unit-generation",
+        )
         .await
         .unwrap()
         .lease
         .unwrap();
     assert_eq!(lease.state, ContainerLeaseState::Running);
     *fixture.protocol.snapshot_rootfs.lock().await = snapshots::rootfs(b"saved");
-    (auth, credential, lease)
+    lease
 }
 
 fn request(authority: &Authority, lease: &ResolvedLease) -> SnapshotRequest {
@@ -58,18 +62,14 @@ async fn directory_snapshot_capture_persists_path_and_reports_archive_bytes() {
         } else {
             authority(&fixture.service, &fixture._artifacts, image, false)
         };
-        let (auth, credential, lease) = running(&fixture, &authority).await;
+        let lease = running(&fixture, &authority).await;
         let directory =
             open_compute_core::containers::ContainerDirectoryPath::parse("/app/data").unwrap();
         let mut request = request(&authority, &lease);
         request.directory = Some(directory.clone());
         let expected = fixture.protocol.snapshot_rootfs.lock().await.len() as u64;
         fixture.protocol.image_size.store(173, Ordering::SeqCst);
-        let response = fixture
-            .service
-            .capture_snapshot(request, auth, credential)
-            .await
-            .unwrap();
+        let response = fixture.service.capture_snapshot(request).await.unwrap();
         assert_eq!(response.snapshot.dir, Some(directory));
         assert_eq!(response.snapshot.size, expected);
         assert_ne!(response.snapshot.size, 173);
@@ -102,12 +102,12 @@ async fn snapshot_disk_admission_failure_does_not_reserve_or_stop_the_source() {
     let fixture = fixture().await;
     let image = fixture.admit_image("main").await;
     let authority = do_authority(&fixture.service, &fixture._artifacts, image, false);
-    let (auth, credential, lease) = running(&fixture, &authority).await;
+    let lease = running(&fixture, &authority).await;
     fixture.service.storage.begin_draining();
     assert!(
         fixture
             .service
-            .capture_snapshot(request(&authority, &lease), auth, credential)
+            .capture_snapshot(request(&authority, &lease))
             .await
             .is_err()
     );
@@ -144,16 +144,12 @@ async fn snapshot_capture_restores_same_application_after_service_restart_and_re
     let fixture = fixture().await;
     let image = fixture.admit_image("main").await;
     let authority = do_authority(&fixture.service, &fixture._artifacts, image, false);
-    let (auth, credential, lease) = running(&fixture, &authority).await;
+    let lease = running(&fixture, &authority).await;
     fixture.protocol.image_size.store(173, Ordering::SeqCst);
     fixture.protocol.image_checks.lock().await.clear();
     let response = fixture
         .service
-        .capture_snapshot(
-            request(&authority, &lease),
-            auth.clone(),
-            credential.clone(),
-        )
+        .capture_snapshot(request(&authority, &lease))
         .await
         .unwrap();
     let repo = ContainerAuthority::new(fixture.service.storage.db());
@@ -199,7 +195,7 @@ async fn snapshot_capture_restores_same_application_after_service_restart_and_re
     );
     fixture
         .service
-        .stop(&authority.stop(&lease), 12, &auth, &credential)
+        .stop(&authority.stop(&lease), 12)
         .await
         .unwrap();
     let object = insert_object(&fixture.service, authority.object.namespace_resource_id, 8);
@@ -221,8 +217,7 @@ async fn snapshot_capture_restores_same_application_after_service_restart_and_re
                     }))
                 ),
                 13,
-                &auth,
-                &credential
+                "container-unit-generation"
             )
             .await
             .is_err()
@@ -236,8 +231,7 @@ async fn snapshot_capture_restores_same_application_after_service_restart_and_re
                 })),
             ),
             14,
-            &auth,
-            &credential,
+            "container-unit-generation",
         )
         .await
         .unwrap()
@@ -255,7 +249,7 @@ async fn snapshot_capture_restores_same_application_after_service_restart_and_re
     );
     fixture.running().await;
     let restored = restarted
-        .resolve(target.request(false, None), 15, &auth, &credential)
+        .resolve(target.request(false, None), 15, "container-unit-generation")
         .await
         .unwrap()
         .lease
@@ -263,10 +257,7 @@ async fn snapshot_capture_restores_same_application_after_service_restart_and_re
     let persisted = repo.existing_lease(&target.object).unwrap().unwrap();
     assert_eq!(persisted.startup.snapshot_id, Some(saved.id));
     assert_eq!(persisted.state, ContainerLeaseState::Running);
-    restarted
-        .stop(&target.stop(&restored), 16, &auth, &credential)
-        .await
-        .unwrap();
+    restarted.stop(&target.stop(&restored), 16).await.unwrap();
     repo.retire_snapshots(
         fixture.service.instance_id(),
         open_compute_core::wall_time_ms() + CONTAINER_SNAPSHOT_RETENTION_MS + 1,
@@ -287,7 +278,7 @@ async fn snapshot_image_import_failure_never_publishes_ready_or_releases_unknown
         let fixture = fixture().await;
         let image = fixture.admit_image("main").await;
         let authority = do_authority(&fixture.service, &fixture._artifacts, image, false);
-        let (auth, credential, lease) = running(&fixture, &authority).await;
+        let lease = running(&fixture, &authority).await;
         let imports = fixture.protocol.imports.load(Ordering::SeqCst);
         fixture
             .protocol
@@ -301,7 +292,7 @@ async fn snapshot_image_import_failure_never_publishes_ready_or_releases_unknown
         assert!(
             fixture
                 .service
-                .capture_snapshot(request(&authority, &lease), auth, credential)
+                .capture_snapshot(request(&authority, &lease))
                 .await
                 .is_err()
         );
@@ -376,7 +367,7 @@ async fn snapshot_authority_rejects_stale_scope_and_nonrunning_sources_before_pr
     let fixture = fixture().await;
     let image = fixture.admit_image("main").await;
     let authority = do_authority(&fixture.service, &fixture._artifacts, image, false);
-    let (auth, credential, lease) = running(&fixture, &authority).await;
+    let lease = running(&fixture, &authority).await;
     for change in 0..6 {
         let mut request = request(&authority, &lease);
         match change {
@@ -387,13 +378,7 @@ async fn snapshot_authority_rejects_stale_scope_and_nonrunning_sources_before_pr
             4 => request.source.instance_id = InstanceId::generate(),
             _ => request.name = Some("x".repeat(257)),
         }
-        assert!(
-            fixture
-                .service
-                .capture_snapshot(request, auth.clone(), credential.clone())
-                .await
-                .is_err()
-        );
+        assert!(fixture.service.capture_snapshot(request).await.is_err());
     }
     let repo = ContainerAuthority::new(fixture.service.storage.db());
     assert!(
@@ -407,7 +392,7 @@ async fn snapshot_authority_rejects_stale_scope_and_nonrunning_sources_before_pr
     assert!(
         fixture
             .service
-            .capture_snapshot(request(&authority, &lease), auth, credential)
+            .capture_snapshot(request(&authority, &lease))
             .await
             .is_err()
     );
@@ -419,7 +404,7 @@ async fn failed_snapshot_keeps_capacity_until_cleanup_recovers_after_service_res
     let fixture = fixture().await;
     let image = fixture.admit_image("main").await;
     let authority = do_authority(&fixture.service, &fixture._artifacts, image, false);
-    let (auth, credential, lease) = running(&fixture, &authority).await;
+    let lease = running(&fixture, &authority).await;
     fixture.protocol.snapshot_fail.store(true, Ordering::SeqCst);
     fixture
         .protocol
@@ -427,8 +412,7 @@ async fn failed_snapshot_keeps_capacity_until_cleanup_recovers_after_service_res
         .store(true, Ordering::SeqCst);
     let service = Arc::clone(&fixture.service);
     let request = request(&authority, &lease);
-    let capture =
-        tokio::spawn(async move { service.capture_snapshot(request, auth, credential).await });
+    let capture = tokio::spawn(async move { service.capture_snapshot(request).await });
     tokio::time::timeout(
         std::time::Duration::from_secs(5),
         fixture.protocol.snapshot_entered.notified(),
@@ -496,15 +480,14 @@ async fn caller_cancellation_does_not_abandon_an_admitted_snapshot_publication()
     let fixture = fixture().await;
     let image = fixture.admit_image("main").await;
     let authority = do_authority(&fixture.service, &fixture._artifacts, image, false);
-    let (auth, credential, lease) = running(&fixture, &authority).await;
+    let lease = running(&fixture, &authority).await;
     fixture
         .protocol
         .snapshot_block
         .store(true, Ordering::SeqCst);
     let service = Arc::clone(&fixture.service);
     let request = request(&authority, &lease);
-    let caller =
-        tokio::spawn(async move { service.capture_snapshot(request, auth, credential).await });
+    let caller = tokio::spawn(async move { service.capture_snapshot(request).await });
     tokio::time::timeout(
         std::time::Duration::from_secs(5),
         fixture.protocol.snapshot_entered.notified(),
@@ -531,52 +514,16 @@ async fn caller_cancellation_does_not_abandon_an_admitted_snapshot_publication()
 }
 
 #[tokio::test]
-async fn generation_rotation_during_capture_rejects_publication_and_recovers_the_source() {
-    let fixture = fixture().await;
-    let image = fixture.admit_image("main").await;
-    let authority = do_authority(&fixture.service, &fixture._artifacts, image, false);
-    let (auth, credential, lease) = running(&fixture, &authority).await;
-    fixture
-        .protocol
-        .snapshot_block
-        .store(true, Ordering::SeqCst);
-    let service = Arc::clone(&fixture.service);
-    let request = request(&authority, &lease);
-    let active = auth.clone();
-    let capture =
-        tokio::spawn(async move { service.capture_snapshot(request, active, credential).await });
-    tokio::time::timeout(
-        std::time::Duration::from_secs(5),
-        fixture.protocol.snapshot_entered.notified(),
-    )
-    .await
-    .unwrap();
-    auth.activate_for_test(open_compute_core::SecretString::new(
-        "replacement-generation",
-    ));
-    fixture.protocol.snapshot_release.notify_one();
-    assert!(capture.await.unwrap().is_err());
-    fixture.service.reconcile_snapshots().await.unwrap();
-    assert!(
-        ContainerAuthority::new(fixture.service.storage.db())
-            .snapshots(fixture.service.instance_id())
-            .unwrap()
-            .is_empty()
-    );
-    assert_eq!(fixture.protocol.terminated.lock().await.len(), 1);
-}
-
-#[tokio::test]
 async fn malformed_snapshot_rootfs_is_not_published_or_released_before_source_cleanup() {
     let fixture = fixture().await;
     let image = fixture.admit_image("main").await;
     let authority = do_authority(&fixture.service, &fixture._artifacts, image, false);
-    let (auth, credential, lease) = running(&fixture, &authority).await;
+    let lease = running(&fixture, &authority).await;
     *fixture.protocol.snapshot_rootfs.lock().await = b"not-an-archive".to_vec();
     assert!(
         fixture
             .service
-            .capture_snapshot(request(&authority, &lease), auth, credential)
+            .capture_snapshot(request(&authority, &lease))
             .await
             .is_err()
     );
@@ -602,7 +549,7 @@ async fn artifact_publication_failure_keeps_known_identity_and_charge_until_posi
     let fixture = fixture().await;
     let image = fixture.admit_image("main").await;
     let authority = do_authority(&fixture.service, &fixture._artifacts, image, false);
-    let (auth, credential, lease) = running(&fixture, &authority).await;
+    let lease = running(&fixture, &authority).await;
     // Source preparation is complete before the object backend becomes unavailable.
     let source = fixture.service.admitted_image(&image).unwrap();
     let source_artifact = open_compute_artifacts::ArtifactRef::new(
@@ -620,7 +567,7 @@ async fn artifact_publication_failure_keeps_known_identity_and_charge_until_posi
     fixture._artifacts._mock.set_fault(Fault::ServerError);
     let failure = fixture
         .service
-        .capture_snapshot(request(&authority, &lease), auth, credential)
+        .capture_snapshot(request(&authority, &lease))
         .await
         .err()
         .unwrap();
@@ -667,7 +614,7 @@ async fn snapshot_lost_put_response_retires_artifact_but_keeps_unknown_publicati
         let fixture = fixture().await;
         let image = fixture.admit_image("main").await;
         let authority = do_authority(&fixture.service, &fixture._artifacts, image, false);
-        let (auth, credential, lease) = running(&fixture, &authority).await;
+        let lease = running(&fixture, &authority).await;
         let source = fixture.service.admitted_image(&image).unwrap();
         let source_artifact = open_compute_artifacts::ArtifactRef::new(
             1,
@@ -685,7 +632,7 @@ async fn snapshot_lost_put_response_retires_artifact_but_keeps_unknown_publicati
         assert!(
             fixture
                 .service
-                .capture_snapshot(request(&authority, &lease), auth, credential)
+                .capture_snapshot(request(&authority, &lease))
                 .await
                 .is_err()
         );
@@ -771,25 +718,17 @@ async fn snapshot_shared_artifact_retirement_preserves_ready_restore_and_charge(
     let fixture = fixture().await;
     let image = fixture.admit_image("main").await;
     let authority = do_authority(&fixture.service, &fixture._artifacts, image, false);
-    let (auth, credential, source) = running(&fixture, &authority).await;
+    let source = running(&fixture, &authority).await;
     let first = fixture
         .service
-        .capture_snapshot(
-            request(&authority, &source),
-            auth.clone(),
-            credential.clone(),
-        )
+        .capture_snapshot(request(&authority, &source))
         .await
         .unwrap()
         .snapshot
         .id;
     let second = fixture
         .service
-        .capture_snapshot(
-            request(&authority, &source),
-            auth.clone(),
-            credential.clone(),
-        )
+        .capture_snapshot(request(&authority, &source))
         .await
         .unwrap()
         .snapshot
@@ -812,7 +751,7 @@ async fn snapshot_shared_artifact_retirement_preserves_ready_restore_and_charge(
     .unwrap();
     fixture
         .service
-        .stop(&authority.stop(&source), 12, &auth, &credential)
+        .stop(&authority.stop(&source), 12)
         .await
         .unwrap();
     let now = open_compute_core::wall_time_ms();
@@ -824,15 +763,18 @@ async fn snapshot_shared_artifact_retirement_preserves_ready_restore_and_charge(
                 Some(json!({"containerSnapshotId":second,"enableInternet":false})),
             ),
             now,
-            &auth,
-            &credential,
+            "container-unit-generation",
         )
         .await
         .unwrap();
     fixture.running().await;
     let restored = fixture
         .service
-        .resolve(authority.request(false, None), now + 1, &auth, &credential)
+        .resolve(
+            authority.request(false, None),
+            now + 1,
+            "container-unit-generation",
+        )
         .await
         .unwrap()
         .lease
@@ -897,7 +839,7 @@ async fn snapshot_shared_artifact_retirement_preserves_ready_restore_and_charge(
     );
     fixture
         .service
-        .stop(&authority.stop(&restored), now + 3, &auth, &credential)
+        .stop(&authority.stop(&restored), now + 3)
         .await
         .unwrap();
     repo.retire_snapshots(instance, now + CONTAINER_SNAPSHOT_RETENTION_MS + 10)
@@ -923,15 +865,14 @@ async fn snapshot_detached_capture_cannot_publish_after_application_delete_fence
     let fixture = fixture().await;
     let image = fixture.admit_image("main").await;
     let authority = do_authority(&fixture.service, &fixture._artifacts, image, false);
-    let (auth, credential, source) = running(&fixture, &authority).await;
+    let source = running(&fixture, &authority).await;
     fixture
         .protocol
         .snapshot_block
         .store(true, Ordering::SeqCst);
     let service = Arc::clone(&fixture.service);
     let capture = request(&authority, &source);
-    let caller =
-        tokio::spawn(async move { service.capture_snapshot(capture, auth, credential).await });
+    let caller = tokio::spawn(async move { service.capture_snapshot(capture).await });
     tokio::time::timeout(
         std::time::Duration::from_secs(5),
         fixture.protocol.snapshot_entered.notified(),
@@ -1010,15 +951,11 @@ async fn default_scheduling_rejects_snapshot_capture_and_restore_before_provider
     let fixture = fixture().await;
     let image = fixture.admit_image("default").await;
     let authority = authority(&fixture.service, &fixture._artifacts, image, false);
-    let (auth, credential, lease) = running(&fixture, &authority).await;
+    let lease = running(&fixture, &authority).await;
     assert!(
         fixture
             .service
-            .capture_snapshot(
-                request(&authority, &lease),
-                auth.clone(),
-                credential.clone()
-            )
+            .capture_snapshot(request(&authority, &lease))
             .await
             .is_err()
     );
@@ -1054,8 +991,7 @@ async fn default_scheduling_rejects_snapshot_capture_and_restore_before_provider
                     Some(json!({"containerSnapshotId":ResourceId::generate()}))
                 ),
                 12,
-                &auth,
-                &credential
+                "container-unit-generation"
             )
             .await
             .is_err()
@@ -1082,7 +1018,7 @@ async fn directory_restore_start_streams_frozen_archive_and_replay_preserves_liv
         } else {
             authority(&fixture.service, &fixture._artifacts, image, false)
         };
-        let (auth, credential, lease) = running(&fixture, &source).await;
+        let lease = running(&fixture, &source).await;
         let original = fixture.protocol.snapshot_rootfs.lock().await.clone();
         let mut capture = request(&source, &lease);
         capture.directory = Some(
@@ -1090,13 +1026,13 @@ async fn directory_restore_start_streams_frozen_archive_and_replay_preserves_liv
         );
         let saved = fixture
             .service
-            .capture_snapshot(capture, auth.clone(), credential.clone())
+            .capture_snapshot(capture)
             .await
             .unwrap()
             .snapshot;
         fixture
             .service
-            .stop(&source.stop(&lease), 12, &auth, &credential)
+            .stop(&source.stop(&lease), 12)
             .await
             .unwrap();
         let target = Authority {
@@ -1125,8 +1061,7 @@ async fn directory_restore_start_streams_frozen_archive_and_replay_preserves_liv
             .resolve(
                 target.request(true, Some(startup.clone())),
                 13,
-                &auth,
-                &credential,
+                "container-unit-generation",
             )
             .await
             .unwrap()
@@ -1150,7 +1085,7 @@ async fn directory_restore_start_streams_frozen_archive_and_replay_preserves_liv
         assert!(registration.directory_snapshots[1].archive.is_none());
         fixture.running().await;
         let current = restarted
-            .resolve(target.request(false, None), 14, &auth, &credential)
+            .resolve(target.request(false, None), 14, "container-unit-generation")
             .await
             .unwrap()
             .lease
@@ -1158,7 +1093,11 @@ async fn directory_restore_start_streams_frozen_archive_and_replay_preserves_liv
         assert_eq!(current.state, ContainerLeaseState::Running);
         let again = fixture
             .restart_service()
-            .resolve(target.request(true, Some(startup)), 15, &auth, &credential)
+            .resolve(
+                target.request(true, Some(startup)),
+                15,
+                "container-unit-generation",
+            )
             .await
             .unwrap()
             .lease
@@ -1176,18 +1115,14 @@ async fn directory_restore_start_streams_frozen_archive_and_replay_preserves_liv
                     .resolve(
                         target.request(true, Some(json!({"directorySnapshots":plan}))),
                         16,
-                        &auth,
-                        &credential
+                        "container-unit-generation"
                     )
                     .await
                     .is_err()
             );
         }
         assert_eq!(*fixture.protocol.directory_archives.lock().await, uploads);
-        restarted
-            .stop(&target.stop(&restored), 17, &auth, &credential)
-            .await
-            .unwrap();
+        restarted.stop(&target.stop(&restored), 17).await.unwrap();
         let cleanup = fixture
             .protocol
             .cleanup_registrations

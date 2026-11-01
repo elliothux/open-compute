@@ -1,13 +1,15 @@
 use super::*;
-use open_compute_core::SecretString;
+
 use std::sync::atomic::{AtomicU16, Ordering};
 
 #[tokio::test]
-async fn revocation_batches_are_authenticated_and_unknown_results_fail_closed() {
+async fn revocation_batches_are_bounded_and_unknown_results_fail_closed() {
     let calls = Arc::new(Mutex::new(Vec::<Vec<String>>::new()));
     let status = Arc::new(AtomicU16::new(204));
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = listener.local_addr().unwrap().port();
+    let listener_dir = tempfile::tempdir_in("/tmp").unwrap();
+    let listener_path = listener_dir.path().join("runtime.sock");
+    let listener = tokio::net::UnixListener::bind(&listener_path).unwrap();
+    let port = listener_path.clone();
     let app = Router::new().route(
         "/internal/worker-loaders/revoke",
         post({
@@ -17,7 +19,6 @@ async fn revocation_batches_are_authenticated_and_unknown_results_fail_closed() 
                 let calls = calls.clone();
                 let status = status.clone();
                 async move {
-                    assert_eq!(headers[TOKEN_HEADER], "aa".repeat(32));
                     assert!(
                         headers[header::CONTENT_LENGTH]
                             .to_str()
@@ -42,16 +43,17 @@ async fn revocation_batches_are_authenticated_and_unknown_results_fail_closed() 
             .await
             .unwrap();
     });
-    let auth = GenerationAuthRegistry::new();
-    let transport = WorkerdTransport::for_test_endpoint(auth.clone(), port);
+
+    let transport = WorkerdTransport::for_test_endpoint(&port);
     transport.revoke_worker_loaders(&[], None).await.unwrap();
+    let inactive = WorkerdTransport::new(Arc::new(Mutex::new(None)));
     assert!(
-        transport
+        inactive
             .revoke_worker_loaders(&[format!("{}/", "a".repeat(64))], None)
             .await
             .is_err()
     );
-    auth.activate_for_test(SecretString::new("aa".repeat(32)));
+
     let keys = (0..129)
         .map(|index| format!("{index:064x}/"))
         .collect::<Vec<_>>();
@@ -81,13 +83,14 @@ async fn revocation_batches_are_authenticated_and_unknown_results_fail_closed() 
 
 #[tokio::test]
 async fn revocation_transport_failures_classify_stable_evidence() {
-    // A closed port reports the connect-failure evidence class without leaking keys.
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = listener.local_addr().unwrap().port();
+    // A closed Unix socket reports the connect-failure evidence class without leaking keys.
+    let listener_dir = tempfile::tempdir_in("/tmp").unwrap();
+    let listener_path = listener_dir.path().join("runtime.sock");
+    let listener = tokio::net::UnixListener::bind(&listener_path).unwrap();
+    let port = listener_path.clone();
     drop(listener);
-    let auth = GenerationAuthRegistry::new();
-    auth.activate_for_test(SecretString::new("bb".repeat(32)));
-    let transport = WorkerdTransport::for_test_endpoint(auth, port);
+
+    let transport = WorkerdTransport::for_test_endpoint(&port);
     let keys = vec![format!("{}/", "c".repeat(64))];
     let error = transport
         .revoke_worker_loaders(&keys, None)
@@ -96,8 +99,10 @@ async fn revocation_transport_failures_classify_stable_evidence() {
     assert!(!error.to_string().contains(&keys[0]));
 
     // An endpoint that accepts but never responds surfaces the bounded header-timeout class.
-    let stalled = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let stalled_port = stalled.local_addr().unwrap().port();
+    let stalled_dir = tempfile::tempdir_in("/tmp").unwrap();
+    let stalled_path = stalled_dir.path().join("runtime.sock");
+    let stalled = tokio::net::UnixListener::bind(&stalled_path).unwrap();
+    let stalled_port = stalled_path.clone();
     let holder = tokio::spawn(async move {
         loop {
             if let Ok((stream, _)) = stalled.accept().await {
@@ -105,9 +110,8 @@ async fn revocation_transport_failures_classify_stable_evidence() {
             }
         }
     });
-    let auth = GenerationAuthRegistry::new();
-    auth.activate_for_test(SecretString::new("cc".repeat(32)));
-    let transport = WorkerdTransport::for_test_endpoint(auth, stalled_port);
+
+    let transport = WorkerdTransport::for_test_endpoint(&stalled_port);
     let started = std::time::Instant::now();
     let error = transport
         .revoke_worker_loaders(&[format!("{}/", "d".repeat(64))], None)

@@ -6,11 +6,7 @@ import {
   isRecord,
 } from "../bindings/private-transport.js";
 import type { BindingEnv, ImageTransportProps } from "../bindings/protocol.js";
-import {
-  BINDING_TOKEN_HEADER,
-  bindingError,
-  currentStartupGeneration,
-} from "../loader/shared.js";
+import { bindingError } from "../loader/shared.js";
 
 /** Private version-scoped Images transport; never exposed directly to tenant code. */
 export class ImageTransport extends WorkerEntrypoint<
@@ -28,8 +24,6 @@ export class ImageTransport extends WorkerEntrypoint<
     )
       throw bindingError("IMAGE_PROTOCOL_ERROR");
     return {
-      [BINDING_TOKEN_HEADER]: this.env.BINDING_BACKEND_TOKEN,
-      "x-open-compute-startup-generation": currentStartupGeneration(),
       "x-open-compute-instance-id": props.instanceId,
       "x-open-compute-worker-id": props.workerId,
       "x-open-compute-version-id": props.versionId,

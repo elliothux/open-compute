@@ -29,7 +29,7 @@ printf 'COMPILED-%s' \"$$\"
     let runtime = verify_ok(&lock_path, &bin).await;
     let data = dir.path().join("data");
     fs::create_dir(&data).unwrap();
-    let token = SecretString::new(TOKEN);
+
     let redactor = redactor_with_token();
     let platform = platform_meta();
     let dest_name = {
@@ -38,9 +38,7 @@ printf 'COMPILED-%s' \"$$\"
             runtime.lock_bytes(),
             &runtime,
             &platform,
-            &token,
-            &TEST_BINDING_TOKEN,
-            &TEST_OBSERVABILITY_TOKEN,
+            Path::new("/tmp/oc-runtime.sock"),
         )
         .unwrap();
         format!("config.{digest}.bin")
@@ -75,7 +73,6 @@ printf 'COMPILED-%s' \"$$\"
         dir.path(),
         &data,
         &platform,
-        &token,
         &redactor,
         Duration::from_secs(5),
     ));
@@ -85,7 +82,6 @@ printf 'COMPILED-%s' \"$$\"
         dir.path(),
         &data,
         &platform,
-        &token,
         &redactor,
         Duration::from_secs(5),
     ));

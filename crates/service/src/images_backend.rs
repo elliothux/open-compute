@@ -32,7 +32,6 @@ const INSTANCE_HEADER: &str = "x-open-compute-instance-id";
 const WORKER_HEADER: &str = "x-open-compute-worker-id";
 const VERSION_HEADER: &str = "x-open-compute-version-id";
 const DESCRIPTOR_HEADER: &str = "x-open-compute-descriptor-sha256";
-const GENERATION_HEADER: &str = "x-open-compute-startup-generation";
 const ERROR_HEADER: &str = "x-open-compute-error-code";
 const MAX_OPTIONS_BYTES: usize = 64 * 1024;
 
@@ -116,7 +115,7 @@ impl ImageBindingService {
     /// Inspect bounded process capacity after pruning expired sessions.
     pub fn capacity(&self) -> Result<ImageCapacity, PlatformError> {
         let mut sessions = self.sessions.lock().map_err(|_| unavailable())?;
-        prune_sessions(&mut sessions, self.config.session_ttl_ms, None);
+        prune_sessions(&mut sessions, self.config.session_ttl_ms);
         Ok(ImageCapacity {
             active_sessions: sessions.len() as u64,
             max_sessions: self.config.max_sessions,
@@ -140,7 +139,7 @@ impl ImageBindingService {
         Ok(())
     }
 
-    /// Dispatch one generation-authenticated private Images operation.
+    /// Dispatch one private Images operation.
     pub async fn handle(&self, request: Request) -> Response {
         let operation = image_metric_operation(request.uri().path());
         let result = self.handle_result(request).await;
@@ -211,7 +210,6 @@ impl ImageBindingService {
             worker,
             version,
             descriptor: text_header(headers, DESCRIPTOR_HEADER)?.to_owned(),
-            generation: text_header(headers, GENERATION_HEADER)?.to_owned(),
         })
     }
 
@@ -239,11 +237,7 @@ impl ImageBindingService {
         }
         let session = Uuid::now_v7().to_string();
         let mut sessions = self.sessions.lock().map_err(|_| unavailable())?;
-        prune_sessions(
-            &mut sessions,
-            self.config.session_ttl_ms,
-            Some(&owner.generation),
-        );
+        prune_sessions(&mut sessions, self.config.session_ttl_ms);
         if sessions.len() >= usize::from(self.config.max_sessions)
             || retained_bytes(&sessions).saturating_add(staged.size) > self.config.max_temp_bytes
         {
@@ -301,11 +295,7 @@ impl ImageBindingService {
         let options: TransformRequest = serde_json::from_slice(&bytes).map_err(|_| option())?;
         let operations = options.operations()?;
         let mut sessions = self.sessions.lock().map_err(|_| unavailable())?;
-        prune_sessions(
-            &mut sessions,
-            self.config.session_ttl_ms,
-            Some(&owner.generation),
-        );
+        prune_sessions(&mut sessions, self.config.session_ttl_ms);
         let value = sessions.get_mut(&session).ok_or_else(protocol)?;
         value.require_owner(&owner)?;
         if value.operations.len().saturating_add(operations.len())
@@ -352,11 +342,7 @@ impl ImageBindingService {
             metrics.add_image_bytes(true, staged.size);
         }
         let mut sessions = self.sessions.lock().map_err(|_| unavailable())?;
-        prune_sessions(
-            &mut sessions,
-            self.config.session_ttl_ms,
-            Some(&owner.generation),
-        );
+        prune_sessions(&mut sessions, self.config.session_ttl_ms);
         let total = retained_bytes(&sessions).saturating_add(staged.size);
         let value = sessions.get_mut(&session).ok_or_else(protocol)?;
         value.require_owner(&owner)?;
@@ -394,11 +380,7 @@ impl ImageBindingService {
         let output: OutputOptions = serde_json::from_slice(&bytes).map_err(|_| option())?;
         let session = {
             let mut sessions = self.sessions.lock().map_err(|_| unavailable())?;
-            prune_sessions(
-                &mut sessions,
-                self.config.session_ttl_ms,
-                Some(&owner.generation),
-            );
+            prune_sessions(&mut sessions, self.config.session_ttl_ms);
             sessions
                 .get(&session)
                 .ok_or_else(protocol)?
@@ -450,7 +432,6 @@ struct ImageAuthority {
     worker: WorkerId,
     version: VersionId,
     descriptor: String,
-    generation: String,
 }
 
 impl ImageSession {
@@ -603,16 +584,9 @@ fn parse_session_path(path: &str) -> Result<(String, &str), PlatformError> {
     Ok((session.to_owned(), operation))
 }
 
-fn prune_sessions(
-    sessions: &mut HashMap<String, ImageSession>,
-    ttl_ms: u64,
-    generation: Option<&str>,
-) {
+fn prune_sessions(sessions: &mut HashMap<String, ImageSession>, ttl_ms: u64) {
     let ttl = Duration::from_millis(ttl_ms);
-    sessions.retain(|_, session| {
-        session.last_used.elapsed() < ttl
-            && generation.is_none_or(|generation| session.owner.generation == generation)
-    });
+    sessions.retain(|_, session| session.last_used.elapsed() < ttl);
 }
 
 fn retained_bytes(sessions: &HashMap<String, ImageSession>) -> u64 {

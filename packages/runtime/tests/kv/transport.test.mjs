@@ -34,7 +34,7 @@ const props = {
 const transport = (fetch, permissions = props.permissions) =>
   new KVNamespace(
     { props: { ...props, permissions } },
-    { BINDING_BACKEND: { fetch }, BINDING_BACKEND_TOKEN: "token" },
+    { BINDING_BACKEND: { fetch } },
   );
 
 test("native KV bulk rejects JSON expansion above the response budget", async () => {
@@ -311,7 +311,7 @@ test("KV uses one frame protocol for default text, binary, JSON and metadata rea
     assert.equal(options.headers["content-type"], contentType);
     assert.equal(
       options.headers["x-open-compute-startup-generation"],
-      "generation",
+      undefined,
     );
     calls.push({
       operation: url.split("/").at(-1),
