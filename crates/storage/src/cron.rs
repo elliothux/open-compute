@@ -8,7 +8,7 @@ use rusqlite::{Transaction, params};
 use serde::Serialize;
 use sha2::{Digest as _, Sha256};
 
-/// Cron parser/canonicalization contract shipped by P2.3.
+/// Normalization identity version; the a/b scheduling fix preserves version-1 declaration hashes.
 pub const CRON_PARSER_VERSION: u32 = 1;
 
 /// Frozen Cron config inserted with a staging version.
@@ -404,5 +404,62 @@ impl rusqlite::types::FromSql for CronActivationState {
             "active" => Ok(Self::Active),
             _ => Err(rusqlite::types::FromSqlError::InvalidType),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn version_one_stored_step_declaration_keeps_its_identity() {
+        assert_eq!(CRON_PARSER_VERSION, 1);
+        let version_id = VersionId::generate();
+        // Frozen version-1 hashes use the original expression and normalized spelling, not fire times.
+        let mut config = CronVersionConfig {
+            version_id,
+            capability_version: 1,
+            descriptor_sha256: hex::decode(
+                "4cefccc767aca9860006e765ca2d69d9c1c0d1d4ab29b77674d04057fcb9127d",
+            )
+            .unwrap()
+            .try_into()
+            .unwrap(),
+            created_at_ms: 0,
+            declarations: vec![CronDeclaration {
+                id: CronActivationId::generate(),
+                version_id,
+                expression: "5/5\t * * * *".into(),
+                expression_sha256: hex::decode(
+                    "9eddee43ec656b021f8c2441a5b4e345e23f8dc4810eeb667fb7c683239eb556",
+                )
+                .unwrap()
+                .try_into()
+                .unwrap(),
+                parser_version: 1,
+                scheduled_handler: true,
+                workflow_bindings: Vec::new(),
+                created_at_ms: 0,
+            }],
+        };
+        config.validate().unwrap();
+        assert_eq!(
+            open_compute_core::CronSchedule::parse(&config.declarations[0].expression)
+                .unwrap()
+                .next_after_ms(5 * 60_000)
+                .unwrap(),
+            10 * 60_000
+        );
+        config.declarations[0].parser_version = 2;
+        assert_eq!(
+            config.validate().unwrap_err().code(),
+            ErrorCode::CronProjectionPending
+        );
+        config.declarations[0].parser_version = 1;
+        config.declarations[0].expression_sha256[0] ^= 1;
+        assert_eq!(
+            config.validate().unwrap_err().code(),
+            ErrorCode::CronProjectionPending
+        );
     }
 }

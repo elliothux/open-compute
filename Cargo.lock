@@ -1450,6 +1450,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "790eea4361631c5e7d22598ecd5723ff611904e3344ce8720784c93e3d83d40b"
 
 [[package]]
+name = "croner"
+version = "4.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "26d09284075f5c87675790d1ad74212a7863eb8bdf228cdbd364f08a152fc62d"
+dependencies = [
+ "derive_builder",
+ "strum 0.27.2",
+]
+
+[[package]]
 name = "crossbeam-channel"
 version = "0.5.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4784,10 +4794,13 @@ name = "open-compute-core"
 version = "0.4.0"
 dependencies = [
  "base64 0.22.1",
+ "croner",
  "futures",
  "hex",
  "ipnet",
+ "jiff",
  "psl",
+ "regex",
  "rusqlite",
  "semver",
  "serde",
