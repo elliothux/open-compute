@@ -3,8 +3,8 @@ name: Runtime Gate diagnosis
 on:
   workflow_dispatch:
     inputs:
-      workspace-final:
-        description: Run the uninstrumented workspace final with controlled egress
+      workspace:
+        description: Run the uninstrumented workspace Gate with controlled egress
         required: false
         type: boolean
         default: false
@@ -45,16 +45,16 @@ env:
   MBX_GC_AUTO: "false"
   PYTHONDONTWRITEBYTECODE: "1"
   CARGO_INCREMENTAL: "0"
-  CARGO_BUILD_JOBS: ${{ (inputs.workspace-final || inputs.outbound-contexts) && '2' || '1' }}
-  CARGO_TARGET_DIR: ${{ (inputs.workspace-final || inputs.outbound-contexts) && format('{0}/target', github.workspace) || format('{0}/target/llvm-cov-target', github.workspace) }}
+  CARGO_BUILD_JOBS: ${{ (inputs.workspace || inputs.outbound-contexts) && '2' || '1' }}
+  CARGO_TARGET_DIR: ${{ (inputs.workspace || inputs.outbound-contexts) && format('{0}/target', github.workspace) || format('{0}/target/llvm-cov-target', github.workspace) }}
   CARGO_PROFILE_DEV_DEBUG: line-tables-only
   CARGO_PROFILE_TEST_DEBUG: line-tables-only
-  RUSTFLAGS: ${{ (inputs.workspace-final || inputs.outbound-contexts) && '-D warnings' || '-C instrument-coverage --cfg=coverage -D warnings' }}
+  RUSTFLAGS: ${{ (inputs.workspace || inputs.outbound-contexts) && '-D warnings' || '-C instrument-coverage --cfg=coverage -D warnings' }}
 
 jobs:
   diagnose:
     runs-on: ubuntu-24.04
-    timeout-minutes: ${{ inputs.workspace-final && 180 || 90 }}
+    timeout-minutes: ${{ inputs.workspace && 180 || 90 }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -66,7 +66,7 @@ jobs:
           FIXTURE_RUN: ${{ inputs.fixture-run-id }}
           SOURCE_REVISION: ${{ inputs.artifact-revision }}
           BROKER_SHA256: ${{ inputs.broker-sha256 }}
-          WORKSPACE_FINAL: ${{ inputs.workspace-final }}
+          WORKSPACE: ${{ inputs.workspace }}
           OUTBOUND_CONTEXTS: ${{ inputs.outbound-contexts }}
         run: |
           set -euo pipefail
@@ -74,7 +74,7 @@ jobs:
           [[ "$FIXTURE_RUN" =~ ^[0-9]+$ ]]
           [[ "$SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]]
           [[ "$BROKER_SHA256" =~ ^[0-9a-f]{64}$ ]]
-          [[ "$WORKSPACE_FINAL" != true || "$OUTBOUND_CONTEXTS" != true ]]
+          [[ "$WORKSPACE" != true || "$OUTBOUND_CONTEXTS" != true ]]
           git cat-file -e "$SOURCE_REVISION^{commit}"
           git diff --exit-code "$SOURCE_REVISION" HEAD -- crates packages share third_party Cargo.toml Cargo.lock ':(exclude)crates/*/tests/**' ':(exclude)packages/*/tests/**'
           test -z "$(git status --porcelain --untracked-files=all)"
@@ -83,7 +83,7 @@ jobs:
         with:
           llvm-cov: "true"
           rust-components: llvm-tools-preview
-          browser-fixture: ${{ inputs.workspace-final && 'true' || 'false' }}
+          browser-fixture: ${{ inputs.workspace && 'true' || 'false' }}
       - uses: actions/download-artifact@v8
         with:
           name: release-linux-x64
@@ -121,12 +121,12 @@ jobs:
           mbx fetch --locked
       - name: Diagnose the selected canonical Gate once
         env:
-          WORKSPACE_FINAL: ${{ inputs.workspace-final }}
+          WORKSPACE: ${{ inputs.workspace }}
           OUTBOUND_CONTEXTS: ${{ inputs.outbound-contexts }}
         run: |
           set -euo pipefail
           options=()
-          if [[ "$WORKSPACE_FINAL" == true ]]; then options+=(--workspace-final); fi
+          if [[ "$WORKSPACE" == true ]]; then options+=(--workspace); fi
           if [[ "$OUTBOUND_CONTEXTS" == true ]]; then options+=(--outbound-contexts); fi
           bash test/containers-fixture/with-ci-linux-engine.sh \
             --images "$RUNNER_TEMP/p23-fixture-images" \
@@ -152,7 +152,7 @@ jobs:
           retention-days: 14
           path: |
             .temp/container-diagnostic/
-            .temp/workspace-final-diagnostic/
+            .temp/workspace-diagnostic/
             .temp/outbound-contexts-diagnostic/
             .temp/containers-ci-engine/
             .temp/gate-run/

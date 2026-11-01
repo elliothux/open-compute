@@ -337,14 +337,14 @@ test("release qualification and local Docker diagnostic keep their exact boundar
     workflow,
     /name: unverified-native-build-\$\{\{ matrix\.target \}\}[\s\S]*?\.temp\/dashboard-e2e[\s\S]*?\.temp\/dashboard-server[\s\S]*?apps\/dashboard\/test-results/,
   );
-  assert.equal(workflow.match(/--workspace-final/g)?.length, 1);
+  assert.equal(workflow.match(/--workspace/g)?.length, 1);
   const finalGuard = await readFile(
     new URL("./containers-fixture/diagnostic-inputs.py", import.meta.url),
     "utf8",
   );
   assert.match(
     finalGuard,
-    /'\.\/test\/test-p0-2-egress-linux\.sh', '--workspace', '--final', '--jobs', '2'/,
+    /'\.\/test\/test-p0-2-egress-linux\.sh', '--workspace', '--jobs', '2'/,
   );
   assert.match(
     workflow,

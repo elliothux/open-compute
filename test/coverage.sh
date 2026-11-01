@@ -19,7 +19,7 @@ case "$coverage_html" in
 esac
 
 if [ "${OPEN_COMPUTE_GATE_ROUNDS:-1}" != 1 ]; then
-  echo "coverage runs exactly once; final timing rounds require uninstrumented executables" >&2
+  echo "coverage runs exactly once; diagnostic timing rounds require uninstrumented executables" >&2
   exit 1
 fi
 

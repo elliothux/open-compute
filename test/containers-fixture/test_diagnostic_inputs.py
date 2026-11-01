@@ -22,10 +22,10 @@ native_spec.loader.exec_module(native)
 
 
 class DiagnosticInputsTest(unittest.TestCase):
-    def test_final_guard_retains_evidence_and_stops_its_process_at_disk_waterline(self):
+    def test_guard_retains_evidence_and_stops_its_process_at_disk_waterline(self):
         disk = namedtuple('Disk', 'total used free')
         total = 100 << 30
-        for mode, full in [(mode, full) for mode in ('workspace-final', 'outbound-contexts')
+        for mode, full in [(mode, full) for mode in ('workspace', 'outbound-contexts')
                            for full in (False, True)]:
             with self.subTest(mode=mode, full=full), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
@@ -54,7 +54,7 @@ class DiagnosticInputsTest(unittest.TestCase):
                         diagnostic.main()
                     self.assertNotIn('LLVM_PROFILE_FILE', os.environ)
                 self.assertEqual(result.exception.code, 1 if full else 0)
-                commands.assert_called_once_with(mode == 'workspace-final', mode == 'outbound-contexts')
+                commands.assert_called_once_with(mode == 'workspace', mode == 'outbound-contexts')
                 report = diagnostic.json.loads((root /
                     f'.temp/{mode}-diagnostic/input-guard.json').read_text())
                 self.assertEqual(report['success'], not full)
@@ -73,11 +73,11 @@ class DiagnosticInputsTest(unittest.TestCase):
         self.assertEqual(diagnostic.disk_admission(
             disk(total, total - boundary - 1, boundary + 1)), boundary + 1)
 
-    def test_final_preserves_workspace_final_and_controlled_egress(self):
+    def test_workspace_preserves_controlled_egress(self):
         discovery, acceptance = diagnostic.gate_commands(True)
         self.assertEqual(discovery, acceptance + ['--list'])
         self.assertEqual(acceptance, ['./test/test-p0-2-egress-linux.sh',
-            '--workspace', '--final', '--jobs', '2'])
+            '--workspace', '--jobs', '2'])
         self.assertNotIn('--keep-going', acceptance)
         self.assertEqual(diagnostic.gate_commands(False), [
             ['./test/gate.py', 'p23-containers', '--list'],

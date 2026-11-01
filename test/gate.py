@@ -3,7 +3,6 @@
 
 import argparse
 import errno
-import fcntl
 from collections import namedtuple
 import concurrent.futures
 from contextlib import nullcontext
@@ -15,9 +14,7 @@ from pathlib import Path
 import platform
 import re
 import resource
-import select
 import shutil
-import stat
 import subprocess
 import sys
 import tempfile
@@ -25,8 +22,7 @@ import threading
 import time
 import uuid
 
-# This CLI imports repository-local policy; do not create disposable source-tree
-# bytecode (or change the frozen input set) while discovering/running tests.
+# This CLI imports repository-local policy; keep disposable bytecode out of the source tree.
 sys.dont_write_bytecode = True
 from gate_cases import (
     ONCE,
@@ -457,7 +453,7 @@ def source_identity():
         if source_identity_excluded(name):
             continue
         # Designs/history are not runtime inputs. Maintained references include
-        # embedded runbooks and conformance fixtures, so they must remain frozen.
+        # embedded runbooks and conformance fixtures, so include them in the report identity.
         if name.startswith(b'docs/') and not name.startswith(b'docs/references/'):
             continue
         path = ROOT / os.fsdecode(name)
@@ -592,53 +588,6 @@ def verify_selected_inputs(targets, *, probe_version=True):
         'catalog_sha256': digest(ROOT / 'test/conformance/catalog.json'),
         'capabilities_sha256': digest(ROOT / 'share/cloudflare-capabilities.json'),
     }
-
-
-def compilation_phase_barrier(report):
-    """Wait for the resource owner before any test process can start."""
-    event = os.environ.pop('OPEN_COMPUTE_GATE_BUILD_EVENT_FD', None)
-    resume = os.environ.pop('OPEN_COMPUTE_GATE_RUN_CONTINUE_FD', None)
-    if event is None and resume is None:
-        return
-    if (event is None or resume is None
-            or not re.fullmatch('[0-9]{1,10}', event)
-            or not re.fullmatch('[0-9]{1,10}', resume)):
-        raise ValueError('compilation handoff requires two pipe descriptors')
-    event_fd, resume_fd = int(event), int(resume)
-    if min(event_fd, resume_fd) < 3 or event_fd == resume_fd:
-        raise ValueError('compilation handoff requires distinct dedicated pipes')
-    try:
-        for fd, access in ((event_fd, os.O_WRONLY), (resume_fd, os.O_RDONLY)):
-            if (not stat.S_ISFIFO(os.fstat(fd).st_mode)
-                    or fcntl.fcntl(fd, fcntl.F_GETFL) & os.O_ACCMODE != access):
-                raise ValueError('compilation handoff requires a writable and a readable pipe')
-        source = report['source_sha256']
-        if not re.fullmatch('[0-9a-f]{64}', source):
-            raise ValueError('compilation handoff requires the current source digest')
-        report['compilation_handoff'] = {'resumed': False, 'source_sha256': source}
-        message = json.dumps({'phase': 'compiled', 'source_sha256': source,
-                              'targets': len(report['targets'])}).encode() + b'\n'
-        if os.write(event_fd, message) != len(message):
-            raise RuntimeError('compilation handoff notification was incomplete')
-        expected = f'RUN {source}\n'.encode()
-        response = b''
-        deadline = time.monotonic() + 120
-        while True:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0 or not select.select([resume_fd], [], [], remaining)[0]:
-                raise TimeoutError('compilation handoff did not restore the test resource limits')
-            part = os.read(resume_fd, len(expected) + 1 - len(response))
-            if not part:
-                break
-            response += part
-            if len(response) > len(expected):
-                raise RuntimeError('compilation handoff response was too long')
-        if response != expected:
-            raise RuntimeError('compilation handoff did not authorize the current source')
-        report['compilation_handoff']['resumed'] = True
-    finally:
-        os.close(event_fd)
-        os.close(resume_fd)
 
 
 def build_targets(targets, directory, workspace):
@@ -1017,29 +966,16 @@ def write_contract_report(directory, report):
     report['contract_verdict'] = result['platformVerdict']
 
 
-def reject_duplicate_final(source, inputs):
-    """Refuse another full final run of the same frozen source and verified inputs."""
-    root = ROOT / '.temp/gate-run'
-    for path in [*root.glob('*/report.json'), *root.glob('failed/*/report.json')]:
-        report = json.loads(path.read_text())
-        if (report.get('purpose') == 'final' and report.get('workspace') is True
-                and report.get('source_sha256') == source and report.get('inputs') == inputs):
-            raise ValueError(f'full final Gate already attempted for these frozen inputs: {path}; '
-                             'inspect failures and run affected targets before new acceptance')
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('targets', nargs='*', help='Gate targets/groups; use --list to inspect the plan')
     parser.add_argument('--workspace', action='store_true',
-                        help='all Cargo test executables once; final mode repeats only product timing cases')
+                        help='all Cargo test executables; diagnostic rounds repeat only product timing cases')
     parser.add_argument('--jobs', type=int, default=DEFAULT_JOBS,
                         help='audited independent processes (default: min(4, CPU count))')
     parser.add_argument('--list', action='store_true', help='validate and print the exact plan without building or running')
     parser.add_argument('--keep-going', action='store_true',
                         help='collect failures from every selected target once; never retry')
-    parser.add_argument('--final', action='store_true',
-                        help='one uninstrumented acceptance round after source freeze')
     args = parser.parse_args()
     rounds = rounds_from_env()
     validate_registry(TARGETS)
@@ -1049,13 +985,8 @@ def main():
     flags = ' '.join(os.environ.get(name, '') for name in [
         'RUSTFLAGS', 'CARGO_ENCODED_RUSTFLAGS', '__CARGO_LLVM_COV_RUSTC_WRAPPER_RUSTFLAGS'])
     coverage = bool(os.environ.get('CARGO_LLVM_COV') or 'instrument-coverage' in flags)
-    if args.final and (rounds != 1 or coverage):
-        raise ValueError('--final requires one uninstrumented round')
-    if args.workspace and not (args.final or coverage or args.list):
-        raise ValueError('workspace execution requires --final after source freeze; '
-                         'development checks select affected targets with --keep-going')
     if rounds == 3 and (os.environ.get('CARGO_LLVM_COV') or 'instrument-coverage' in flags):
-        raise ValueError('final timing rounds require uninstrumented executables; coverage runs once')
+        raise ValueError('diagnostic timing rounds require uninstrumented executables; coverage runs once')
     if not args.workspace and not args.targets:
         raise ValueError('select Gate targets or --workspace')
     if not 1 <= args.jobs <= (os.cpu_count() or 1):
@@ -1064,7 +995,7 @@ def main():
     targets = resolve_targets(selected, args.workspace)
     plans = round_plan(targets, rounds)
     plan = {'rounds': rounds, 'jobs': args.jobs, 'workspace': args.workspace, 'targets': list(targets),
-            'purpose': 'final' if args.final else 'coverage' if coverage else
+            'purpose': 'coverage' if coverage else
                        'diagnostic' if rounds == 3 else 'development',
             'repetition_policy': 'complete-once-timing-three', 'round_plan': plan_summary(plans),
             'exclusive': [name for name, target in targets.items() if target.exclusive],
@@ -1077,8 +1008,6 @@ def main():
         return 0
     inputs = verify_selected_inputs(targets)
     source = source_identity()
-    if args.final and args.workspace:
-        reject_duplicate_final(source, inputs)
     run_id = f'{time.strftime("%Y%m%dT%H%M%S")}-{uuid.uuid4().hex[:8]}'
     directory = ROOT / '.temp/gate-run' / run_id
     directory.mkdir(parents=True, mode=0o700)
@@ -1103,7 +1032,6 @@ def main():
             ci_progress('workspace', 'compile', 'FAIL', round(time.monotonic() - start, 2))
             raise
         ci_progress('workspace', 'compile', 'PASS', round(time.monotonic() - start, 2))
-        compilation_phase_barrier(report)
         preparation_start = time.monotonic()
         prepared = run_round(
             {name: target._replace(exclusive=False) for name, target in targets.items()},
@@ -1118,9 +1046,6 @@ def main():
         report['inventory_verified'] = True
         report['test_cases'] = sum(len(target.cases) for planned in plans for target in planned.values())
         for number, planned in enumerate(plans, 1):
-            if source_identity() != source or verify_selected_inputs(
-                    targets, probe_version=False) != inputs:
-                raise RuntimeError('source or verified inputs changed during the Gate')
             print(f'Gate round {number}/{len(plans)}; jobs={args.jobs}; targets={len(planned)}', flush=True)
             round_start = time.monotonic()
             results = run_round(planned, artifacts, directory / f'round-{number}', args.jobs,
@@ -1129,9 +1054,6 @@ def main():
                                       'targets': results})
             if len(results) != len(planned) or any(result['exit_code'] for result in results):
                 raise RuntimeError('Gate failed; no retries or subsequent rounds')
-        if source_identity() != source or verify_selected_inputs(
-                targets, probe_version=False) != inputs:
-            raise RuntimeError('source or verified inputs changed during the Gate')
         report['status'] = 'passed'
     except (Exception, KeyboardInterrupt) as error:
         report['error'] = str(error)

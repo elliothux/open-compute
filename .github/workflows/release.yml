@@ -347,7 +347,7 @@ jobs:
           path: ${{ runner.temp }}/release-broker
       - name: Verify the native packaged Broker against this checkout
         run: bun scripts/verify-release-package.ts "$RUNNER_TEMP/release-broker"
-      - name: Final workspace once with controlled egress (Linux)
+      - name: Workspace Gate with controlled egress (Linux)
         run: |
           bash test/containers-fixture/with-ci-linux-engine.sh \
             --images '${{ steps.container-images.outputs.directory }}' \
@@ -357,7 +357,7 @@ jobs:
             --command env OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO=1 \
             python3 -I -B test/containers-fixture/diagnostic-inputs.py \
             --binary "$RUNNER_TEMP/release-broker/ocd-${{ needs.failfast.outputs.tag }}-linux-x64" \
-            --workspace-final
+            --workspace
       - name: Release the CI browser AppArmor profile
         if: always()
         run: |
@@ -371,7 +371,7 @@ jobs:
           name: gate-evidence-${{ matrix.os }}
           include-hidden-files: true
           path: |
-            .temp/workspace-final-diagnostic/
+            .temp/workspace-diagnostic/
             .temp/browser-preparation/run-*/result.json
             .temp/browser-preparation/run-*/stderr.log
             .temp/gate-run/

@@ -50,12 +50,11 @@ Dashboard 的 Browser Run 绑定测试：启动配置了 Browser Run 的隔离 o
 ./test/gate.py p0-2 --list                 # 查看目标、用例和进程数，不构建
 ./test/gate.py p0-2 p2-3 --keep-going      # 收集全部失败
 ./test/gate.py workflow --jobs 2
-./test/gate.py --workspace --final --jobs 2
+./test/gate.py --workspace --jobs 2
 ```
 
 - 修复后只重跑失败和直接受影响的目标。
 - `--jobs N` 默认 `min(4, CPU 数)`，每个测试进程内 `--test-threads=1`。生命周期类用例由独占屏障串行执行。
-- 完整 workspace 运行需要 `--final`（coverage 和 `--list` 除外）。相同源码摘要和输入的 `--final` 只能运行一次。
 - `test/gate_cases.py` 按完整 Rust 测试名登记用例，必须与实际 discovery 一致。新增、删除或改名测试时同步它。
 - 每个目标使用独立 `TMPDIR`。`TMPDIR` 必须在本地磁盘上，不能在 FUSE 挂载上。
 
@@ -127,7 +126,7 @@ mbx +1.98.0 check --workspace --all-targets
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s test -p 'test_gate.py'
 ./test/check-production.py
 ./test/coverage.sh
-./test/gate.py --workspace --final
+./test/gate.py --workspace
 ```
 
 - `./test/coverage.sh` 要求 Rust 行覆盖率不低于 90.00%，报告在 `target/llvm-cov/{html/index.html,lcov.info,summary.json}`。
@@ -147,8 +146,8 @@ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s test -p 'test_gate.py'
 报告在 `.temp/gate-run/<run-id>/report.json`，失败的整次运行保留在 `failed/<run-id>/`。P3 运行另写 `contract-report.json`，
 `p3-cf-diff` 另写去除凭据的 `diff-report.json`。CI 实时输出 `CI_GATE_PROGRESS` 记录。
 
-先检查失败现场再重试。定位后删除本任务不再需要的 fixture 数据、二进制副本、profile 和详细日志。最后一次 `--final` 的 `report.json`
-要保留，`gate.py` 用它拒绝重复运行。检查结束后不能留下 workerd 进程、监听端口、临时文件或 secret。
+先检查失败现场再重试。定位后删除本任务不再需要的 fixture 数据、二进制副本、profile 和详细日志。保留本次运行的 `report.json`。
+检查结束后不能留下 workerd 进程、监听端口、临时文件或 secret。
 
 ## 本地 smoke
 

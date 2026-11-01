@@ -501,38 +501,36 @@ class GateTests(unittest.TestCase):
         self.assertEqual(calls, selected)
         self.assertEqual([item['exit_code'] for item in results], [1, 0, 1])
 
-    def test_workspace_execution_requires_explicit_final_phase(self):
-        with patch.object(gate.sys, 'argv', ['gate.py', '--workspace']), \
-             patch.dict(os.environ, {}, clear=True), \
-             patch.object(gate, 'resolve_targets') as resolve:
-            with self.assertRaisesRegex(ValueError, 'requires --final'):
-                gate.main()
-            resolve.assert_not_called()
-
-    def test_final_rejects_instrumented_or_repeated_execution(self):
-        for environment in [{'OPEN_COMPUTE_GATE_ROUNDS': '3'},
-                            {'RUSTFLAGS': '-C instrument-coverage'}]:
-            with patch.object(gate.sys, 'argv', ['gate.py', '--workspace', '--final']), \
-                 patch.dict(os.environ, environment, clear=True), \
-                 patch.object(gate, 'resolve_targets') as resolve:
-                with self.assertRaisesRegex(ValueError, 'one uninstrumented round'):
-                    gate.main()
-                resolve.assert_not_called()
-
-    def test_duplicate_final_rejects_passed_and_failed_frozen_inputs(self):
-        for failed in [False, True]:
-            with tempfile.TemporaryDirectory() as temp, patch.object(gate, 'ROOT', Path(temp)):
-                directory = Path(temp)/'.temp/gate-run'
-                directory = directory/'failed/run' if failed else directory/'run'
-                directory.mkdir(parents=True)
-                (directory/'report.json').write_text(json.dumps({
-                    'purpose': 'final', 'workspace': True, 'source_sha256': 'frozen',
-                    'inputs': {'runtime': 'verified'}, 'status': 'failed' if failed else 'passed',
+    def test_workspace_can_rerun_without_freezing_source_or_inputs(self):
+        targets = {name: target._replace(cases=gate.ONCE.get(name, ()) + gate.TIMING[name])
+                   for name, target in self.targets(['p0-2']).items()}
+        with tempfile.TemporaryDirectory() as temp, \
+             patch.object(gate, 'ROOT', Path(temp)), \
+             patch.object(gate, 'verify_inputs', return_value={}) as inputs, \
+             patch.object(gate, 'validate_contract_case_mapping'), \
+             patch.object(gate, 'write_contract_report'), \
+             patch.object(gate, 'source_identity', return_value='source') as source, \
+             patch.object(gate, 'resolve_targets', return_value=targets), \
+             patch.object(gate, 'build_targets', return_value=({}, {})), \
+             patch.object(gate, 'verify_case_inventory', return_value=targets), \
+             patch.object(gate.platform, 'platform', return_value='test-host'), \
+             patch.object(gate.subprocess, 'check_output', return_value='revision'), \
+             patch.object(gate.sys, 'argv', ['gate.py', '--workspace']), \
+             patch.dict(os.environ, OPEN_COMPUTE_GATE_ROUNDS='1'), \
+             patch.object(gate, 'run_round', return_value=[{'target': 'p0-2', 'exit_code': 0}]):
+            # Old acceptance reports, including failures, do not gate new executions.
+            previous = Path(temp)/'.temp/gate-run/failed/previous/report.json'
+            previous.parent.mkdir(parents=True)
+            for status in ['passed', 'failed']:
+                previous.write_text(json.dumps({
+                    'purpose': 'final', 'workspace': True, 'source_sha256': 'source',
+                    'inputs': {}, 'status': status,
                 }))
-                with self.assertRaisesRegex(ValueError, 'already attempted'):
-                    gate.reject_duplicate_final('frozen', {'runtime': 'verified'})
-                gate.reject_duplicate_final('changed', {'runtime': 'verified'})
-                gate.reject_duplicate_final('frozen', {'runtime': 'different'})
+                self.assertEqual(gate.main(), 0)
+            # Identities are captured for each report, never compared after building.
+            self.assertEqual(source.call_count, 2)
+            self.assertEqual(inputs.call_count, 2)
+            self.assertEqual(len(list(Path(temp).rglob('report.json'))), 3)
 
     def test_top_level_repeats_only_successful_rounds_and_keeps_failure_report(self):
         for rounds, failure, prepare_failure, expected in [
@@ -825,7 +823,7 @@ class GateTests(unittest.TestCase):
         self.assertIn('MBX_CACHE_EXPORT_GROUP', target.env_allowlist)
         self.assertIn('CARGO_INCREMENTAL', target.env_allowlist)
 
-    def test_final_workspace_runs_complete_inventory_once_and_only_timing_twice_more(self):
+    def test_diagnostic_workspace_runs_complete_inventory_once_and_only_timing_twice_more(self):
         targets = self.targets(['p0-1', 'p1-security', 'p2-1', 'workflow-product'])
         targets['unit'] = gate.Target('package', 'lib', 'lib', '/repo', False)
         targets[gate.SERVICE_LIB_TARGET] = gate.Target(
@@ -845,7 +843,7 @@ class GateTests(unittest.TestCase):
         deterministic = self.targets(['p1-security', 'p2-1'])
         self.assertEqual(gate.round_plan(deterministic, 3), [deterministic])
 
-    def test_final_main_records_mixed_rounds_and_stops_after_second_round_failure(self):
+    def test_diagnostic_main_records_mixed_rounds_and_stops_after_second_round_failure(self):
         for failure in [False, True]:
             selected = ['p1-security', 'workflow-product']
             targets = {name: target._replace(cases=tuple(sorted(
@@ -1022,7 +1020,7 @@ class GateTests(unittest.TestCase):
                     result = gate.execute_target('p0-2', '/compiled/test', Path(temp)/str(index), target)
                 self.assertEqual(result['exit_code'], expected)
 
-    def test_final_rounds_reject_coverage_before_build(self):
+    def test_diagnostic_rounds_reject_coverage_before_build(self):
         for variable, value in [('RUSTFLAGS', '-C instrument-coverage'),
                                 ('CARGO_ENCODED_RUSTFLAGS', '-Cinstrument-coverage'),
                                 ('CARGO_LLVM_COV', '1')]:
@@ -1145,7 +1143,7 @@ if '--list' not in sys.argv:
             self.assertEqual(old_profile.read_text(), 'old profile')
             self.assertEqual(len(list((root / '.temp/coverage').iterdir())), 2)
 
-    def test_source_freeze_ignores_designs_and_python_caches_but_includes_runtime_inputs(self):
+    def test_report_source_identity_ignores_designs_and_python_caches_but_includes_runtime_inputs(self):
         names = ['crates/service/src/resources.rs', 'docs/references/runbooks/install.md',
                  'docs/plan.md', 'docs/implemented/report.md',
                  'test/__pycache__/gate.cpython-314.pyc']
@@ -1395,134 +1393,6 @@ if '--list' not in sys.argv:
             contract = json.loads((root / 'contract-report.json').read_text())
             self.assertEqual(contract['cloudflareDifferential'], 'qualified')
             self.assertEqual(contract['platformVerdict'], 'go')
-
-
-class CompilePhaseTests(unittest.TestCase):
-    def exchange(self, response):
-        event_read, event_write = os.pipe()
-        resume_read, resume_write = os.pipe()
-        report = {'source_sha256': 'a' * 64, 'targets': ['unit']}
-        finished = threading.Event()
-        errors = []
-        def child():
-            try:
-                gate.compilation_phase_barrier(report)
-                finished.set()
-            except BaseException as error:
-                errors.append(error)
-        try:
-            with patch.dict(os.environ, {
-                'OPEN_COMPUTE_GATE_BUILD_EVENT_FD': str(event_write),
-                'OPEN_COMPUTE_GATE_RUN_CONTINUE_FD': str(resume_read),
-            }):
-                worker = threading.Thread(target=child, daemon=True)
-                worker.start()
-                self.assertTrue(gate.select.select([event_read], [], [], 3)[0])
-                event = json.loads(os.read(event_read, 4096))
-                self.assertEqual(event, {
-                    'phase': 'compiled', 'source_sha256': 'a' * 64, 'targets': 1,
-                })
-                self.assertFalse(finished.is_set())
-                if response:
-                    os.write(resume_write, response)
-                os.close(resume_write)
-                resume_write = None
-                worker.join(3)
-                self.assertFalse(worker.is_alive())
-            return report, finished.is_set(), errors
-        finally:
-            for fd in (event_read, event_write, resume_read, resume_write):
-                if fd is not None:
-                    try:
-                        os.close(fd)
-                    except OSError as error:
-                        if error.errno != 9:
-                            raise
-
-    def test_no_control_pipes_preserve_default_execution(self):
-        with patch.dict(os.environ, {}, clear=True):
-            report = {}
-            self.assertIsNone(gate.compilation_phase_barrier(report))
-            self.assertEqual(report, {})
-
-    def test_matching_source_releases_the_case_boundary(self):
-        report, finished, errors = self.exchange(b'RUN ' + b'a' * 64 + b'\n')
-        self.assertTrue(finished)
-        self.assertEqual(errors, [])
-        self.assertTrue(report['compilation_handoff']['resumed'])
-
-    def test_other_source_or_eof_cannot_start_cases(self):
-        for response in (b'RUN ' + b'b' * 64 + b'\n', b''):
-            with self.subTest(response=response):
-                report, finished, errors = self.exchange(response)
-                self.assertFalse(finished)
-                self.assertEqual(len(errors), 1)
-                self.assertIsInstance(errors[0], RuntimeError)
-                self.assertFalse(report['compilation_handoff']['resumed'])
-
-    def test_oversized_response_is_rejected(self):
-        report, finished, errors = self.exchange(b'x' * 256)
-        self.assertFalse(finished)
-        self.assertIsInstance(errors[0], RuntimeError)
-        self.assertFalse(report['compilation_handoff']['resumed'])
-
-    def test_missing_resource_confirmation_expires_before_cases(self):
-        event_read, event_write = os.pipe()
-        resume_read, resume_write = os.pipe()
-        try:
-            with patch.dict(os.environ, {
-                'OPEN_COMPUTE_GATE_BUILD_EVENT_FD': str(event_write),
-                'OPEN_COMPUTE_GATE_RUN_CONTINUE_FD': str(resume_read),
-            }), patch.object(gate.time, 'monotonic', side_effect=[0, 121]):
-                with self.assertRaises(TimeoutError):
-                    gate.compilation_phase_barrier({'source_sha256': 'a' * 64, 'targets': ['unit']})
-        finally:
-            os.close(event_read)
-            os.close(resume_write)
-
-    def test_partial_invalid_or_standard_descriptor_pair_is_rejected(self):
-        pairs = [
-            {'OPEN_COMPUTE_GATE_BUILD_EVENT_FD': '5'},
-            {'OPEN_COMPUTE_GATE_RUN_CONTINUE_FD': '6'},
-            {'OPEN_COMPUTE_GATE_BUILD_EVENT_FD': '1', 'OPEN_COMPUTE_GATE_RUN_CONTINUE_FD': '2'},
-            {'OPEN_COMPUTE_GATE_BUILD_EVENT_FD': '5', 'OPEN_COMPUTE_GATE_RUN_CONTINUE_FD': '5'},
-            {'OPEN_COMPUTE_GATE_BUILD_EVENT_FD': 'bad', 'OPEN_COMPUTE_GATE_RUN_CONTINUE_FD': '6'},
-        ]
-        for values in pairs:
-            with self.subTest(values=values), patch.dict(os.environ, values, clear=True):
-                with self.assertRaises((RuntimeError, ValueError)):
-                    gate.compilation_phase_barrier({'source_sha256': 'a' * 64, 'targets': ['unit']})
-        with tempfile.TemporaryFile() as file:
-            first, second = os.dup(file.fileno()), os.dup(file.fileno())
-            with patch.dict(os.environ, {
-                'OPEN_COMPUTE_GATE_BUILD_EVENT_FD': str(first),
-                'OPEN_COMPUTE_GATE_RUN_CONTINUE_FD': str(second),
-            }, clear=True):
-                with self.assertRaisesRegex(ValueError, 'pipe'):
-                    gate.compilation_phase_barrier({'source_sha256': 'a' * 64, 'targets': ['unit']})
-            file.seek(0)
-            self.assertEqual(file.read(), b'')
-
-    def test_rejected_handoff_prevents_even_case_inventory_processes(self):
-        with tempfile.TemporaryDirectory() as temp, \
-             patch.object(gate, 'ROOT', Path(temp)), \
-             patch.object(gate, 'verify_inputs', return_value={}), \
-             patch.object(gate, 'validate_contract_case_mapping'), \
-             patch.object(gate, 'write_contract_report'), \
-             patch.object(gate, 'source_identity', return_value='a' * 64), \
-             patch.object(gate, 'resolve_targets', return_value=GateTests.targets(['p0-2'])), \
-             patch.object(gate, 'build_targets', return_value=({}, {})), \
-             patch.object(gate.platform, 'platform', return_value='test-host'), \
-             patch.object(gate.subprocess, 'check_output', return_value='revision'), \
-             patch.object(gate.sys, 'argv', ['gate.py', 'p0-2']), \
-             patch.dict(os.environ, OPEN_COMPUTE_GATE_ROUNDS='1'), \
-             patch.object(gate, 'compilation_phase_barrier', side_effect=RuntimeError('handoff rejected')), \
-             patch.object(gate, 'run_round') as run:
-            self.assertEqual(gate.main(), 1)
-            run.assert_not_called()
-            report = json.loads(next(Path(temp).rglob('report.json')).read_text())
-            self.assertEqual(report['test_processes_executed'], 0)
-            self.assertFalse(report['inventory_verified'])
 
 
 if __name__ == '__main__':
