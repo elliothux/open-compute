@@ -350,7 +350,6 @@ pub(crate) enum WorkerUploadBinding {
         name: String,
         class_name: String,
         script_name: Option<String>,
-        environment: Option<String>,
     },
     /// Existing Queue producer.
     Queue {
@@ -373,7 +372,6 @@ pub(crate) enum WorkerUploadBinding {
     Service {
         name: String,
         service: String,
-        environment: Option<String>,
         entrypoint: Option<String>,
         cross_account_grant: Option<String>,
         props: Option<serde_json::Value>,
@@ -451,12 +449,10 @@ impl WorkerUploadBinding {
             } => internal_env.is_some() || raw.is_some(),
             Self::Ai { staging, raw, .. } => staging.is_some() || raw.is_some(),
             Self::Queue { raw, .. } | Self::Workflow { raw, .. } => raw.is_some(),
-            Self::DurableObjectNamespace { environment, .. } => environment.is_some(),
             Self::Service {
-                environment,
                 cross_account_grant,
                 ..
-            } => environment.is_some() || cross_account_grant.is_some(),
+            } => cross_account_grant.is_some(),
             _ => false,
         }
     }

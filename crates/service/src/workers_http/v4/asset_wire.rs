@@ -35,35 +35,6 @@ pub(super) fn valid_multipart_content_type(request: &Request) -> bool {
     valid && values.next().is_none()
 }
 
-pub(super) fn single_content_type(request: &Request) -> Result<String, V4Error> {
-    let mut values = request.headers().get_all(header::CONTENT_TYPE).iter();
-    let value = values
-        .next()
-        .and_then(|value| value.to_str().ok())
-        .ok_or(V4Error::InvalidRequest)?;
-    if values.next().is_some() || !valid_media_type(value) {
-        return Err(V4Error::InvalidRequest);
-    }
-    Ok(normalize_content_type(Some(value)))
-}
-
-fn valid_media_type(value: &str) -> bool {
-    let media_type = value.split(';').next().map(str::trim).unwrap_or_default();
-    let Some((kind, subtype)) = media_type.split_once('/') else {
-        return false;
-    };
-    !kind.is_empty()
-        && !subtype.is_empty()
-        && kind.bytes().chain(subtype.bytes()).all(|byte| {
-            byte.is_ascii_alphanumeric()
-                || matches!(
-                    byte,
-                    b'!' | b'#' | b'$' | b'&' | b'^' | b'_' | b'.' | b'+' | b'-'
-                )
-        })
-        && value.bytes().all(|byte| !byte.is_ascii_control())
-}
-
 pub(super) fn normalize_content_type(value: Option<&str>) -> String {
     match value {
         Some("application/null") | None => "application/octet-stream".to_owned(),

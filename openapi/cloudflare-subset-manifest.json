@@ -516,12 +516,5 @@
       "requestMediaType": "none"
     }
   ],
-  "observedMultipartOperations": [
-    {
-      "operation": "POST /accounts/{account_id}/workers/assets/upload/{manifest_hash}",
-      "status": "supported",
-      "source": "wrangler-dist/cli.js:157069",
-      "note": "Wrangler per-object asset upload; not present in the pinned official OpenAPI snapshot"
-    }
-  ]
+  "observedMultipartOperations": []
 }

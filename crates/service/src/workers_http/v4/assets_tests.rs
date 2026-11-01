@@ -79,7 +79,7 @@ fn hashes_routing_tokens_and_buckets_cover_supported_shapes() {
 }
 
 #[tokio::test]
-async fn asset_session_single_upload_and_completion_token_round_trip() {
+async fn asset_session_bulk_upload_and_completion_token_round_trip() {
     let (_temp, _mock, state, account, _storage) =
         crate::tests::initialized_worker_http_fixture().await;
     let authority = crate::cloudflare_v4::accounts::V4InstanceContext::new(account, 1);
@@ -118,15 +118,20 @@ async fn asset_session_single_upload_and_completion_token_round_trip() {
     let created = json(created).await;
     assert_eq!(created["result"]["buckets"][0][0], hash);
     let upload_token = created["result"]["jwt"].as_str().unwrap();
+    assert!(
+        !open_token(&api, upload_token)
+            .unwrap()
+            .wrangler_single_asset_uploads
+    );
     assert!(authenticate_upload_token(
         &configured,
-        &format!("/client/v4/accounts/{public_account}/workers/assets/upload/{hash}"),
+        &format!("/client/v4/accounts/{public_account}/workers/assets/upload"),
         Some(upload_token)
     ));
     let other_instance = InstanceId::generate();
     assert!(!authenticate_upload_token(
         &configured,
-        &format!("/client/v4/accounts/{other_instance}/workers/assets/upload/{hash}"),
+        &format!("/client/v4/accounts/{other_instance}/workers/assets/upload"),
         Some(upload_token)
     ));
     assert!(!authenticate_upload_token(
@@ -136,14 +141,21 @@ async fn asset_session_single_upload_and_completion_token_round_trip() {
     ));
     assert!(!authenticate_upload_token(
         &configured,
-        &format!("/client/v4/accounts/{public_account}/workers/assets/upload/{hash}"),
+        &format!("/client/v4/accounts/{public_account}/workers/assets/upload"),
         None
     ));
     for token in ["", "a.b", "a.b.c.d", "a.%%%.c", "a.YQ.c"] {
         assert!(open_token(&api, token).is_err());
     }
 
-    let upload_uri = format!("/client/v4/accounts/{public_account}/workers/assets/upload/{hash}");
+    let upload_uri =
+        format!("/client/v4/accounts/{public_account}/workers/assets/upload?base64=true");
+    let multipart = |bytes: &[u8]| {
+        let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+        format!(
+            "--fixed\r\nContent-Disposition: form-data; name=\"{hash}\"\r\nContent-Type: text/html; charset=utf-8\r\n\r\n{encoded}\r\n--fixed--\r\n"
+        )
+    };
     let conflict = app
         .clone()
         .oneshot(
@@ -151,8 +163,8 @@ async fn asset_session_single_upload_and_completion_token_round_trip() {
                 .method(Method::POST)
                 .uri(&upload_uri)
                 .header(header::AUTHORIZATION, format!("Bearer {upload_token}"))
-                .header(header::CONTENT_TYPE, "text/html")
-                .body(Body::from("wrong"))
+                .header(header::CONTENT_TYPE, "multipart/form-data; boundary=fixed")
+                .body(Body::from(multipart(b"wrong")))
                 .unwrap(),
         )
         .await
@@ -166,8 +178,8 @@ async fn asset_session_single_upload_and_completion_token_round_trip() {
                 .method(Method::POST)
                 .uri(&upload_uri)
                 .header(header::AUTHORIZATION, format!("Bearer {upload_token}"))
-                .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
-                .body(Body::from(content.as_slice()))
+                .header(header::CONTENT_TYPE, "multipart/form-data; boundary=fixed")
+                .body(Body::from(multipart(content)))
                 .unwrap(),
         )
         .await
@@ -180,7 +192,7 @@ async fn asset_session_single_upload_and_completion_token_round_trip() {
     assert!(open_token(&api, &complete_token).is_ok());
     assert!(!authenticate_upload_token(
         &configured,
-        &upload_uri,
+        &format!("/client/v4/accounts/{public_account}/workers/assets/upload"),
         Some(&complete_token)
     ));
 

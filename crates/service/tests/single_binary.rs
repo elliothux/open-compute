@@ -378,15 +378,17 @@ async fn assert_asset_upload_token_isolation(address: SocketAddr, alpha: &str, b
         tokens.push(response["result"]["jwt"].as_str().unwrap().to_owned());
     }
     for (instance, foreign_token) in [(alpha, &tokens[1]), (beta, &tokens[0])] {
-        let path = format!("/client/v4/accounts/{instance}/workers/assets/upload/{hash}");
+        let path = format!("/client/v4/accounts/{instance}/workers/assets/upload?base64=true");
         let (status, _) = request_http_body_with_headers(
             address,
             "POST",
             "127.0.0.1",
             foreign_token,
             &path,
-            "good",
-            "Content-Type: text/html\r\n",
+            &format!(
+                "--fixed\r\nContent-Disposition: form-data; name=\"{hash}\"\r\nContent-Type: text/html\r\n\r\nZ29vZA==\r\n--fixed--\r\n"
+            ),
+            "Content-Type: multipart/form-data; boundary=fixed\r\n",
         )
         .await;
         assert_eq!(status, 401, "another instance's upload token was accepted");

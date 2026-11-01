@@ -180,7 +180,6 @@ fn unsupported_binding_options_are_rejected_by_every_affected_variant() {
         {"type":"ai","name":"ai","staging":true},
         {"type":"queue","name":"queue","queue_name":"queue","raw":true},
         {"type":"workflow","name":"workflow","workflow_name":"workflow","raw":true},
-        {"type":"durable_object_namespace","name":"do","class_name":"Object","environment":"preview"},
         {"type":"service","name":"service","service":"target","cross_account_grant":"grant"}
     ]))
     .unwrap();

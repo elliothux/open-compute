@@ -1022,3 +1022,50 @@ async fn beta_worker_delete_resolves_public_identity_and_enforces_authority() {
 
 mod completed_request_delete;
 mod workflow_delete;
+
+#[tokio::test]
+async fn upload_rejects_binding_environment_with_the_public_invalid_request_code() {
+    let (_temp, _mock, state, account, _storage) =
+        crate::tests::initialized_worker_http_fixture().await;
+    let authority = crate::cloudflare_v4::accounts::V4InstanceContext::new(account, 1);
+    let uri = format!(
+        "/client/v4/accounts/{}/workers/scripts/site",
+        authority.public_id()
+    );
+    let app = crate::http::admin_router(state.with_v4_instance_context(authority));
+    for binding in [
+        serde_json::json!({"type":"service","name":"SERVICE","service":"target"}),
+        serde_json::json!({"type":"durable_object_namespace","name":"OBJECT","class_name":"Object"}),
+    ] {
+        for environment in [serde_json::json!("preview"), serde_json::Value::Null] {
+            let mut binding = binding.clone();
+            binding["environment"] = environment;
+            let metadata = serde_json::json!({
+                "main_module":"index.js",
+                "compatibility_date":"2026-09-08",
+                "bindings":[binding]
+            });
+            let body = format!(
+                "--fixed\r\nContent-Disposition: form-data; name=\"metadata\"\r\nContent-Type: application/json\r\n\r\n{metadata}\r\n--fixed\r\nContent-Disposition: form-data; name=\"index.js\"; filename=\"index.js\"\r\nContent-Type: application/javascript+module\r\n\r\nexport default {{}};\r\n--fixed--\r\n"
+            );
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(Method::PUT)
+                        .uri(&uri)
+                        .header(header::AUTHORIZATION, "Bearer admin-token")
+                        .header(header::CONTENT_TYPE, "multipart/form-data; boundary=fixed")
+                        .body(Body::from(body))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            assert_eq!(
+                response_json(response).await["errors"][0]["code"],
+                9_100_003
+            );
+        }
+    }
+}

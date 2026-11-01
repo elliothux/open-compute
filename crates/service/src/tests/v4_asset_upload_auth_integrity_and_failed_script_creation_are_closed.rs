@@ -32,9 +32,13 @@ async fn v4_asset_upload_auth_integrity_and_failed_script_creation_are_closed() 
     let missing_json: serde_json::Value = serde_json::from_slice(&missing_body).unwrap();
     assert_eq!(missing_json["errors"][0]["code"], 10_007);
 
-    let upload_path = format!(
-        "/client/v4/accounts/{public_account}/workers/assets/upload/4c73266e449fea54bba5a6dea074dbbd"
-    );
+    let upload_path =
+        format!("/client/v4/accounts/{public_account}/workers/assets/upload?base64=true");
+    let multipart = |encoded: &str| {
+        format!(
+            "--fixed\r\nContent-Disposition: form-data; name=\"4c73266e449fea54bba5a6dea074dbbd\"\r\nContent-Type: text/html\r\n\r\n{encoded}\r\n--fixed--\r\n"
+        )
+    };
     let fake = app
         .clone()
         .oneshot(
@@ -42,7 +46,8 @@ async fn v4_asset_upload_auth_integrity_and_failed_script_creation_are_closed() 
                 .method("POST")
                 .uri(&upload_path)
                 .header("authorization", "Bearer eyJ.fake.signature")
-                .body(Body::from("good"))
+                .header("content-type", "multipart/form-data; boundary=fixed")
+                .body(Body::from(multipart("Z29vZA==")))
                 .unwrap(),
         )
         .await
@@ -96,9 +101,10 @@ async fn v4_asset_upload_auth_integrity_and_failed_script_creation_are_closed() 
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/client/v4/accounts/00000000000000000000000000000000/workers/assets/upload/4c73266e449fea54bba5a6dea074dbbd")
+                .uri("/client/v4/accounts/00000000000000000000000000000000/workers/assets/upload?base64=true")
                 .header("authorization", format!("Bearer {upload_token}"))
-                .body(Body::from("good"))
+                .header("content-type", "multipart/form-data; boundary=fixed")
+                .body(Body::from(multipart("Z29vZA==")))
                 .unwrap(),
         )
         .await
@@ -112,8 +118,8 @@ async fn v4_asset_upload_auth_integrity_and_failed_script_creation_are_closed() 
                 .method("POST")
                 .uri(&upload_path)
                 .header("authorization", format!("Bearer {upload_token}"))
-                .header("content-type", "text/html")
-                .body(Body::from("evil"))
+                .header("content-type", "multipart/form-data; boundary=fixed")
+                .body(Body::from(multipart("ZXZpbA==")))
                 .unwrap(),
         )
         .await
@@ -128,8 +134,8 @@ async fn v4_asset_upload_auth_integrity_and_failed_script_creation_are_closed() 
                 .method("POST")
                 .uri(&upload_path)
                 .header("authorization", format!("Bearer {upload_token}"))
-                .header("content-type", "text/html")
-                .body(Body::from("good"))
+                .header("content-type", "multipart/form-data; boundary=fixed")
+                .body(Body::from(multipart("Z29vZA==")))
                 .unwrap(),
         )
         .await
@@ -147,8 +153,8 @@ async fn v4_asset_upload_auth_integrity_and_failed_script_creation_are_closed() 
                 .method("POST")
                 .uri(&upload_path)
                 .header("authorization", format!("Bearer {upload_token}"))
-                .header("content-type", "text/html")
-                .body(Body::from("good"))
+                .header("content-type", "multipart/form-data; boundary=fixed")
+                .body(Body::from(multipart("Z29vZA==")))
                 .unwrap(),
         )
         .await
@@ -167,7 +173,8 @@ async fn v4_asset_upload_auth_integrity_and_failed_script_creation_are_closed() 
                 .method("POST")
                 .uri(&upload_path)
                 .header("authorization", format!("Bearer {completion_token}"))
-                .body(Body::from("good"))
+                .header("content-type", "multipart/form-data; boundary=fixed")
+                .body(Body::from(multipart("Z29vZA==")))
                 .unwrap(),
         )
         .await

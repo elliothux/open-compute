@@ -150,7 +150,7 @@ test("vendor extension operations have stable typed envelopes and exact request 
   );
 });
 
-test("settings surfaces, asset upload variants, and old routes are classified exactly", () => {
+test("settings surfaces, bulk asset upload, and old routes are classified exactly", () => {
   const routes = new Map(
     capability.managementApi.routes.map((item) => [item.id, item]),
   );
@@ -158,7 +158,7 @@ test("settings surfaces, asset upload variants, and old routes are classified ex
     capability.managementApi.routes.filter(
       (item) => item.status === "supported",
     ).length,
-    201,
+    200,
   );
   assert.equal(
     capability.managementApi.routes.filter(
@@ -263,14 +263,10 @@ test("settings surfaces, asset upload variants, and old routes are classified ex
   ]);
   assert.deepEqual(
     [
-      routes.get(
-        "POST /accounts/{account_id}/workers/assets/upload/{manifest_hash}",
-      )?.status,
-      routes.get(
-        "POST /accounts/{account_id}/workers/assets/upload/{manifest_hash}",
-      )?.source,
+      routes.get("POST /accounts/{account_id}/workers/assets/upload")?.status,
+      routes.get("POST /accounts/{account_id}/workers/assets/upload")?.source,
     ],
-    ["supported", "wrangler-dist/cli.js:157069"],
+    ["supported", "cloudflare-openapi"],
   );
   assert.equal(
     routes.get("GET /accounts/{account_id}/r2/buckets/{bucket_name}/objects")

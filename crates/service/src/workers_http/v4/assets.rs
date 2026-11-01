@@ -1,8 +1,8 @@
 //! Fixed-Wrangler Static Assets session, upload, and completion-token adapter.
 
 use super::asset_wire::{
-    base64_size, canonical_path, invalid, normalize_content_type, single_content_type, v4_error,
-    valid_bulk_query, valid_multipart_content_type,
+    base64_size, canonical_path, invalid, normalize_content_type, v4_error, valid_bulk_query,
+    valid_multipart_content_type,
 };
 use super::domain;
 use super::handlers::{authorize, now_ms, platform_error};
@@ -13,7 +13,6 @@ use crate::cloudflare_v4::{
 use crate::http::HttpState;
 use crate::workers_http::WorkerApiState;
 use axum::Router;
-use axum::body::to_bytes;
 use axum::extract::{DefaultBodyLimit, FromRequest, Multipart, Path, Request, State};
 use axum::http::{StatusCode, header};
 use axum::response::Response;
@@ -48,10 +47,6 @@ pub(crate) fn router() -> Router<HttpState> {
         .route(
             "/accounts/{account}/workers/assets/upload",
             post(upload_bulk).layer(DefaultBodyLimit::max(64 * 1024 * 1024)),
-        )
-        .route(
-            "/accounts/{account}/workers/assets/upload/{hash}",
-            post(upload_single),
         )
 }
 
@@ -271,63 +266,6 @@ async fn upload_multipart(
         };
     }
     upload_result(api, context, &session)
-}
-
-async fn upload_single(
-    State(state): State<HttpState>,
-    Path((account, hash)): Path<(String, String)>,
-    request: Request,
-) -> Response {
-    let context = match authorize(&request, V4Permission::ProductWrite) {
-        Ok(value) => value,
-        Err(response) => return response.into_response(),
-    };
-    if request.uri().query().is_some() {
-        return error_response(V4Error::InvalidRequest, context.request_id());
-    }
-    let Some(api) = state.worker_api().cloned() else {
-        return error_response(V4Error::Unavailable, context.request_id());
-    };
-    let instance_id = match domain::resolve_instance(&state, &account) {
-        Ok(value) => value,
-        Err(error) => return error_response(error, context.request_id()),
-    };
-    let claims = match upload_claims(&api, &request, instance_id) {
-        Ok(value) => value,
-        Err(error) => return error_response(error, context.request_id()),
-    };
-    let content_type = match single_content_type(&request) {
-        Ok(value) => value,
-        Err(error) => return error_response(error, context.request_id()),
-    };
-    let bytes = match to_bytes(request.into_body(), 25 * 1024 * 1024).await {
-        Ok(value) => value.to_vec(),
-        Err(_) => {
-            return error_response(
-                V4Error::Official(crate::cloudflare_v4::V4OfficialError::RequestTooLarge),
-                context.request_id(),
-            );
-        }
-    };
-    let session = match current_session(&api, &claims) {
-        Ok(value) => value,
-        Err(error) => return platform_error(context.request_id(), &error),
-    };
-    let session = match persist_asset(
-        &api,
-        &session,
-        instance_id,
-        &claims.script,
-        &hash,
-        Some(&content_type),
-        bytes,
-    )
-    .await
-    {
-        Ok(value) => value,
-        Err(error) => return platform_error(context.request_id(), &error),
-    };
-    upload_result(&api, context, &session)
 }
 
 async fn persist_asset(
@@ -585,18 +523,7 @@ pub(crate) fn authenticate_upload_token(
             "assets",
             "upload",
         ]
-        | [
-            "client",
-            "v4",
-            "accounts",
-            account,
-            "workers",
-            "assets",
-            "upload",
-            _,
-        ]
-        | ["accounts", account, "workers", "assets", "upload"]
-        | ["accounts", account, "workers", "assets", "upload", _] => *account,
+        | ["accounts", account, "workers", "assets", "upload"] => *account,
         _ => return false,
     };
     let Some(api) = state.worker_api() else {

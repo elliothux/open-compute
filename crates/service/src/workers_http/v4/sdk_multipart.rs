@@ -534,7 +534,6 @@ fn insert_binding_field(
                 | "instance_name"
                 | "class_name"
                 | "script_name"
-                | "environment"
                 | "queue_name"
                 | "workflow_name"
                 | "service"

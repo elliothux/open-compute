@@ -1527,15 +1527,6 @@
         "requestMediaType": "none"
       },
       {
-        "id": "POST /accounts/{account_id}/workers/assets/upload/{manifest_hash}",
-        "method": "POST",
-        "path": "/accounts/{account_id}/workers/assets/upload/{manifest_hash}",
-        "status": "supported",
-        "source": "wrangler-dist/cli.js:157069",
-        "constraint": "Wrangler per-object asset upload; not present in the pinned official OpenAPI snapshot",
-        "requestMediaType": "multipart"
-      },
-      {
         "id": "POST /accounts/{account_id}/artifacts/namespaces",
         "method": "POST",
         "path": "/accounts/{account_id}/artifacts/namespaces",
