@@ -18,9 +18,9 @@ def job(source, name):
 
 class ImageWorkflowTests(unittest.TestCase):
     def test_each_build_consumer_waits_for_current_run_images(self):
-        for workflow, names in [('ci.yml', ('checks', 'ai-search-qualification',
-                                            's3-provider-qualification')),
-                                ('release.yml', ('coverage', 'integration', 'package'))]:
+        for workflow, names in [('ci.yml', ('checks', 'product-gates')),
+                                ('release.yml', ('coverage', 'package', 'ai-search-qualification',
+                                                 's3-provider-qualification'))]:
             source = (ROOT / '.github/workflows' / workflow).read_text()
             for name in names:
                 with self.subTest(workflow=workflow, job=name):
@@ -82,18 +82,13 @@ class ImageWorkflowTests(unittest.TestCase):
     def test_release_requires_full_linux_workspace_and_coverage(self):
         source = (ROOT / '.github/workflows/release.yml').read_text()
         coverage = job(source, 'coverage')
-        integration = job(source, 'integration')
         self.assertIn('./test/coverage.sh --jobs 2', coverage)
-        self.assertEqual(integration.count('test/containers-fixture/diagnostic-inputs.py'), 1)
-        self.assertEqual(integration.count('--workspace'), 1)
-        guard = (ROOT / 'test/containers-fixture/diagnostic-inputs.py').read_text()
-        self.assertIn("'./test/test-p0-2-egress-linux.sh', '--workspace', '--jobs', '2'", guard)
-        self.assertIn('OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO=1', integration)
-        self.assertNotIn('./test/gate.py --workspace', integration)
+        self.assertNotIn('\n  integration:', source)
+        self.assertEqual(source.count('./test/coverage.sh --jobs 2'), 1)
+        self.assertIn('OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO=1', coverage)
         self.assertIn('runs-on: ubuntu-24.04', coverage)
-        self.assertIn('os: [ubuntu-24.04]', integration)
         self.assertNotIn('intel', source.lower())
-        for body in (coverage, integration):
+        for body in (coverage,):
             self.assertEqual(body.count('test/containers-fixture/with-ci-linux-engine.sh'), 1)
             verify = body.index('bun scripts/verify-release-package.ts "$RUNNER_TEMP/release-broker"')
             self.assertLess(verify, body.index('test/containers-fixture/with-ci-linux-engine.sh'))

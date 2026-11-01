@@ -24,6 +24,7 @@ jobs:
     outputs:
       scope: ${{ steps.scope.outputs.scope }}
       components: ${{ steps.scope.outputs.components }}
+      gate_targets: ${{ steps.scope.outputs.gate_targets }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -51,7 +52,7 @@ jobs:
 
   fixture-images:
     needs: failfast
-    if: needs.failfast.outputs.scope == 'full' || (github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || github.event_name == 'push'))
+    if: needs.failfast.outputs.scope == 'full' || needs.failfast.outputs.gate_targets != '' || (github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || github.event_name == 'push'))
     uses: ./.github/workflows/container-images.yml
     with:
       arm64: false
@@ -90,9 +91,6 @@ jobs:
       - name: Service installation permissions and umask regression
         if: matrix.suite == 'core'
         run: mbx test --locked -p open-compute-service --lib service_manager::tests -- --test-threads=1
-      - name: SDK package pack inspection and isolated consumer smoke
-        if: matrix.suite == 'core'
-        run: bun packages/sdk/scripts/inspect-package.ts
       - name: fmt
         if: matrix.suite == 'core'
         run: mbx fmt --all --check
@@ -117,6 +115,56 @@ jobs:
       - name: dependency boundaries
         if: matrix.suite == 'core'
         run: ./test/check-boundaries.sh
+
+  product-gates:
+    needs: [failfast, fixture-images]
+    if: needs.failfast.outputs.gate_targets != ''
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          lfs: true
+      - uses: ./.github/actions/setup-open-compute
+        with:
+          browser-fixture: ${{ contains(needs.failfast.outputs.gate_targets, 'p22-browser-run') && 'true' || 'false' }}
+      - uses: ./.github/actions/prepare-container-fixture-images
+        id: container-images
+      - name: Build runtime and application assets
+        run: bun run build
+      - name: Run affected product Gates
+        env:
+          GATE_TARGETS: ${{ needs.failfast.outputs.gate_targets }}
+        run: |
+          set -euo pipefail
+          read -r -a targets <<< "$GATE_TARGETS"
+          command=(./test/gate.py)
+          if [[ " $GATE_TARGETS " == *" p0-2 "* ]]; then
+            command=(env OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO=1 ./test/test-p0-2-egress-linux.sh)
+          fi
+          if [[ " $GATE_TARGETS " == *" p23-containers "* ]]; then
+            mbx build --locked -p open-compute-service --bin ocd --features test-support
+            bash test/containers-fixture/with-ci-linux-engine.sh \
+              --images '${{ steps.container-images.outputs.directory }}' \
+              --binary "$PWD/target/debug/ocd" \
+              --root /tmp/oc-ci-products \
+              --evidence "$PWD/.temp/containers-ci-engine" \
+              --command "${command[@]}" "${targets[@]}" --keep-going --jobs 2
+          else
+            "${command[@]}" "${targets[@]}" --keep-going --jobs 2
+          fi
+      - name: Release the CI browser AppArmor profile
+        if: always()
+        run: |
+          if [[ -n "${OPEN_COMPUTE_CI_BROWSER_APPARMOR_EXECUTABLE:-}" ]]; then
+            python3 scripts/ci-browser-apparmor.py remove \
+              "$OPEN_COMPUTE_CI_BROWSER_APPARMOR_EXECUTABLE"
+          fi
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: affected-product-gate-failures
+          include-hidden-files: true
+          path: .temp/gate-run/failed/
 
   frontend-checks:
     needs: failfast
@@ -149,7 +197,6 @@ jobs:
             *,sdk,*)
               bun run --filter @open-compute/sdk typecheck
               bun run --filter @open-compute/sdk test
-              bun packages/sdk/scripts/inspect-package.ts
               ;;
           esac
           case ",$COMPONENTS," in
@@ -164,41 +211,8 @@ jobs:
             *,website,*) bun run --filter @open-compute/website build ;;
           esac
           case ",$COMPONENTS," in
-          esac
-          case ",$COMPONENTS," in
             *,docs,*) bun scripts/check-docs.ts ;;
           esac
-
-  gateway-caddy-module:
-    needs: failfast
-    if: needs.failfast.outputs.scope == 'full'
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          lfs: true
-      - name: Initialize pinned source submodules
-        run: git submodule update --init --depth 1 third_party/caddy third_party/gitserver third_party/workerd
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.3.14
-      - name: Install locked JavaScript tooling
-        run: bun install --frozen-lockfile --ignore-scripts
-      - name: Download and verify pinned runtime inputs
-        run: |
-          mkdir -p "$PWD/.temp/runtime-inputs"
-          bun scripts/prepare-workerd.ts --dest "$PWD/.temp/runtime-inputs/workerd" --download >> "$GITHUB_ENV"
-          bun scripts/prepare-caddy.ts --dest "$PWD/.temp/runtime-inputs/caddy" --download >> "$GITHUB_ENV"
-      - name: Prepare exact embedded inputs for the Docker runtime build
-        run: |
-          bun scripts/build-workerd.ts
-          bun run --filter @open-compute/sdk build
-          bun run --filter @open-compute/dashboard build
-          bun run --filter @open-compute/runtime build
-      - name: Build and validate the custom Caddy module in Docker
-        run: docker build --file test/gateway/Dockerfile --tag open-compute-gateway-caddy-test .
-      - name: Run ocd and its embedded Caddy in an isolated Docker build
-        run: docker build --file test/gateway/runtime.Dockerfile --tag open-compute-gateway-runtime-test .
 
   docs-checks:
     needs: failfast
@@ -239,106 +253,6 @@ jobs:
             test/release-tools.test.mjs
           bun scripts/check-docs.ts
 
-  ai-search-qualification:
-    needs: fixture-images
-    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || github.event_name == 'push')
-    runs-on: ubuntu-24.04
-    environment: ai-search-qualification
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          lfs: true
-      - uses: ./.github/actions/setup-open-compute
-      - uses: ./.github/actions/prepare-container-fixture-images
-      - name: Build current runtime and application assets
-        run: bun run build
-      - name: Fetch locked Rust dependencies
-        run: mbx fetch --locked
-      - name: Run local AI Search Gate
-        run: ./test/gate.py p5-search --jobs 1
-      - name: Require protected provider configuration
-        env:
-          BAILIAN_API_HOST: ${{ secrets.BAILIAN_API_HOST }}
-          BAILIAN_API_KEY: ${{ secrets.BAILIAN_API_KEY }}
-          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-          COHERE_API_KEY: ${{ secrets.COHERE_API_KEY }}
-        run: |
-          set -euo pipefail
-          test -n "$BAILIAN_API_HOST"
-          test -n "$BAILIAN_API_KEY"
-          test -n "$DEEPSEEK_API_KEY"
-          test -n "$COHERE_API_KEY"
-      - name: Run live AI provider qualification
-        env:
-          BAILIAN_API_HOST: ${{ secrets.BAILIAN_API_HOST }}
-          BAILIAN_API_KEY: ${{ secrets.BAILIAN_API_KEY }}
-          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-          COHERE_API_KEY: ${{ secrets.COHERE_API_KEY }}
-        run: ./test/gate.py p5-ai-provider-qualification --jobs 1
-      # The harness redacts provider credentials from captured case output, and
-      # Actions masks registered secrets; retained tmp/ evidence is never uploaded.
-      - name: Show AI provider qualification diagnostics
-        if: failure()
-        run: |
-          shopt -s nullglob
-          for log in .temp/gate-run/failed/*/round-*/p5-ai-provider-qualification/output.log \
-            .temp/gate-run/failed/*/prepare/p5-ai-provider-qualification/output.log; do
-            echo "=== $log"
-            cat "$log"
-          done
-          for report in .temp/gate-run/failed/*/report.json; do
-            echo "=== $report"
-            jq '{status, error, results}' "$report"
-          done
-      - name: Upload AI provider qualification evidence
-        if: failure()
-        uses: actions/upload-artifact@v7
-        with:
-          name: ai-provider-qualification-failed-${{ github.run_attempt }}
-          path: |
-            .temp/gate-run/failed/*/*.json
-            .temp/gate-run/failed/*/*.log
-            .temp/gate-run/failed/*/*/*/*.log
-          if-no-files-found: ignore
-          retention-days: 14
-
-  s3-provider-qualification:
-    needs: fixture-images
-    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || github.event_name == 'push')
-    runs-on: ubuntu-24.04
-    environment: s3-provider-qualification
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          lfs: true
-      - uses: ./.github/actions/setup-open-compute
-      - uses: ./.github/actions/prepare-container-fixture-images
-      - name: Build current runtime and application assets
-        run: bun run build
-      - name: Fetch locked Rust dependencies
-        run: mbx fetch --locked
-      - name: Run production S3 preflight against hosted R2
-        env:
-          OPEN_COMPUTE_TEST_R2_S3_ENDPOINT: ${{ secrets.OPEN_COMPUTE_TEST_R2_S3_ENDPOINT }}
-          OPEN_COMPUTE_TEST_R2_S3_REGION: ${{ secrets.OPEN_COMPUTE_TEST_R2_S3_REGION }}
-          OPEN_COMPUTE_TEST_R2_S3_BUCKET: ${{ secrets.OPEN_COMPUTE_TEST_R2_S3_BUCKET }}
-          OPEN_COMPUTE_TEST_R2_S3_ACCESS_KEY_ID: ${{ secrets.OPEN_COMPUTE_TEST_R2_S3_ACCESS_KEY_ID }}
-          OPEN_COMPUTE_TEST_R2_S3_SECRET_ACCESS_KEY: ${{ secrets.OPEN_COMPUTE_TEST_R2_S3_SECRET_ACCESS_KEY }}
-          OPEN_COMPUTE_TEST_R2_S3_MUTATION_ACK: ${{ secrets.OPEN_COMPUTE_TEST_R2_S3_MUTATION_ACK }}
-        run: ./test/gate.py s3-provider-qualification --jobs 1
-
-      - name: Upload S3 provider qualification failure evidence
-        if: failure()
-        uses: actions/upload-artifact@v7
-        with:
-          name: s3-provider-qualification-failed-${{ github.run_attempt }}
-          path: |
-            .temp/gate-run/failed/*/*.json
-            .temp/gate-run/failed/*/*.log
-            .temp/gate-run/failed/*/*/*/*.log
-          if-no-files-found: ignore
-          retention-days: 14
-
   ci:
     if: ${{ always() && !cancelled() }}
     needs:
@@ -346,31 +260,30 @@ jobs:
         failfast,
         fixture-images,
         checks,
+        product-gates,
         frontend-checks,
         docs-checks,
         release-tooling-checks,
-        gateway-caddy-module,
-        ai-search-qualification,
-        s3-provider-qualification,
       ]
     runs-on: ubuntu-24.04
     steps:
       - name: Require development checks
         env:
           SCOPE: ${{ needs.failfast.outputs.scope }}
+          GATE_TARGETS: ${{ needs.failfast.outputs.gate_targets }}
         run: |
           set -euo pipefail
           test "${{ needs.failfast.result }}" = success
           if [ "${{ github.event_name }}" != pull_request ]; then
             test "${{ needs.fixture-images.result }}" = success
-            test "${{ needs.ai-search-qualification.result }}" = success
-            test "${{ needs.s3-provider-qualification.result }}" = success
+          fi
+          if [ -n "$GATE_TARGETS" ]; then
+            test "${{ needs.product-gates.result }}" = success
           fi
           case "$SCOPE" in
             full)
               test "${{ needs.fixture-images.result }}" = success
               test "${{ needs.checks.result }}" = success
-              test "${{ needs.gateway-caddy-module.result }}" = success
               ;;
             frontend) test "${{ needs.frontend-checks.result }}" = success ;;
             docs) test "${{ needs.docs-checks.result }}" = success ;;

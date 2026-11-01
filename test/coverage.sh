@@ -82,7 +82,11 @@ if [ -n "${__CARGO_LLVM_COV_RUSTC_WRAPPER_RUSTFLAGS:-}" ]; then
 fi
 unset RUSTC_WRAPPER
 export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-1}"
-./test/gate.py --workspace "$@"
+if [ "${OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO:-}" = 1 ]; then
+  ./test/test-p0-2-egress-linux.sh --workspace "$@"
+else
+  ./test/gate.py --workspace "$@"
+fi
 
 mkdir -p "$report_dir"
 # External-runner caches retain prior hashed executables. cargo-llvm-cov's

@@ -1,8 +1,8 @@
 # Cloudflare 上游刷新
 
 状态：**已实现（P16，2026-09-14）**。P20 将当前入口替换为 cf。本页定义 OpenAPI schema、官方 TypeScript SDK 与 cf 的长期更新合同。发现
-（scanner：`test/upstream-review/scanner.ts`，分类 fixture：`test/upstream-review/scanner.test.mjs`）与 scheduled
-workflow（`.github/workflows/cloudflare-upstream-review.yml`，周一 06:23 UTC + `workflow_dispatch`）已接入；ready 候选的
+（scanner：`test/upstream-review/scanner.ts`，分类 fixture：`test/upstream-review/scanner.test.mjs`）与手动
+workflow（`.github/workflows/cloudflare-upstream-review.yml`，`workflow_dispatch`）已接入；ready 候选的
 frozen-identity Draft PR 由 `draft-pr` job 通过 `test/upstream-review/apply-candidate.ts` 机械再生。历史扫描
 （2026-09-14）判定为 `blocked`：schema HEAD 前进但官方 SDK 7.2.0 未发布对应字段（AI Search `use_ocr`、
 Queue create `jurisdiction`），当时 Wrangler 需要协调评审。2026-09-25 经 three-way closure 接受 OpenAPI
@@ -23,13 +23,12 @@ fixtures 与刷新 workflow 切换为 cf。历史只读 scan 已发现更新的 
 - npm stable dist-tag 指向的 `cf` 版本、tarball integrity/shasum、官方 `cf/config` Worker schema 与 CLI identity。
 
 “最新”表示经过验证的最新相容组合，不等于三个独立 moving latest 的机械拼接。schema 先出现而已发布 SDK 尚未表达的字段不是可接受
-组合；定时运行要求持续发现、分类和留证，不要求每次运行都移动正式 pin。OpenAPI dialect、Cloudflare API version、schema revision、
+组合；手动运行发现、分类和留证，不要求每次运行都移动正式 pin。OpenAPI dialect、Cloudflare API version、schema revision、
 SDK package version 和 cf package version 是不同身份，不能把其中一个的变化代替其它输入的复核。
 
-## 调度与只读发现
+## 手动运行与只读发现
 
-`.github/workflows/cloudflare-upstream-review.yml` 每周一在非整点运行，并支持 `workflow_dispatch`。scheduled workflow 只从默认分支
-执行已提交的仓库内 scanner，以当前 lock 为基线解析三个上游的 stable/HEAD 身份。
+通过 `workflow_dispatch` 手动运行 `.github/workflows/cloudflare-upstream-review.yml`，执行已提交的仓库内 scanner，以当前 lock 为基线解析三个上游的 stable/HEAD 身份。
 
 发现 job 默认只有 `contents: read`。它只能把下载内容写入 `.temp/upstream-review/`，静态检查 schema 和 npm tarball；不得运行
 upstream package lifecycle script、生成代码、执行下载且尚未安装/验证依赖图的 cf CLI，或持有 npm、GitHub Release、environment、deployment 与 OIDC

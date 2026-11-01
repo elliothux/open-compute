@@ -4,7 +4,7 @@
 
 2026-10-06 起，Rust 工具直接调用全局安装的 `mbx`，不同项目和 worktree 共用全局对象缓存；CI 安装 mbx 1.22.0。
 普通编译 job 直接缓存可写 Cargo target，不导出 mbx objects bundle，也不使用 sccache；Cargo registry/git 下载仍独立缓存。
-coverage 和最终 Gate 使用 action 的 `local` backend，不恢复普通检查留下的其他配置 target。
+coverage 使用 action 的 `local` backend，不恢复普通检查留下的其他配置 target。
 Cargo 下载缓存、全局 MBX 配置和 store 保持不变，不创建第二份缓存。
 具体策略与安装命令见[测试说明](testing.md)。下文已观察到的成本与研究取舍记录当时的实现，不代表当前缓存配置。
 
@@ -117,16 +117,15 @@ workspace/final binary。当前没有应用 benchmark，且仓库 cache 已接�
   Clippy、production hygiene 三个职责并行执行，完整覆盖 build/typecheck、快速工具测试、format、
   no-default-features、Rust 1.98 compile check、metadata 和边界检查；这些任务统一依赖
   秒级 `failfast`。release-only tooling scope 不启动 Rust。release tag 校验精确 source commit 已通过该静态资格，不再重跑。
-- CI 先按变更路径分类：纯 `docs/**`、README 和 release notes 只执行文档检查；纯 SDK、dashboard、
-  website 或 toolchain 变更只执行对应 JavaScript 检查；release workflow/assembler/test 使用独立
+- CI 的静态检查先按变更路径分类：非嵌入文档、README 和 release notes 执行文档检查；SDK、dashboard、
+  website 变更执行对应 JavaScript 检查；产品 Gate 由 `test/ci_scope.py` 取并集，共享或未知路径运行全部产品；release workflow/assembler/test 使用独立
   release-tooling 检查；文档与 frontend 混合时在同一个 frontend job 执行两类检查。只有 `sourceDigest`
   变化的独立修复提交回溯到上一次 baseline revision，按期间全部 owning files 选择检查；baseline 其他字段、
   Rust、runtime、workerd、`ci.yml`、共享 setup 或未知路径仍执行完整静态资格。汇总 job `ci` 保留不变，
   避免分支保护因跳过具体 job 失效。
 - tag qualification：`failfast` 先验证 release environment、source/release identity、notes、SDK report
-  contract、npm credential 和目标版本。三个 package job 成功后，Linux coverage 与一个 Linux 完整最终 workspace Gate 并行启动。
-  最终 Gate 在受控 egress fixture 中执行，包含 `p0-2`；工作流不再另跑一轮 `p0-2`。
-- 三个正式平台 package：身份验证后即并行构建。Linux coverage 和最终 Gate 校验并复用同次运行的 Linux x64 发行包作为 Broker，不再重复构建 debug Broker。publish 等待所有路径成功。macOS Intel 不再进入 package 矩阵。
+  contract、npm credential 和目标版本。三个 package job 成功后，Linux coverage 在受控 egress fixture 中执行唯一完整 workspace Gate，包含 `p0-2`。
+- 三个正式平台 package：身份验证后即并行构建。Linux coverage 校验并复用同次运行的 Linux x64 发行包作为 Broker，不再重复构建 debug Broker。publish 等待所有路径成功。macOS Intel 不再进入 package 矩阵。
 - package 与普通 production hygiene 使用同一 executable verifier，生成 mode 0600 临时配置再查询
   capabilities，同时核对 release identity、版本、licenses 和嵌入 docs；不初始化平台数据目录。
 - `main` 不保护；`release` 要求 PR、最新 required `ci` 和讨论解决；tag 必须来自通过 CI 的 `release`。
@@ -195,12 +194,12 @@ SKU，单独增加 SKU 预算不能覆盖它。要允许 cache 写入，Actions 
 | 增加 codegen units              | 暖跑剩余 245.58 秒为最终 ThinLTO/link；没有应用 benchmark 前不拿未知运行时退化换几十秒构建时间                      |
 | 缓存完整 workspace/final binary | 当前 target/compiler cache 已证明 9 分钟暖跑；不增加 source-keyed 全量 target 缓存挤占 20 GB 配额                   |
 | nightly 编译参数 / 替换 linker  | 不引入 nightly 或未验证 linker；保持正式 Rust 1.98 和原生链接契约                                                   |
-| Gate 调度                       | 保持 `--jobs 2`；service lib 的 787/8 case 分区并行调度，但 241 MB P0.5 矩阵继续独占，避免以资源争用换时序失败      |
+| Gate 调度                       | 保持 `--jobs 2`；service lib 的 787/8 case 分区并行调度，但三分片 P0.5 矩阵继续独占，避免以资源争用换时序失败       |
 
 ## 测试与复用边界
 
 本地选择、单轮策略与 evidence 复用统一见[测试说明](testing.md#按输入选择测试)。CI 各职责见上文；
-release 的 coverage、未插桩 Gate、受控 egress、安装生命周期、stress、三平台 package 与公开字节回读互不替代。
+release 的 coverage 中的完整 Gate 与受控 egress、安装生命周期、stress、三平台 package 与公开字节回读互不替代。
 变更后的输入不能继承旧 PASS，也不重复调度未变化且身份一致的检查。
 
 ## 失败后的选择性重跑

@@ -19,16 +19,15 @@ const identity = {
 };
 const digest = "c".repeat(64);
 
-test("release report requires the Linux final and all supported native packages", async () => {
+test("release report requires one workspace coverage pass and all supported native packages", async () => {
   const workflow = await readFile(
     new URL("../.github/workflows/release.yml", import.meta.url),
     "utf8",
   );
-  const platform = /os: \[([^\]]+)\]/.exec(workflow)?.[1];
-  assert.equal(platform, "ubuntu-24.04");
+  assert.doesNotMatch(workflow, /\n  integration:/);
+  assert.equal(workflow.match(/--command .*test\/coverage\.sh/g)?.length, 1);
   assert.deepEqual(gateEvidence, [
     "coverage-gate-evidence",
-    "gate-evidence-ubuntu-24.04",
     "package-gate-darwin-arm64",
     "package-gate-linux-arm64",
     "package-gate-linux-x64",
@@ -43,7 +42,7 @@ test("release report publishes selected metrics and escaped case names; rejects 
     new URL("../.temp/release-report-tests/run-", import.meta.url).pathname,
   );
   await createReleaseEvidence(directory, identity, digest);
-  const gatePath = join(directory, "gate-evidence-ubuntu-24.04/report.json");
+  const gatePath = join(directory, "coverage-gate-evidence/report.json");
   const gate = JSON.parse(await readFile(gatePath, "utf8"));
   gate.results[0].targets[0].cases = ['<img src=x onerror="throw 1">'];
   gate.targets.push("open-compute-service.bin.ocd");
@@ -69,10 +68,10 @@ test("release report publishes selected metrics and escaped case names; rejects 
     );
   }
   const report = JSON.parse(rendered.json);
-  assert.equal(report.gates.length, 5);
+  assert.equal(report.gates.length, 4);
   assert.deepEqual(
     report.gates
-      .find((entry) => entry.label === "gate-evidence-ubuntu-24.04")
+      .find((entry) => entry.label === "coverage-gate-evidence")
       .targets.at(-1).cases,
     [],
   );

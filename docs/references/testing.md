@@ -19,7 +19,8 @@ SDK 消费者读取 `packages/sdk/dist/`。SDK 生成面变化时先运行 `bun 
 bun -e 'import {sourceIdentity} from "./test/conformance/checks/context.ts"; console.log(sourceIdentity())'
 ```
 
-把输出写入 `test/conformance/baseline.json` 的 `sourceDigest`。CI 的路径分类在 `test/ci_scope.py`。
+把输出写入 `test/conformance/baseline.json` 的 `sourceDigest`。CI 的路径与产品 Gate 映射在 `test/ci_scope.py`；PR 只执行静态检查和受影响产品，未知或共享路径执行全部产品 Gate。
+完整 workspace、90% coverage、打包和安装升级只在 release workflow 执行一轮，CI 不定时运行。
 
 ## 准备输入
 

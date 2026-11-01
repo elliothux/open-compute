@@ -2,8 +2,11 @@
 """Classify changed files so CI can skip unrelated heavyweight checks."""
 
 import argparse
+from fnmatch import fnmatchcase
 import json
 import subprocess
+
+from gate import CARGO_TARGETS, selection
 
 
 FRONTEND_ROOTS = {
@@ -26,6 +29,67 @@ RELEASE_TOOLING = {
 
 BASELINE_PATH = "test/conformance/baseline.json"
 
+# Unknown/shared inputs select all product Gates, not workspace unit or package tests.
+PRODUCT_TARGETS = tuple(name for name in selection(['all']) if name != 'single-binary')
+PRODUCT_PATHS = {
+    ('crates/*/src/kv*', 'crates/*/src/cloudflare_v4/kv*'): ('p0-4',),
+    ('crates/*/src/r2*', 'crates/*/src/cloudflare_v4/r2*'): ('p0-5',),
+    ('crates/*/src/d1*', 'crates/*/src/cloudflare_v4/d1*'): ('p0-6',),
+    ('crates/*/src/durable_objects*', 'crates/*/src/do_*'): ('p0-7', 'p0-8'),
+    ('crates/*/src/queue*', 'crates/*/src/cloudflare_v4/queues*',
+     'crates/*/src/scheduler/queue*'): ('p0-2', 'p2-1', 'p2-2', 'p2-exit'),
+    ('crates/*/src/workflow*', 'crates/*/src/cloudflare_v4/workflows*',
+     'crates/*/src/scheduler/workflow*'): ('workflow',),
+    ('crates/*/src/services*', 'crates/*/src/service_binding*'): ('p3-services',),
+    ('crates/*/src/cache*', 'crates/*/src/image*', 'crates/*/src/workers_cache*',
+     'crates/*/src/cloudflare_v4/images*'): ('p3-cache-images',),
+    ('crates/*/src/asset*', 'crates/*/src/workers_http/v4/asset*'): ('p3-assets',),
+    ('crates/search/*', 'crates/*/src/ai_search*',
+     'crates/*/src/cloudflare_v4/ai_search*'): ('p5-search',),
+    ('crates/*/src/*container*', 'crates/*/src/cloudflare_v4/container*',
+     'test/applications/containers/*', 'test/containers-fixture/*'): ('p23-containers',),
+    ('crates/*/src/browser*', 'test/applications/browser-run/*',
+     'test/browser-fixture.lock.json', 'scripts/prepare-browser.ts'): ('p22-browser-run',),
+    ('apps/dashboard/*',): ('dashboard',),
+    ('docs/references/p1-deviations.md', 'test/conformance/*', 'openapi/*'): ('p3-contract',),
+}
+
+
+def affected_targets(paths: list[str]) -> list[str]:
+    if not paths:
+        return list(PRODUCT_TARGETS)
+    targets = set()
+    for path in paths:
+        matched = False
+        for patterns, names in PRODUCT_PATHS.items():
+            if any(fnmatchcase(path, pattern) for pattern in patterns):
+                targets.update(selection(names))
+                matched = True
+        for name, (_, native, _) in CARGO_TARGETS.items():
+            owned = (native, native.removesuffix('_gate') + '_support')
+            if any(fnmatchcase(path, f'crates/*/tests/{stem}.rs') or
+                   fnmatchcase(path, f'crates/*/tests/{stem}/*') for stem in owned):
+                targets.add(name)
+                matched = True
+            if name.startswith('p21-python-') and any(path.startswith(root) for root in (
+                    f'test/applications/{name.removeprefix("p21-")}/',
+                    f'test/fixtures/{name.removeprefix("p21-")}/')):
+                targets.add(name)
+                matched = True
+        if matched:
+            continue
+        if path.startswith('crates/service/tests/python_support/'):
+            targets.update(name for name in CARGO_TARGETS if name.startswith('p21-python-'))
+        elif path.startswith('docs/references/runbooks/'):
+            return list(PRODUCT_TARGETS)
+        elif (is_docs_path(path) or path.startswith('apps/website/') or path in RELEASE_TOOLING):
+            continue
+        else:
+            return list(PRODUCT_TARGETS)
+    if targets:
+        targets.add('p3-contract')
+    return [name for name in PRODUCT_TARGETS if name in targets]
+
 
 def git_output(args: list[str]) -> str:
     return subprocess.check_output(
@@ -35,7 +99,7 @@ def git_output(args: list[str]) -> str:
 
 def diff_files(base: str, head: str) -> list[str]:
     return git_output(
-        ["diff", "--name-only", "--diff-filter=ACMRTUXB", base, head]
+        ["diff", "--name-only", "--no-renames", base, head]
     ).splitlines()
 
 
@@ -82,7 +146,9 @@ def changed_files(base: str, head: str) -> list[str]:
 
 
 def is_docs_path(path: str) -> bool:
-    return path.startswith("docs/") or path in {"README.md", "README.zh.md"}
+    return (path.startswith(("docs/", ".agents/", ".claude/"))
+            or path.rsplit("/", 1)[-1] in {"AGENTS.md", "CLAUDE.md"}
+            or path in {"README.md", "README.zh.md"})
 
 
 def classify(paths: list[str]) -> tuple[str, str]:
@@ -121,6 +187,7 @@ def main() -> None:
     print(f"scope={scope}")
     print(f"components={components}")
     print(f"changed_files={len(paths)}")
+    print(f"gate_targets={' '.join(affected_targets(paths))}")
 
 
 if __name__ == "__main__":

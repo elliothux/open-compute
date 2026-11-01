@@ -72,6 +72,134 @@ async function writeTestCommand(directory, name, source) {
   await writeFile(join(directory, name), source, { mode: 0o755 });
 }
 
+async function parseWorkflow(path) {
+  const { stdout } = await execFileAsync("bun", [
+    "-e",
+    "console.log(JSON.stringify(Bun.YAML.parse(await Bun.file(process.argv[1]).text())))",
+    path,
+  ]);
+  return JSON.parse(stdout);
+}
+
+test("CI and release workflow YAML, dependencies and Bash commands remain valid without schedules", async () => {
+  for (const name of await readdir(
+    new URL("../.github/workflows/", import.meta.url),
+  )) {
+    if (!name.endsWith(".yml")) continue;
+    const workflow = await parseWorkflow(
+      fileURLToPath(new URL(`../.github/workflows/${name}`, import.meta.url)),
+    );
+    assert.equal(workflow.on.schedule, undefined, name);
+    for (const [id, job] of Object.entries(workflow.jobs)) {
+      for (const need of [job.needs ?? []].flat())
+        assert.ok(workflow.jobs[need], `${name}: ${id} needs ${need}`);
+      for (const step of job.steps ?? []) {
+        if (step.run && (!step.shell || step.shell.startsWith("bash")))
+          await execFileAsync("bash", ["-n", "-c", step.run]);
+      }
+    }
+  }
+});
+
+test("affected product command preserves unions through egress and isolated Containers wrappers", async () => {
+  const workflow = await parseWorkflow(ciWorkflowPath);
+  const ci = await readFile(ciWorkflowPath, "utf8");
+  assert.doesNotMatch(
+    ci,
+    /gate\.py --workspace|test\/coverage\.sh|scripts\/package-release\.sh|packages\/sdk\/scripts\/inspect-package\.ts|install-upgrade-fixture/,
+  );
+  const release = await parseWorkflow(releaseWorkflowPath);
+  for (const name of [
+    "coverage",
+    "package",
+    "install-lifecycle",
+    "sdk-package",
+    "stress",
+    "gateway-caddy-module",
+    "ai-search-qualification",
+    "s3-provider-qualification",
+  ])
+    assert.ok(release.jobs.assemble.needs.includes(name), name);
+  const step = workflow.jobs["product-gates"].steps.find(
+    (entry) => entry.name === "Run affected product Gates",
+  );
+  const root = await mkdtemp(join(tmpdir(), "oc-ci-products-"));
+  try {
+    await mkdir(join(root, "test/containers-fixture"), { recursive: true });
+    const recorder = `#!${process.execPath}
+require('node:fs').appendFileSync(process.env.CI_COMMAND_LOG, JSON.stringify({name: require('node:path').basename(process.argv[1]), args: process.argv.slice(2), sudo: process.env.OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO}) + '\\n');
+`;
+    for (const name of [
+      "test/gate.py",
+      "test/test-p0-2-egress-linux.sh",
+      "mbx",
+    ])
+      await writeTestCommand(root, name, recorder);
+    await writeTestCommand(
+      root,
+      "test/containers-fixture/with-ci-linux-engine.sh",
+      `#!/bin/bash
+set -eu
+while [[ "$1" != --command ]]; do shift; done
+shift
+exec env -i PATH="$PATH" CI_COMMAND_LOG="$CI_COMMAND_LOG" "$@"
+`,
+    );
+    for (const targets of [
+      "p0-5 p3-contract",
+      "p0-2 p3-contract",
+      "p23-containers p3-contract",
+      "p0-2 p23-containers p3-contract",
+    ]) {
+      const log = join(root, "commands.jsonl");
+      await writeFile(log, "");
+      await execFileAsync(
+        "bash",
+        [
+          "-c",
+          step.run.replace(
+            "${{ steps.container-images.outputs.directory }}",
+            join(root, "images"),
+          ),
+        ],
+        {
+          cwd: root,
+          env: {
+            PATH: `${root}:${process.env.PATH}`,
+            GATE_TARGETS: targets,
+            CI_COMMAND_LOG: log,
+          },
+        },
+      );
+      const calls = (await readFile(log, "utf8"))
+        .trim()
+        .split("\n")
+        .map(JSON.parse);
+      assert.equal(calls.length, targets.includes("p23-containers") ? 2 : 1);
+      if (calls.length === 2)
+        assert.deepEqual(calls[0].args, [
+          "build",
+          "--locked",
+          "-p",
+          "open-compute-service",
+          "--bin",
+          "ocd",
+          "--features",
+          "test-support",
+        ]);
+      assert.deepEqual(calls.at(-1), {
+        name: targets.includes("p0-2")
+          ? "test-p0-2-egress-linux.sh"
+          : "gate.py",
+        args: [...targets.split(" "), "--keep-going", "--jobs", "2"],
+        ...(targets.includes("p0-2") ? { sudo: "1" } : {}),
+      });
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 async function writeTargetCommands(directory) {
   await writeTestCommand(
     directory,
@@ -267,12 +395,9 @@ test("release qualification and local Docker diagnostic keep their exact boundar
   );
   assert.match(
     workflow,
-    /name: Enforce 90 percent Rust line coverage\n\s+env:\n\s+CARGO_BUILD_JOBS: "2"\n\s+OPEN_COMPUTE_COVERAGE_HTML: "0"\n\s+run: \|\n\s+bash test\/containers-fixture\/with-ci-linux-engine\.sh[\s\S]*?--command \.\/test\/coverage\.sh --jobs 2/,
+    /name: Enforce 90 percent Rust line coverage\n\s+env:\n\s+CARGO_BUILD_JOBS: "2"\n\s+OPEN_COMPUTE_COVERAGE_HTML: "0"\n\s+run: \|\n\s+bash test\/containers-fixture\/with-ci-linux-engine\.sh[\s\S]*?--command env OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO=1 \.\/test\/coverage\.sh --jobs 2/,
   );
-  assert.match(
-    workflow,
-    /  integration:\n    needs: \[failfast, fixture-images, package\]\n/,
-  );
+  assert.doesNotMatch(workflow, /\n  integration:/);
   assert.match(
     workflow,
     /  sdk-package:\n    # Build the SDK tarball once[\s\S]*?needs: failfast\n/,
@@ -297,12 +422,12 @@ test("release qualification and local Docker diagnostic keep their exact boundar
     assert.equal(ci.split(command).length - 1, 1);
   }
   assert.match(
-    ci,
+    workflow,
     /  s3-provider-qualification:\n[\s\S]*?environment: s3-provider-qualification[\s\S]*?OPEN_COMPUTE_TEST_R2_S3_ACCESS_KEY_ID: \$\{\{ secrets\.OPEN_COMPUTE_TEST_R2_S3_ACCESS_KEY_ID \}\}[\s\S]*?\.\/test\/gate\.py s3-provider-qualification --jobs 1/,
   );
-  assert.match(
+  assert.doesNotMatch(
     ci,
-    /test "\$\{\{ needs\.s3-provider-qualification\.result \}\}" = success/,
+    /\n  (?:s3-provider-qualification|ai-search-qualification|gateway-caddy-module):/,
   );
   assert.match(
     workflow,
@@ -340,23 +465,17 @@ test("release qualification and local Docker diagnostic keep their exact boundar
     workflow,
     /name: unverified-native-build-\$\{\{ matrix\.target \}\}[\s\S]*?\.temp\/dashboard-e2e[\s\S]*?\.temp\/dashboard-server[\s\S]*?apps\/dashboard\/test-results/,
   );
-  assert.equal(workflow.match(/--workspace/g)?.length, 1);
-  const finalGuard = await readFile(
-    new URL("./containers-fixture/diagnostic-inputs.py", import.meta.url),
+  const coverage = await readFile(
+    new URL("./coverage.sh", import.meta.url),
     "utf8",
   );
-  assert.match(
-    finalGuard,
-    /'\.\/test\/test-p0-2-egress-linux\.sh', '--workspace', '--jobs', '2'/,
-  );
+  assert.match(coverage, /test-p0-2-egress-linux\.sh --workspace/);
+  assert.match(coverage, /minimum_lines=90\.00/);
   assert.match(
     workflow,
-    /  integration:\n[\s\S]*?CARGO_INCREMENTAL: "0"\n\s+CARGO_PROFILE_DEV_DEBUG: line-tables-only\n\s+CARGO_PROFILE_TEST_DEBUG: line-tables-only/,
+    /  coverage:\n[\s\S]*?CARGO_INCREMENTAL: "0"\n\s+CARGO_PROFILE_DEV_DEBUG: line-tables-only\n\s+CARGO_PROFILE_TEST_DEBUG: line-tables-only/,
   );
-  assert.match(
-    workflow,
-    /browser-fixture: "true"\n\s+rust-cache-backend: local/,
-  );
+  assert.match(workflow, /browser-fixture: "true"/);
   assert.doesNotMatch(workflow, /test-p0-2-egress-linux\.sh p0-2 --jobs 2/);
   for (const source of [workflow]) {
     assert.match(
@@ -481,7 +600,7 @@ test("release qualification and local Docker diagnostic keep their exact boundar
 
 test("Linux qualification reuses same-run packages without a dependency cycle or debug Broker build", async () => {
   const workflow = await readFile(releaseWorkflowPath, "utf8");
-  for (const name of ["coverage", "integration"]) {
+  for (const name of ["coverage"]) {
     const job = workflow.split(`\n  ${name}:`)[1].split(/\n  [a-z][a-z-]*:/)[0];
     assert.match(job, /needs: \[failfast, fixture-images, package\]/);
     assert.match(
@@ -514,7 +633,9 @@ test("recovery rebuilds the stress index without accepting failed or unknown res
     "coverage",
     "sdk-package",
     "stress",
-    "integration (linux)",
+    "gateway-caddy-module",
+    "ai-search-qualification",
+    "s3-provider-qualification",
     "package (macos)",
     "package (arm64)",
     "package (x64)",
@@ -1116,7 +1237,7 @@ test("installation qualification is a mandatory publication dependency", async (
   );
   const recovery = await readFile(recoveryWorkflowPath, "utf8");
   assert.match(recovery, /startswith\("install-lifecycle \("\)/);
-  assert.match(recovery, /length == 13 and all\(\.conclusion == "success"\)/);
+  assert.match(recovery, /length == 15 and all\(\.conclusion == "success"\)/);
   await execFileAsync(
     "python3",
     ["-B", "-m", "unittest", "discover", "-s", "test/install-lifecycle"],

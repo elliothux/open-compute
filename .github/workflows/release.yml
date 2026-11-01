@@ -248,6 +248,132 @@ jobs:
     needs: failfast
     uses: ./.github/workflows/container-images.yml
 
+  gateway-caddy-module:
+    needs: failfast
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          lfs: true
+      - name: Initialize pinned source submodules
+        run: git submodule update --init --depth 1 third_party/caddy third_party/gitserver third_party/workerd
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - name: Install locked JavaScript tooling
+        run: bun install --frozen-lockfile --ignore-scripts
+      - name: Download and verify pinned runtime inputs
+        run: |
+          mkdir -p "$PWD/.temp/runtime-inputs"
+          bun scripts/prepare-workerd.ts --dest "$PWD/.temp/runtime-inputs/workerd" --download >> "$GITHUB_ENV"
+          bun scripts/prepare-caddy.ts --dest "$PWD/.temp/runtime-inputs/caddy" --download >> "$GITHUB_ENV"
+      - name: Prepare exact embedded inputs for the Docker runtime build
+        run: |
+          bun scripts/build-workerd.ts
+          bun run --filter @open-compute/sdk build
+          bun run --filter @open-compute/dashboard build
+          bun run --filter @open-compute/runtime build
+      - name: Build and validate the custom Caddy module in Docker
+        run: docker build --file test/gateway/Dockerfile --tag open-compute-gateway-caddy-test .
+      - name: Run ocd and its embedded Caddy in an isolated Docker build
+        run: docker build --file test/gateway/runtime.Dockerfile --tag open-compute-gateway-runtime-test .
+
+  ai-search-qualification:
+    needs: [failfast, fixture-images]
+    runs-on: ubuntu-24.04
+    environment: ai-search-qualification
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          lfs: true
+      - uses: ./.github/actions/setup-open-compute
+      - uses: ./.github/actions/prepare-container-fixture-images
+      - name: Build current runtime and application assets
+        run: bun run build
+      - name: Fetch locked Rust dependencies
+        run: mbx fetch --locked
+      - name: Require protected provider configuration
+        env:
+          BAILIAN_API_HOST: ${{ secrets.BAILIAN_API_HOST }}
+          BAILIAN_API_KEY: ${{ secrets.BAILIAN_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          COHERE_API_KEY: ${{ secrets.COHERE_API_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$BAILIAN_API_HOST"
+          test -n "$BAILIAN_API_KEY"
+          test -n "$DEEPSEEK_API_KEY"
+          test -n "$COHERE_API_KEY"
+      - name: Run live AI provider qualification
+        env:
+          BAILIAN_API_HOST: ${{ secrets.BAILIAN_API_HOST }}
+          BAILIAN_API_KEY: ${{ secrets.BAILIAN_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          COHERE_API_KEY: ${{ secrets.COHERE_API_KEY }}
+        run: ./test/gate.py p5-ai-provider-qualification --jobs 1
+      # The harness redacts provider credentials from captured case output, and
+      # Actions masks registered secrets; retained tmp/ evidence is never uploaded.
+      - name: Show AI provider qualification diagnostics
+        if: failure()
+        run: |
+          shopt -s nullglob
+          for log in .temp/gate-run/failed/*/round-*/p5-ai-provider-qualification/output.log \
+            .temp/gate-run/failed/*/prepare/p5-ai-provider-qualification/output.log; do
+            echo "=== $log"
+            cat "$log"
+          done
+          for report in .temp/gate-run/failed/*/report.json; do
+            echo "=== $report"
+            jq '{status, error, results}' "$report"
+          done
+      - name: Upload AI provider qualification evidence
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ai-provider-qualification-failed-${{ github.run_attempt }}
+          path: |
+            .temp/gate-run/failed/*/*.json
+            .temp/gate-run/failed/*/*.log
+            .temp/gate-run/failed/*/*/*/*.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+  s3-provider-qualification:
+    needs: [failfast, fixture-images]
+    runs-on: ubuntu-24.04
+    environment: s3-provider-qualification
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          lfs: true
+      - uses: ./.github/actions/setup-open-compute
+      - uses: ./.github/actions/prepare-container-fixture-images
+      - name: Build current runtime and application assets
+        run: bun run build
+      - name: Fetch locked Rust dependencies
+        run: mbx fetch --locked
+      - name: Run production S3 preflight against hosted R2
+        env:
+          OPEN_COMPUTE_TEST_R2_S3_ENDPOINT: ${{ secrets.OPEN_COMPUTE_TEST_R2_S3_ENDPOINT }}
+          OPEN_COMPUTE_TEST_R2_S3_REGION: ${{ secrets.OPEN_COMPUTE_TEST_R2_S3_REGION }}
+          OPEN_COMPUTE_TEST_R2_S3_BUCKET: ${{ secrets.OPEN_COMPUTE_TEST_R2_S3_BUCKET }}
+          OPEN_COMPUTE_TEST_R2_S3_ACCESS_KEY_ID: ${{ secrets.OPEN_COMPUTE_TEST_R2_S3_ACCESS_KEY_ID }}
+          OPEN_COMPUTE_TEST_R2_S3_SECRET_ACCESS_KEY: ${{ secrets.OPEN_COMPUTE_TEST_R2_S3_SECRET_ACCESS_KEY }}
+          OPEN_COMPUTE_TEST_R2_S3_MUTATION_ACK: ${{ secrets.OPEN_COMPUTE_TEST_R2_S3_MUTATION_ACK }}
+        run: ./test/gate.py s3-provider-qualification --jobs 1
+
+      - name: Upload S3 provider qualification failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: s3-provider-qualification-failed-${{ github.run_attempt }}
+          path: |
+            .temp/gate-run/failed/*/*.json
+            .temp/gate-run/failed/*/*.log
+            .temp/gate-run/failed/*/*/*/*.log
+          if-no-files-found: ignore
+          retention-days: 14
+
   coverage:
     needs: [failfast, fixture-images, package]
     runs-on: ubuntu-24.04
@@ -290,7 +416,7 @@ jobs:
             --binary "$RUNNER_TEMP/release-broker/ocd-${{ needs.failfast.outputs.tag }}-linux-x64" \
             --root /tmp/oc-ci-coverage \
             --evidence "$PWD/.temp/containers-ci-engine" \
-            --command ./test/coverage.sh --jobs 2
+            --command env OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO=1 ./test/coverage.sh --jobs 2
       - name: Release the CI browser AppArmor profile
         if: always()
         run: |
@@ -313,71 +439,6 @@ jobs:
             .temp/containers-ci-engine/
             target/llvm-cov/summary.json
             target/llvm-cov/lcov.info
-            !**/node_modules
-            !**/node_modules/**
-
-  integration:
-    needs: [failfast, fixture-images, package]
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-24.04]
-    runs-on: ${{ matrix.os }}
-    env:
-      CARGO_INCREMENTAL: "0"
-      CARGO_PROFILE_DEV_DEBUG: line-tables-only
-      CARGO_PROFILE_TEST_DEBUG: line-tables-only
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          lfs: true
-      - uses: ./.github/actions/setup-open-compute
-        with:
-          browser-fixture: "true"
-          rust-cache-backend: local
-      - uses: ./.github/actions/prepare-container-fixture-images
-        id: container-images
-      - name: Build untracked runtime and toolchain assets from this checkout
-        run: bun run build
-      - name: Fetch locked crates for offline Gate compile
-        run: mbx fetch --locked
-      - uses: actions/download-artifact@v8
-        with:
-          name: release-linux-x64
-          path: ${{ runner.temp }}/release-broker
-      - name: Verify the native packaged Broker against this checkout
-        run: bun scripts/verify-release-package.ts "$RUNNER_TEMP/release-broker"
-      - name: Workspace Gate with controlled egress (Linux)
-        run: |
-          bash test/containers-fixture/with-ci-linux-engine.sh \
-            --images '${{ steps.container-images.outputs.directory }}' \
-            --binary "$RUNNER_TEMP/release-broker/ocd-${{ needs.failfast.outputs.tag }}-linux-x64" \
-            --root /tmp/oc-ci-workspace \
-            --evidence "$PWD/.temp/containers-ci-engine" \
-            --command env OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO=1 \
-            python3 -I -B test/containers-fixture/diagnostic-inputs.py \
-            --binary "$RUNNER_TEMP/release-broker/ocd-${{ needs.failfast.outputs.tag }}-linux-x64" \
-            --workspace
-      - name: Release the CI browser AppArmor profile
-        if: always()
-        run: |
-          if [[ -n "${OPEN_COMPUTE_CI_BROWSER_APPARMOR_EXECUTABLE:-}" ]]; then
-            python3 scripts/ci-browser-apparmor.py remove \
-              "$OPEN_COMPUTE_CI_BROWSER_APPARMOR_EXECUTABLE"
-          fi
-      - uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: gate-evidence-${{ matrix.os }}
-          include-hidden-files: true
-          path: |
-            .temp/workspace-diagnostic/
-            .temp/browser-preparation/run-*/result.json
-            .temp/browser-preparation/run-*/stderr.log
-            .temp/gate-run/
-            .temp/**/failed/**/ocd.log
-            .temp/p22-product/*/ocd.stderr.log
-            .temp/containers-ci-engine/
             !**/node_modules
             !**/node_modules/**
 
@@ -817,7 +878,9 @@ jobs:
         package,
         sdk-package,
         coverage,
-        integration,
+        gateway-caddy-module,
+        ai-search-qualification,
+        s3-provider-qualification,
         install-lifecycle,
         stress,
       ]
@@ -838,7 +901,7 @@ jobs:
           path: .temp/sdk-package
       - uses: actions/download-artifact@v8
         with:
-          pattern: "{coverage-gate-evidence,gate-evidence-*,package-gate-*,install-lifecycle-*,stress-qualification}"
+          pattern: "{coverage-gate-evidence,package-gate-*,install-lifecycle-*,stress-qualification}"
           path: .temp/release-evidence
       - name: Assemble the immutable release manifest
         env:
@@ -870,7 +933,7 @@ jobs:
 
   # prettier-ignore
   publish:
-    needs: [failfast, assemble, coverage, integration, sdk-package, install-lifecycle, stress]
+    needs: [failfast, assemble, coverage, gateway-caddy-module, ai-search-qualification, s3-provider-qualification, sdk-package, install-lifecycle, stress]
     if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     environment: release

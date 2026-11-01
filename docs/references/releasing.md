@@ -79,7 +79,7 @@ macOS 入口先在 `container-images.yml` 的手动入口为同一候选构建�
    package/version、official SDK/OpenAPI pins、surface 变化、安装命令与 npm version link）；
    不得保留 TODO、TBD 或 PLACEHOLDER。Workerd 与 Thanks 的内容要求见下文。
 
-上述规则由唯一的 `failfast` job 持有，所有 coverage、integration、package 和 SDK package job 都只在它
+上述规则由唯一的 `failfast` job 持有，所有 coverage、package 和 SDK package job 都只在它
 成功后启动。该 job 绑定 `release` environment，并只做秒级检查：tag/release/source identity、版本与干净
 checkout、main CI 证据、release notes 章节和占位符、Workerd 章节的精确 gitlink 或
 `submodule revision is unchanged` 句子、Thanks、`sourceDigest`、release-tool 单元契约、
@@ -110,7 +110,7 @@ npm 发布以 `npm publish` 成功退出为完成信号，成功后不轮询 reg
 artifact 完全一致，则把它视为此前调用结果未知但发布已完成；否则立即失败并交给 `release-recovery`，不自动重发。
 
 只读 `assemble` job 只接受三个精确命名的二进制和对应 package report；它重新核对版本、revision、workerd pin、
-lock SHA-256、文件大小与文件 SHA-256。组装还必须等待 coverage、integration、安装生命周期和 stress 全部成功，读取各 job 的同提交证据生成品牌 HTML 与 JSON 报告，将报告摘要和大小写入 `release.json`，并加入 `SHA256SUMS`。
+lock SHA-256、文件大小与文件 SHA-256。组装还必须等待 coverage、gateway、AI/S3 provider、安装生命周期和 stress 全部成功，读取各 job 的同提交证据生成品牌 HTML 与 JSON 报告，将报告摘要和大小写入 `release.json`，并加入 `SHA256SUMS`。
 
 `stress` 使用已打包的 Linux x64 候选，在独立 Compose project 中实际限制 2 CPU / 4 GiB，在 60 分钟预算内依次执行 smoke、P0、scenario、P1 peak 和恢复 soak。每个峰值负载档持续 60 秒，原并发、速率和 SLO 保持。soak 使用预算中的剩余时间，至少持续 30 分钟，并完成 3 次重启和恢复核验。
 
