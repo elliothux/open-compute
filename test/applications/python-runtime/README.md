@@ -10,7 +10,7 @@ PyWrangler; upload, deploy, development and resource management use cf.
 TODO(P25): remove the bridge when cf has a qualified Python builder.
 
 The reviewed raw cf upload and assets requests are in
-`../../fixtures/python-runtime/`. The single `p21-python-runtime` case verifies
+`../../fixtures/python-runtime/`. The single `python-runtime` case verifies
 maintained main/helper bytes and all 19 unmodified SDK sources before using the
 real daemon, formal workerd pin, SQLite and SigV4 fixture. Loopback HTTP/TCP and
 model services are owned by the Rust fixture. Static capture alone is not a

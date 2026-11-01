@@ -19,7 +19,7 @@ Unicode restoration by Python and JavaScript consumers after restart and rollbac
 Fresh build and cf capture evidence lives in `.temp/p21-queue-v8-wire/build-01/`,
 `capture-01/` and `input-qualification-01.json`. The prior reviewed fixture and
 package lock remain in `previous-queue-input-01/`; all earlier diagnostics remain
-in `.temp/p21-python-queues/`. The official SDK and pylock are unchanged. No native
+in `.temp/python-queues/`. The official SDK and pylock are unchanged. No native
 workerd build was performed.
 
 The full ordinary Queue case passed on 2026-10-05 in aggregate

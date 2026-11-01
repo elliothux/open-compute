@@ -533,7 +533,7 @@ test("target member evidence is complete and raw TCP coverage is exact", async (
     assert.deepEqual(
       member.runtime_cases,
       [
-        "p23-containers::ordinary_sdk_native_execution_code_deploy_rollout_and_restart_use_real_containers",
+        "containers::ordinary_sdk_native_execution_code_deploy_rollout_and_restart_use_real_containers",
       ],
       member.id,
     );

@@ -51,98 +51,106 @@ SERVICE_LIB_TARGET = 'open-compute-service.lib.open_compute_service'
 # shared kernel socket buffers in a
 # parallel measurement. Keep the workload intact and isolate its test process.
 CARGO_TARGETS = {
-    'p0-1': ('open-compute-service', 'p0_1_gate', True),
+    'daemon': ('open-compute-service', 'p0_1_gate', True),
     # W2 adds CPU condemnation plus a SIGSTOP/restart cycle; keep that real-process
     # pressure out of the independently parallelized version and parser probes.
-    'p0-2': ('open-compute-service', 'p0_2_runtime_gate', True),
-    'p0-3': ('open-compute-service', 'p0_3_resource_binding_gate', False),
-    'p0-4': ('open-compute-service', 'p0_4_kv_gate', False),
+    'workers': ('open-compute-service', 'p0_2_runtime_gate', True),
+    'bindings': ('open-compute-service', 'p0_3_resource_binding_gate', False),
+    'kv': ('open-compute-service', 'p0_4_kv_gate', False),
     # The concurrent upload/readback matrix loses its HTTP stream under
     # coverage when it contends with the service-library process.
-    'p0-5': ('open-compute-service', 'p0_5_r2_gate', True),
-    'p0-6': ('open-compute-service', 'p0_6_d1_gate', False),
-    'p0-7': ('open-compute-service', 'p0_7_durable_objects_gate', False),
-    'p0-8': ('open-compute-service', 'p0_8_scheduler_do_alarms_gate', False),
-    'p0-exit': ('open-compute-service', 'p0_exit_gate', False),
-    'p1-conformance': ('open-compute-service', 'p1_conformance', False),
-    'p1-security': ('open-compute-service', 'p1_security', False),
-    'p1-crash': ('open-compute-service', 'p1_crash_process', False),
-    'p1-snapshot': ('open-compute-service', 'p1_snapshot_restore', False),
-    'p2-1': ('open-compute-service', 'p2_1_scheduler_hardening_gate', False),
-    'p2-2': ('open-compute-service', 'p2_2_queue_producer_gate', False),
+    'r2': ('open-compute-service', 'p0_5_r2_gate', True),
+    'd1': ('open-compute-service', 'p0_6_d1_gate', False),
+    'durable-objects': ('open-compute-service', 'p0_7_durable_objects_gate', False),
+    'alarms': ('open-compute-service', 'p0_8_scheduler_do_alarms_gate', False),
+    'core-products': ('open-compute-service', 'p0_exit_gate', False),
+    'capabilities': ('open-compute-service', 'p1_conformance', False),
+    'isolation': ('open-compute-service', 'p1_security', False),
+    'crash-recovery': ('open-compute-service', 'p1_crash_process', False),
+    'snapshots': ('open-compute-service', 'p1_snapshot_restore', False),
+    'scheduler': ('open-compute-service', 'p2_1_scheduler_hardening_gate', False),
+    'queues': ('open-compute-service', 'p2_2_queue_producer_gate', False),
     'workflow-runtime': ('open-compute-service', 'workflow_runtime_gate', False),
     'workflow-recovery': ('open-compute-service', 'workflow_recovery_gate', False),
-    'p2-exit': ('open-compute-service', 'p2_exit_gate', False),
-    'p3-assets': ('open-compute-service', 'p3_assets_gate', False),
+    'queue-workflow-recovery': ('open-compute-service', 'p2_exit_gate', False),
+    'assets': ('open-compute-service', 'p3_assets_gate', False),
     'dashboard': ('open-compute-service', 'dashboard_gate', False),
-    'p3-services-hard': ('open-compute-service', 'p3_services_hard', False),
-    'p3-services-product': ('open-compute-service', 'p3_services_product', False),
-    'p3-services-events': ('open-compute-service', 'p3_services_events', False),
-    'p3-services-recovery': ('open-compute-service', 'p3_services_recovery', False),
-    'p3-cache-images': ('open-compute-service', 'p3_cache_images_gate', False),
+    'services-rpc': ('open-compute-service', 'p3_services_hard', False),
+    'services-product': ('open-compute-service', 'p3_services_product', False),
+    'services-events': ('open-compute-service', 'p3_services_events', False),
+    'services-recovery': ('open-compute-service', 'p3_services_recovery', False),
+    'cache-images': ('open-compute-service', 'p3_cache_images_gate', False),
     # Coverage instrumentation makes this real-workerd/search/provider matrix
     # contend with other process-heavy Gates and produce spurious backend failures.
-    'p5-search': ('open-compute-service', 'p5_search_gate', True),
-    'p3-recorded': ('open-compute-service', 'recorded_contracts', True),
-    'p6-cf-resources': ('open-compute-service', 'p6_cf_resource_gate', False),
-    'p22-browser-run': ('open-compute-service', 'p22_browser_run', True),
-    'p23-containers': ('open-compute-service', 'p23_containers', True),
-    'p6-cloudflare-sdk': ('open-compute-service', 'cloudflare_sdk_gate', False),
-    'p20-cf-cli': ('open-compute-service', 'p20_cf_cli', False),
+    'search': ('open-compute-service', 'p5_search_gate', True),
+    'recorded': ('open-compute-service', 'recorded_contracts', True),
+    'cf-resources': ('open-compute-service', 'p6_cf_resource_gate', False),
+    'browser': ('open-compute-service', 'p22_browser_run', True),
+    'containers': ('open-compute-service', 'p23_containers', True),
+    'cloudflare-sdk': ('open-compute-service', 'cloudflare_sdk_gate', False),
+    'cf-cli': ('open-compute-service', 'p20_cf_cli', False),
     # Python snapshots and several fresh daemon generations own one serial scenario.
-    'p21-python-main': ('open-compute-service', 'p21_python_main', True),
-    'p21-python-frameworks': ('open-compute-service', 'p21_python_frameworks', True),
-    'p21-python-services': ('open-compute-service', 'p21_python_services', True),
-    'p21-python-queues': ('open-compute-service', 'p21_python_queues', True),
-    'p21-python-durable-objects': ('open-compute-service', 'p21_python_durable_objects', True),
-    'p21-python-workflows': ('open-compute-service', 'p21_python_workflows', True),
-    'p21-python-runtime': ('open-compute-service', 'p21_python_runtime', True),
+    'python-main': ('open-compute-service', 'p21_python_main', True),
+    'python-frameworks': ('open-compute-service', 'p21_python_frameworks', True),
+    'python-services': ('open-compute-service', 'p21_python_services', True),
+    'python-queues': ('open-compute-service', 'p21_python_queues', True),
+    'python-durable-objects': ('open-compute-service', 'p21_python_durable_objects', True),
+    'python-workflows': ('open-compute-service', 'p21_python_workflows', True),
+    'python-runtime': ('open-compute-service', 'p21_python_runtime', True),
     # Finish independent work together before the remaining exclusive barriers.
     'workflow-product': ('open-compute-service', 'workflow_product_gate', True),
     'runtime': ('open-compute-runtime', 'supervisor', True),
     'single-binary': ('open-compute-service', 'single_binary', True),
 }
 TYPED_TARGETS = {
-    'p3-contract': (None, 'p3-contract', False),
-    'p3-cf-diff': (None, 'p3-cf-diff', True),
-    'p5-ai-provider-qualification': (None, 'p5-ai-provider-qualification', True),
+    'contract': (None, 'contract', False),
+    'cf-diff': (None, 'cf-diff', True),
+    'ai-provider-qualification': (None, 'ai-provider-qualification', True),
     's3-provider-qualification': (None, 's3-provider-qualification', True),
 }
 TARGETS = {**CARGO_TARGETS, **TYPED_TARGETS}
-P3_PRODUCT_TARGETS = [
-    'p3-assets', 'p3-services-hard', 'p3-services-product', 'p3-services-events',
-    'p3-services-recovery', 'p3-cache-images', 'dashboard',
-    'p21-python-main', 'p21-python-frameworks', 'p21-python-services', 'p21-python-queues',
-    'p21-python-durable-objects',
-    'p21-python-workflows',
-    'p21-python-runtime',
+PRODUCT_SCENARIOS = [
+    'assets', 'services-rpc', 'services-product', 'services-events',
+    'services-recovery', 'cache-images', 'dashboard',
+    'python-main', 'python-frameworks', 'python-services', 'python-queues',
+    'python-durable-objects',
+    'python-workflows',
+    'python-runtime',
 ]
 GROUPS = {
-    'p0': [name for name in CARGO_TARGETS if name.startswith('p0-')],
-    'p1': [name for name in CARGO_TARGETS if name.startswith('p1-')],
-    'p2': [name for name in CARGO_TARGETS if name.startswith('p2-') or name.startswith('workflow-')],
-    'p3': [
-        'p3-contract', 'p3-recorded',
-        *[name for name in CARGO_TARGETS if name.startswith('p0-')],
-        *[name for name in CARGO_TARGETS if name.startswith('p1-')],
-        *[name for name in CARGO_TARGETS if name.startswith('p2-') or name.startswith('workflow-')],
-        *P3_PRODUCT_TARGETS,
+    'core': [
+        'daemon', 'workers', 'bindings', 'kv', 'r2', 'd1', 'durable-objects', 'alarms',
+        'core-products',
     ],
-    'p3-services': [
-        'p3-services-hard', 'p3-services-product', 'p3-services-events',
-        'p3-services-recovery',
+    'platform': [
+        'capabilities', 'isolation', 'crash-recovery', 'snapshots',
     ],
-    'p3-isolation': ['p1-security', *P3_PRODUCT_TARGETS],
-    'p3-recovery': [
-        'p1-crash', 'p1-snapshot', 'p2-exit', 'workflow-recovery', *P3_PRODUCT_TARGETS,
+    'scheduling': [
+        'scheduler', 'queues', 'workflow-runtime', 'workflow-recovery', 'queue-workflow-recovery',
+        'workflow-product',
     ],
-    # Queue/Cron share the immutable loader matrix; selecting both never duplicates it.
-    'p2-3': ['p0-2'],
-    'p1-8': ['p0-7', 'p1-conformance'],
-    'workflow': ['workflow-runtime', 'workflow-recovery', 'workflow-product'],
-    'all': [*CARGO_TARGETS, 'p3-contract'],
-    'p5': ['p5-search', 'p5-ai-provider-qualification'],
+    'services': [
+        'services-rpc', 'services-product', 'services-events', 'services-recovery',
+    ],
+    'product-isolation': ['isolation', *PRODUCT_SCENARIOS],
+    'product-recovery': [
+        'crash-recovery', 'snapshots', 'queue-workflow-recovery', 'workflow-recovery',
+        *PRODUCT_SCENARIOS,
+    ],
+    'hibernation': [
+        'durable-objects', 'capabilities',
+    ],
+    'workflow': [
+        'workflow-runtime', 'workflow-recovery', 'workflow-product',
+    ],
+    'all': [*CARGO_TARGETS, 'contract'],
+    'search-qualification': [
+        'search', 'ai-provider-qualification',
+    ],
 }
+GROUPS['products'] = ['contract', 'recorded', *GROUPS['core'], *GROUPS['platform'],
+                      *GROUPS['scheduling'], *PRODUCT_SCENARIOS]
+
 
 
 def prevent_macos_sleep():
@@ -318,18 +326,18 @@ def resolve_targets(selected, workspace):
     typed = {}
     if workspace or set(TYPED_TARGETS) & set(selected):
         bun = None
-        if workspace or {'p3-contract', 'p3-cf-diff', 'p5-ai-provider-qualification'} & set(selected):
+        if workspace or {'contract', 'cf-diff', 'ai-provider-qualification'} & set(selected):
             bun = shutil.which('bun')
             if bun is None:
                 raise ValueError('bun is required for typed conformance targets')
-        if workspace or 'p3-contract' in selected:
-            typed['p3-contract'] = TypedTarget(
+        if workspace or 'contract' in selected:
+            typed['contract'] = TypedTarget(
                 None,
-                'p3-contract',
+                'contract',
                 'bun-test',
                 str(ROOT),
                 False,
-                tuple(sorted(ONCE['p3-contract'] + TIMING.get('p3-contract', ()))),
+                tuple(sorted(ONCE['contract'] + TIMING.get('contract', ()))),
                 bun,
                 (str(ROOT / 'test/conformance/check.ts'),),
                 ('--list',),
@@ -338,14 +346,14 @@ def resolve_targets(selected, workspace):
                 'light',
                 'conformance-check',
             )
-        if 'p3-cf-diff' in selected:
-            typed['p3-cf-diff'] = TypedTarget(
+        if 'cf-diff' in selected:
+            typed['cf-diff'] = TypedTarget(
                 None,
-                'p3-cf-diff',
+                'cf-diff',
                 'cloudflare-differential',
                 str(ROOT),
                 True,
-                tuple(sorted(ONCE['p3-cf-diff'] + TIMING.get('p3-cf-diff', ()))),
+                tuple(sorted(ONCE['cf-diff'] + TIMING.get('cf-diff', ()))),
                 bun,
                 (str(ROOT / 'test/conformance/differential.ts'),),
                 ('--list',),
@@ -360,14 +368,14 @@ def resolve_targets(selected, workspace):
                 'external-exclusive',
                 'differential-runner',
             )
-        if 'p5-ai-provider-qualification' in selected:
-            typed['p5-ai-provider-qualification'] = TypedTarget(
+        if 'ai-provider-qualification' in selected:
+            typed['ai-provider-qualification'] = TypedTarget(
                 None,
-                'p5-ai-provider-qualification',
+                'ai-provider-qualification',
                 'bun-test',
                 str(ROOT),
                 True,
-                tuple(sorted(ONCE['p5-ai-provider-qualification'])),
+                tuple(sorted(ONCE['ai-provider-qualification'])),
                 bun,
                 (str(ROOT / 'test/conformance/ai-provider-qualification.ts'),),
                 ('--list',),
@@ -423,7 +431,7 @@ def resolve_targets(selected, workspace):
         resolved = dict(sorted(found.items(), key=lambda item: (
             0 if item[0] == 'open-compute-service.test.cli' else
             1 if item[0] == 'single-binary' else
-            2 if item[0] == 'p5-search' else 4 if item[1].exclusive else 3,
+            2 if item[0] == 'search' else 4 if item[1].exclusive else 3,
             item[0])))
         resolved.update(typed)
         return resolved
@@ -499,7 +507,7 @@ def container_inputs_identity():
     """Freeze the explicit P23 OCI graphs, declared Broker contract and built Worker bytes."""
     configured = os.environ.get('OPEN_COMPUTE_TEST_CONTAINERS_INPUT')
     if not configured:
-        raise ValueError('p23-containers requires OPEN_COMPUTE_TEST_CONTAINERS_INPUT')
+        raise ValueError('containers requires OPEN_COMPUTE_TEST_CONTAINERS_INPUT')
     path = Path(configured)
     if not path.is_absolute() or path.is_symlink() or not path.is_file() or path.stat().st_size > 65536:
         raise ValueError('P23 input JSON must be an absolute bounded regular file')
@@ -574,12 +582,12 @@ def container_inputs_identity():
 
 def verify_selected_inputs(targets, *, probe_version=True):
     """L0 typed checks need only frozen manifests; Cargo product Gates need runtime inputs."""
-    if 'p0-1' in targets and not (shutil.which('/usr/sbin/lsof') or shutil.which('lsof')):
-        raise ValueError('p0-1 requires lsof; install the process Gate tool before running')
+    if 'daemon' in targets and not (shutil.which('/usr/sbin/lsof') or shutil.which('lsof')):
+        raise ValueError('daemon requires lsof; install the process Gate tool before running')
     if (any(not isinstance(target, TypedTarget) for target in targets.values())
-            or 'p5-ai-provider-qualification' in targets):
+            or 'ai-provider-qualification' in targets):
         result = verify_inputs(probe_version=probe_version)
-        if 'p23-containers' in targets:
+        if 'containers' in targets:
             result['containers'] = container_inputs_identity()
         return result
     return {
@@ -728,7 +736,7 @@ def execute_target(name, executable, directory, target, *, list_only=False):
     # Native tests also spawn cf/Bun. Their compile caches must not leak into TMPDIR.
     env['BUN_RUNTIME_TRANSPILER_CACHE_PATH'] = '0'
     env['NODE_DISABLE_COMPILE_CACHE'] = '1'
-    if name == 'p5-search':
+    if name == 'search':
         env.setdefault('OPEN_COMPUTE_TEST_EMBEDDING_API_KEY', 'fixture-secret')
     # Repetition belongs only to this runner, including when a test spawns its own fixture.
     env.pop('OPEN_COMPUTE_GATE_ROUNDS', None)
@@ -976,7 +984,7 @@ def main():
     parser.add_argument('--keep-going', action='store_true',
                         help='collect failures from every selected target once; never retry')
     parser.add_argument('--refresh', action='store_true',
-                        help='refresh portable recordings after successful live p3-cf-diff')
+                        help='refresh portable recordings after successful live cf-diff')
     args = parser.parse_args()
     rounds = rounds_from_env()
     validate_registry(TARGETS)
@@ -993,12 +1001,12 @@ def main():
     if not 1 <= args.jobs <= (os.cpu_count() or 1):
         raise ValueError('--jobs must be between 1 and the host CPU count')
     selected = selection(args.targets)
-    if args.refresh and (args.workspace or selected != ['p3-cf-diff']):
-        raise ValueError('--refresh requires only p3-cf-diff')
+    if args.refresh and (args.workspace or selected != ['cf-diff']):
+        raise ValueError('--refresh requires only cf-diff')
     targets = resolve_targets(selected, args.workspace)
     if args.refresh:
-        target = targets['p3-cf-diff']
-        targets['p3-cf-diff'] = target._replace(argv=(*target.argv, '--refresh'))
+        target = targets['cf-diff']
+        targets['cf-diff'] = target._replace(argv=(*target.argv, '--refresh'))
     plans = round_plan(targets, rounds)
     plan = {'rounds': rounds, 'jobs': args.jobs, 'workspace': args.workspace, 'targets': list(targets),
             'purpose': 'coverage' if coverage else

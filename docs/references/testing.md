@@ -1,6 +1,6 @@
 # 测试
 
-只运行改动影响到的测试。完整 workspace Gate 只在用户要求或发布时运行。只报告实际执行并成功退出的检查。
+只运行受影响的测试；完整 workspace Gate 只在用户要求或发布时运行。
 
 ## 按输入选择测试
 
@@ -9,33 +9,31 @@
 | 文档、release notes、规则文件、skill                                      | `git diff --check`、`bun scripts/check-docs.ts`；改了摘要输入时同步 `sourceDigest`（见下文）          |
 | SDK、Dashboard、Website、JS 工具                                          | 所属包的 typecheck、test 和 build                                                                     |
 | Rust 生产代码                                                             | 受影响 crate 的单元测试、受影响的 Gate 目标、`cargo fmt --all --check`、`./test/check-rust-clippy.sh` |
-| workerd/Caddy lock、submodule、runtime loader、Cap'n Proto、兼容 baseline | 重建 runtime，运行 `p3-contract` 和受影响目标；换 pin 另按 [workerd](../workerd/README.md) 执行       |
+| workerd/Caddy lock、submodule、runtime loader、Cap'n Proto、兼容 baseline | 重建 runtime，运行 `contract` 和受影响目标；换 pin 另按 [workerd](../workerd/README.md) 执行          |
 
 SDK 消费者读取 `packages/sdk/dist/`。SDK 生成面变化时先运行 `bun run --filter @open-compute/sdk build`。
 
-`sourceIdentity()` 只计算 Git 跟踪的文件，排除规则文件、`.agents/**`、`.claude/**`、非嵌入文档（保留 `docs/references/runbooks/**`）、`__pycache__` 和 `test/conformance/baseline.json`；输入变化后更新 baseline 的 `sourceDigest`：
+`sourceIdentity()` 只计算 tracked 文件；排除规则、`.agents/**`、`.claude/**`、非嵌入文档、`__pycache__` 和 baseline，保留嵌入的 runbooks。输入变化后更新摘要：
 
 ```sh
 bun -e 'import {sourceIdentity} from "./test/conformance/checks/context.ts"; console.log(sourceIdentity())'
 ```
 
-把输出写入 `test/conformance/baseline.json` 的 `sourceDigest`。CI 的路径与产品 Gate 映射在 `test/ci_scope.py`；PR 只执行静态检查和受影响产品，未知或共享路径执行全部产品 Gate。
+输出写入 `test/conformance/baseline.json.sourceDigest`。PR 按 `test/ci_scope.py` 运行静态检查与受影响产品；共享或未知路径选全部产品。
 完整 workspace、90% coverage、打包和安装升级只在 release workflow 执行一轮，CI 不定时运行。
 
 ## 准备输入
 
-按[单二进制构建](single-binary.md#构建与打包)准备已验证的 workerd、Caddy、Git LFS 资产和生成资产。输入缺失或校验失败时测试失败；
-下载需要用户授权。真实运行时测试需要 `OPEN_COMPUTE_TEST_WORKERD`。`p0-1` 需要 `lsof`。
+按[构建说明](single-binary.md#构建与打包)准备 workerd、Caddy、LFS 和生成资产；下载须授权。真实运行时需要 `OPEN_COMPUTE_TEST_WORKERD`，`daemon` 还需要 `lsof`。
 
 | 目标               | 额外输入                                                                                                                                                                   |
 | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `p5-search`        | `OPEN_COMPUTE_TEST_EMBEDDING_API_KEY`、`OPEN_COMPUTE_TEST_EMBEDDING_BASE_URL`，指向本机 OpenAI-compatible fixture                                                          |
+| `search`           | `OPEN_COMPUTE_TEST_EMBEDDING_API_KEY`、`OPEN_COMPUTE_TEST_EMBEDDING_BASE_URL`，指向本机 OpenAI-compatible fixture                                                          |
 | Browser Run（P22） | `bun scripts/prepare-browser.ts --source <chrome-headless-shell 安装> --dest <新目录>`，再设置 `OPEN_COMPUTE_TEST_BROWSER`；CI 版本固定在 `test/browser-fixture.lock.json` |
-| `p23-containers`   | `OPEN_COMPUTE_TEST_CONTAINERS_INPUT` 指向 JSON：`containers` 实例配置和两个 OCI 镜像（`manifest` 与 `blobs` 的 `path`、`sha256`）                                          |
+| `containers`       | `OPEN_COMPUTE_TEST_CONTAINERS_INPUT` 指向 JSON：`containers` 实例配置和两个 OCI 镜像（`manifest` 与 `blobs` 的 `path`、`sha256`）                                          |
 | Python（P21）      | 静态输入在 `test/applications/python-*` 和 `test/fixtures/python-*`，Gate 不构建也不下载                                                                                   |
 
-CI 用 `test/containers-fixture/with-ci-linux-engine.sh` 为 Containers 启动独立 Docker Engine。它只能在 GitHub Actions Linux runner 上运行，
-需要 44 GiB 空闲空间。细节见脚本注释和 [Containers 运维](containers.md)。
+CI 的 `test/containers-fixture/with-ci-linux-engine.sh` 只用于 GitHub Actions Linux runner，需要 44 GiB 空闲空间；见 [Containers 运维](containers.md)。
 
 开发时的 Python 构建由 `scripts/build-python.ts` 调用用户安装的 PyWrangler（先找 `.venv/bin/pywrangler`，再找 `PATH`）。
 
@@ -47,8 +45,8 @@ Dashboard 的 Browser Run 绑定测试：启动配置了 Browser Run 的隔离 o
 `test/gate.py` 需要 Python 3.11+。macOS 上它自动经 `caffeinate -is` 运行。
 
 ```sh
-./test/gate.py p0-2 --list                 # 查看目标、用例和进程数，不构建
-./test/gate.py p0-2 p2-3 --keep-going      # 收集全部失败
+./test/gate.py workers --list # 列出计划，不构建
+./test/gate.py workers queues --keep-going # 收集失败
 ./test/gate.py workflow --jobs 2
 ./test/gate.py --workspace --jobs 2
 ```
@@ -58,33 +56,72 @@ Dashboard 的 Browser Run 绑定测试：启动配置了 Browser Run 的隔离 o
 - `test/gate_cases.py` 按完整 Rust 测试名登记用例，必须与实际 discovery 一致。新增、删除或改名测试时同步它。
 - 每个目标使用独立 `TMPDIR`。`TMPDIR` 必须在本地磁盘上，不能在 FUSE 挂载上。
 
-| 目标                                                               | 内容                                                                                    |
-| ------------------------------------------------------------------ | --------------------------------------------------------------------------------------- |
-| `p0-1` … `p0-8`、`p0-exit`                                         | 平台基础、Workers runtime、KV、R2、D1、Durable Objects、调度器                          |
-| `p1-conformance`、`p1-security`、`p1-crash`、`p1-snapshot`、`p1-8` | 合同、隔离、崩溃恢复、快照；`p1-8` 是 WebSocket hibernation                             |
-| `p2-1`、`p2-2`、`p2-3`、`p2-exit`                                  | 调度器、Queue producer、Queue consumer 与 Cron、产品链                                  |
-| `workflow-runtime`、`workflow-recovery`、`workflow-product`        | Workflow 的运行时、恢复和大结果；合称 `workflow`                                        |
-| `p21-python-*`                                                     | Python Workers：main、frameworks、services、queues、durable-objects、workflows、runtime |
-| `p3-contract`                                                      | baseline、catalog 和能力清单一致性；不需要 workerd 和网络                               |
-| `p3-assets`、`p3-services`、`p3-cache-images`                      | 静态资产、Service binding、Cache 与 Images                                              |
-| `p3-isolation`、`p3-recovery`                                      | 跨账户隔离、跨产品崩溃恢复                                                              |
-| `p5-search`                                                        | AI Search：上传、索引、检索、rerank、Chat、重启                                         |
-| `p23-containers`                                                   | Containers 完整 API 与快照恢复                                                          |
-| `runtime`、`single-binary`                                         | supervisor、单文件离线启动、单 daemon 双实例                                            |
-| `p0`、`p1`、`p2`、`p3`、`all`                                      | 对应集合；多个选择取并集                                                                |
+### 目标名称迁移
+
+旧名报错，无别名；Rust binary/case ID 不变。目标取并集，`--list` 显示展开。重复组已并入 `workers`。
+
+| 旧名                           | 新名                        |
+| ------------------------------ | --------------------------- |
+| `p0-1`                         | `daemon`                    |
+| `p0-2`                         | `workers`                   |
+| `p0-3`                         | `bindings`                  |
+| `p0-4`                         | `kv`                        |
+| `p0-5`                         | `r2`                        |
+| `p0-6`                         | `d1`                        |
+| `p0-7`                         | `durable-objects`           |
+| `p0-8`                         | `alarms`                    |
+| `p0-exit`                      | `core-products`             |
+| `p1-conformance`               | `capabilities`              |
+| `p1-security`                  | `isolation`                 |
+| `p1-crash`                     | `crash-recovery`            |
+| `p1-snapshot`                  | `snapshots`                 |
+| `p2-1`                         | `scheduler`                 |
+| `p2-2`                         | `queues`                    |
+| `p2-exit`                      | `queue-workflow-recovery`   |
+| `p3-assets`                    | `assets`                    |
+| `p3-services-hard`             | `services-rpc`              |
+| `p3-services-product`          | `services-product`          |
+| `p3-services-events`           | `services-events`           |
+| `p3-services-recovery`         | `services-recovery`         |
+| `p3-cache-images`              | `cache-images`              |
+| `p5-search`                    | `search`                    |
+| `p3-recorded`                  | `recorded`                  |
+| `p6-cf-resources`              | `cf-resources`              |
+| `p22-browser-run`              | `browser`                   |
+| `p23-containers`               | `containers`                |
+| `p6-cloudflare-sdk`            | `cloudflare-sdk`            |
+| `p20-cf-cli`                   | `cf-cli`                    |
+| `p21-python-main`              | `python-main`               |
+| `p21-python-frameworks`        | `python-frameworks`         |
+| `p21-python-services`          | `python-services`           |
+| `p21-python-queues`            | `python-queues`             |
+| `p21-python-durable-objects`   | `python-durable-objects`    |
+| `p21-python-workflows`         | `python-workflows`          |
+| `p21-python-runtime`           | `python-runtime`            |
+| `p3-contract`                  | `contract`                  |
+| `p3-cf-diff`                   | `cf-diff`                   |
+| `p5-ai-provider-qualification` | `ai-provider-qualification` |
+| `p0`                           | `core`                      |
+| `p1`                           | `platform`                  |
+| `p2`                           | `scheduling`                |
+| `p3`                           | `products`                  |
+| `p3-services`                  | `services`                  |
+| `p3-isolation`                 | `product-isolation`         |
+| `p3-recovery`                  | `product-recovery`          |
+| `p2-3`                         | `workers`                   |
+| `p1-8`                         | `hibernation`               |
+| `p5`                           | `search-qualification`      |
 
 ## 录制的 Cloudflare 合同
 
-`./test/gate.py p3-recorded` 用现有 harness 启动独立 ocd、本地 S3 fixture 和临时目录，运行全部 portable fixture；只访问 loopback，不需要 Cloudflare 凭据。它复用 differential runner 的 cf 本地部署、观测与 JSON 归一化，比较现有 `contract.json`；PR 的产品或 runtime 改动会选择此目标。
+`./test/gate.py recorded` 用隔离 ocd、本地 S3 和临时目录运行全部 portable fixtures；复用 differential 归一化，与 `contract.json` 比较，只访问 loopback，无须 Cloudflare 凭据。PR 产品/runtime 改动会选择它。
 
-发版前在专用账号运行 `p3-cf-diff`。显式刷新用 `./test/gate.py p3-cf-diff --refresh`（单个 fixture 可用 `bun test/conformance/differential.ts --refresh --case <id>`），需要相同的 `OPEN_COMPUTE_CF_*`、本地 endpoint/account/admin token 和 Cloudflare 授权。全部选中 fixture 的 Cloudflare 与 ocd 观测一致且清理成功后，只改观测变化的 `contract.json`，在 `baseline.json.portableRecording` 记一次日期、cf 版本和账号 alias，并更新 `sourceDigest`；失败不改录制。
+发版前用 `./test/gate.py cf-diff --refresh` 刷新；需要 `OPEN_COMPUTE_CF_MUTATION_ACK=cf-diff`、其余 `OPEN_COMPUTE_CF_*` 和本地 endpoint/account/admin token。全部选中 fixture 的 Cloudflare/ocd 观测一致且清理成功后，只写变化的合同，并在 `baseline.json.portableRecording` 记日期、cf 版本和 alias，更新摘要；失败不改录制。
 
 ## Python Workers
 
-七个 `p21-python-*` 目标共九个用例。每个用例启动真实 daemon，使用正式 pin 的 workerd、SQLite 和 SigV4 fixture，对比 Python 与
-JavaScript 在同一产品上的行为。Main 集中验证 admission、package/import、prepared artifact 完整性、重启和 rollback。
-框架只验证 HTTP/WSGI/ASGI；产品用例保留 Python/JS binding、FFI、异常、流和取消，以及 Queue、DO 和 Workflow 的 Python 持久重放。Flask 的 request/app-context 流式响应受上游
-[workers-py#287](https://github.com/cloudflare/workers-py/issues/287) 阻塞，Flask 普通 HTTP 仍在测试中。
+七个 `python-*` 目标共九个用例，用正式 workerd、SQLite 和 SigV4 fixture 比较 Python/JS。Main 测 admission、package/import、preparation 完整性与恢复。
+框架测 HTTP/WSGI/ASGI；产品测 binding/FFI、异常、流/取消及持久重放。Flask 普通 HTTP 保留，streaming 阻塞见 [workers-py#287](https://github.com/cloudflare/workers-py/issues/287)。
 
 ## 显式资格测试
 
@@ -92,8 +129,8 @@ JavaScript 在同一产品上的行为。Main 集中验证 admission、package/i
 
 | 目标或命令                                                                       | 前提                                                                                                                     |
 | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `./test/gate.py p3-cf-diff`                                                      | 写入真实 Cloudflare 账号。需要授权、专用账号和 cf 凭据；资源名为随机 `oc-p34-*`，结束时逐个删除并复查                    |
-| `./test/gate.py p5-ai-provider-qualification --jobs 1`                           | `BAILIAN_API_HOST`、`BAILIAN_API_KEY`、`DEEPSEEK_API_KEY`、`COHERE_API_KEY`；CI 用 `ai-search-qualification` environment |
+| `./test/gate.py cf-diff`                                                         | 写入真实 Cloudflare 账号。需要授权、专用账号和 cf 凭据；资源名为随机 `oc-p34-*`，结束时逐个删除并复查                    |
+| `./test/gate.py ai-provider-qualification --jobs 1`                              | `BAILIAN_API_HOST`、`BAILIAN_API_KEY`、`DEEPSEEK_API_KEY`、`COHERE_API_KEY`；CI 用 `ai-search-qualification` environment |
 | `./test/gate.py s3-provider-qualification --jobs 1`                              | 六个 `OPEN_COMPUTE_TEST_R2_S3_*` 变量和 `OPEN_COMPUTE_TEST_R2_S3_MUTATION_ACK=s3-provider-qualification`                 |
 | `bun test/conformance/applications/browser-soak.ts <v4 url> <account-id> 600000` | 本机 loopback 实例，至少 2 个并发 action；token 放在 `OPEN_COMPUTE_BROWSER_SOAK_TOKEN`                                   |
 | `./test/test-p0-2-egress-linux.sh`                                               | `OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO=1`；会修改 loopback 和 `/etc/hosts`                                              |
@@ -101,15 +138,13 @@ JavaScript 在同一产品上的行为。Main 集中验证 admission、package/i
 
 ### 安装与升级
 
-`test/install-lifecycle/` 在 Ubuntu 24.04、Debian 13（x64、ARM64）和 macOS ARM64 上测试真实 systemd/launchd 安装、user 和 system scope、
-重启，以及从上一个正式版本升级。输入检查不安装任何东西：
+`test/install-lifecycle/` 测 Linux systemd/macOS launchd 的 user/system 安装、重启和升级；平台矩阵见 [发布流程](releasing.md)。输入检查：
 
 ```sh
 python3 -B -m unittest discover -s test/install-lifecycle
 ```
 
-真实场景见 `test/install-lifecycle/run.py --help`，只能在一次性主机上设置 `OPEN_COMPUTE_INSTALL_TEST_DISPOSABLE=1` 后运行。
-升级必须成功。有意不兼容的 pre-1.0 版本在 workflow 中设置 `UPGRADE_REJECT_CODE` 和 `UPGRADE_REJECT_REASON`，并在版本说明里写明。
+真实场景只在一次性主机设置 `OPEN_COMPUTE_INSTALL_TEST_DISPOSABLE=1` 后运行；见 runner 的 `--help`。不兼容的 pre-1.0 升级须设置 `UPGRADE_REJECT_CODE`/`UPGRADE_REJECT_REASON` 并写入版本说明。
 
 ## 完整检查与最终验收
 
@@ -141,11 +176,8 @@ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s test -p 'test_gate.py'
 
 ## 日志与保留证据
 
-报告在 `.temp/gate-run/<run-id>/report.json`，失败的整次运行保留在 `failed/<run-id>/`。P3 运行另写 `contract-report.json`，
-`p3-cf-diff` 另写去除凭据的 `diff-report.json`。CI 实时输出 `CI_GATE_PROGRESS` 记录。
-
-先检查失败现场再重试。定位后删除本任务不再需要的 fixture 数据、二进制副本、profile 和详细日志。保留本次运行的 `report.json`。
-检查结束后不能留下 workerd 进程、监听端口、临时文件或 secret。
+报告在 `.temp/gate-run/<run-id>/report.json`；失败现场移至 `failed/<run-id>/`，合同证据在 `contract-report.json`。CI 输出 `CI_GATE_PROGRESS`。
+定位后清理大产物并保留报告；结束后确认无 workerd 进程、监听端口或 secret。
 
 ## 本地 smoke
 

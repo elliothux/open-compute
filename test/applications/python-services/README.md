@@ -1,6 +1,6 @@
 # Python Service Binding fixture
 
-This application owns the Python input for `p21-python-services`. Official SDK
+This application owns the Python input for `python-services`. Official SDK
 1.9.2 and Python 3.14 are fixed in `pyproject.toml`. `Default` calls a same-account
 JavaScript Worker through default and named Service bindings; `NamedApi` supplies
 a Python named entrypoint. The JavaScript peer also calls both Python entrypoints.

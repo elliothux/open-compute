@@ -32,26 +32,26 @@ BASELINE_PATH = "test/conformance/baseline.json"
 # Unknown/shared inputs select all product Gates, not workspace unit or package tests.
 PRODUCT_TARGETS = tuple(name for name in selection(['all']) if name != 'single-binary')
 PRODUCT_PATHS = {
-    ('crates/*/src/kv*', 'crates/*/src/cloudflare_v4/kv*'): ('p0-4',),
-    ('crates/*/src/r2*', 'crates/*/src/cloudflare_v4/r2*'): ('p0-5',),
-    ('crates/*/src/d1*', 'crates/*/src/cloudflare_v4/d1*'): ('p0-6',),
-    ('crates/*/src/durable_objects*', 'crates/*/src/do_*'): ('p0-7', 'p0-8'),
+    ('crates/*/src/kv*', 'crates/*/src/cloudflare_v4/kv*'): ('kv',),
+    ('crates/*/src/r2*', 'crates/*/src/cloudflare_v4/r2*'): ('r2',),
+    ('crates/*/src/d1*', 'crates/*/src/cloudflare_v4/d1*'): ('d1',),
+    ('crates/*/src/durable_objects*', 'crates/*/src/do_*'): ('durable-objects', 'alarms'),
     ('crates/*/src/queue*', 'crates/*/src/cloudflare_v4/queues*',
-     'crates/*/src/scheduler/queue*'): ('p0-2', 'p2-1', 'p2-2', 'p2-exit'),
+     'crates/*/src/scheduler/queue*'): ('workers', 'scheduler', 'queues', 'queue-workflow-recovery'),
     ('crates/*/src/workflow*', 'crates/*/src/cloudflare_v4/workflows*',
      'crates/*/src/scheduler/workflow*'): ('workflow',),
-    ('crates/*/src/services*', 'crates/*/src/service_binding*'): ('p3-services',),
+    ('crates/*/src/services*', 'crates/*/src/service_binding*'): ('services',),
     ('crates/*/src/cache*', 'crates/*/src/image*', 'crates/*/src/workers_cache*',
-     'crates/*/src/cloudflare_v4/images*'): ('p3-cache-images',),
-    ('crates/*/src/asset*', 'crates/*/src/workers_http/v4/asset*'): ('p3-assets',),
+     'crates/*/src/cloudflare_v4/images*'): ('cache-images',),
+    ('crates/*/src/asset*', 'crates/*/src/workers_http/v4/asset*'): ('assets',),
     ('crates/search/*', 'crates/*/src/ai_search*',
-     'crates/*/src/cloudflare_v4/ai_search*'): ('p5-search',),
+     'crates/*/src/cloudflare_v4/ai_search*'): ('search',),
     ('crates/*/src/*container*', 'crates/*/src/cloudflare_v4/container*',
-     'test/applications/containers/*', 'test/containers-fixture/*'): ('p23-containers',),
+     'test/applications/containers/*', 'test/containers-fixture/*'): ('containers',),
     ('crates/*/src/browser*', 'test/applications/browser-run/*',
-     'test/browser-fixture.lock.json', 'scripts/prepare-browser.ts'): ('p22-browser-run',),
+     'test/browser-fixture.lock.json', 'scripts/prepare-browser.ts'): ('browser',),
     ('apps/dashboard/*',): ('dashboard',),
-    ('docs/references/p1-deviations.md', 'test/conformance/*', 'openapi/*'): ('p3-contract',),
+    ('docs/references/p1-deviations.md', 'test/conformance/*', 'openapi/*'): ('contract',),
 }
 
 
@@ -71,15 +71,15 @@ def affected_targets(paths: list[str]) -> list[str]:
                    fnmatchcase(path, f'crates/*/tests/{stem}/*') for stem in owned):
                 targets.add(name)
                 matched = True
-            if name.startswith('p21-python-') and any(path.startswith(root) for root in (
-                    f'test/applications/{name.removeprefix("p21-")}/',
-                    f'test/fixtures/{name.removeprefix("p21-")}/')):
+            if name.startswith('python-') and any(path.startswith(root) for root in (
+                    f'test/applications/{name}/',
+                    f'test/fixtures/{name}/')):
                 targets.add(name)
                 matched = True
         if matched:
             continue
         if path.startswith('crates/service/tests/python_support/'):
-            targets.update(name for name in CARGO_TARGETS if name.startswith('p21-python-'))
+            targets.update(name for name in CARGO_TARGETS if name.startswith('python-'))
         elif path.startswith('docs/references/runbooks/'):
             return list(PRODUCT_TARGETS)
         elif (is_docs_path(path) or path.startswith('apps/website/') or path in RELEASE_TOOLING):
@@ -87,7 +87,7 @@ def affected_targets(paths: list[str]) -> list[str]:
         else:
             return list(PRODUCT_TARGETS)
     if targets:
-        targets.update(('p3-contract', 'p3-recorded'))
+        targets.update(('contract', 'recorded'))
     return [name for name in PRODUCT_TARGETS if name in targets]
 
 

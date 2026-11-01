@@ -1,6 +1,7 @@
 # R4：架构简化
 
-状态：**planned**（2026-10-31）。
+状态：**completed**（2026-11-02）。
+各步骤的完成范围与延期原因见下文状态。
 
 目标：Cloudflare 兼容面和产品功能矩阵不变，按“单机、小团队、单 daemon 多实例”的定位删掉多余的状态机、防御代码和自写实现。
 先在本地改架构，再改测试和 CI。
@@ -152,7 +153,10 @@
 
 ### R4.10 测试与 CI
 
-架构稳定后执行：
+状态：**已完成**（2026-11-02）。已删除 compile IPC/source-digest 握手和 final 冻结/重复运行策略；Python 矩阵从 2,465 s 降至 1,365 s；R2 上传缩为 3 个分片；摘要只覆盖 Git 跟踪的源码输入。PR 按受影响产品选择 Gate，发布只跑一轮完整测试并保留 90% coverage；Rust 工具直接用 cargo；新增录制合同 Gate，Gate 目标改为领域名。
+完整 nextest 替换延期：仍需迁移 typed runner、用例登记和覆盖率证据，不能只替换进程调度。共享 daemon 延期：现有崩溃/重启用例依赖独立状态和进程生命周期，需先拆分隔离边界；跨 account 共用一个 workerd 跳过，因为这会改变一个实例对应一个 account 的生产架构。
+
+原定范围：
 
 - `cargo nextest` 替换 `gate.py` 和 `gate_cases.py`；删除 `--final` 冻结、重复 final 拒绝和源码摘要握手；去掉 `mbx` 硬依赖。
 - 测试共享一个 daemon 和 workerd，每个测试用自己的 account；重启和崩溃场景收敛到一个小套件。

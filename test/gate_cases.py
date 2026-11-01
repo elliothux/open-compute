@@ -24,12 +24,12 @@ SERVICE_PROCESS_CASES = (
 )
 
 ONCE = {
-    'p3-recorded': ('portable_recordings_match_local_ocd',),
-    'p23-containers': (
+    'recorded': ('portable_recordings_match_local_ocd',),
+    'containers': (
         'exec_options_probe::native_exec_streams_and_code_updates_preserve_owned_processes',
         'snapshots::snapshot_rootfs_excludes_helper_entities_and_hardlink_references',
     ),
-    'p3-contract': (
+    'contract': (
         'baseline-identity',
         'catalog-schema',
         'capability-catalog-bijection',
@@ -44,7 +44,7 @@ ONCE = {
         'portable-fixture-inventory',
         'cloudflare-runner-safety',
     ),
-    'p3-cf-diff': (
+    'cf-diff': (
         'cache-api/portable/cache-hit',
         'd1/portable/database',
         'durable-objects/portable/object',
@@ -56,30 +56,30 @@ ONCE = {
         'workflows/portable/lifecycle',
     ),
     # Fixed listener ordering, not a startup race.
-    'p0-1': ('public_health_port_ignores_private_listener_that_appears_first',),
+    'daemon': ('public_health_port_ignores_private_listener_that_appears_first',),
     # The capability case already compares two fresh CLI processes in one invocation.
-    'p1-conformance': ('p1_capabilities_are_complete_and_identical_across_fresh_processes',),
-    'p1-security': (
+    'capabilities': ('p1_capabilities_are_complete_and_identical_across_fresh_processes',),
+    'isolation': (
         'p1_path_corpus_and_production_fault_surface_fail_closed',
         'p1_two_instance_resource_and_version_matrix_has_no_existence_or_metric_oracle',
     ),
     # Current snapshot validation is a fixed input/fault matrix.
-    'p1-snapshot': ('p1_full_snapshot_retention_and_fresh_host_restore_are_fail_closed',),
-    'p3-assets': ('p3_assets_real_runtime_routing_binding_immutability_and_lifecycle',),
+    'snapshots': ('p1_full_snapshot_retention_and_fresh_host_restore_are_fail_closed',),
+    'assets': ('p3_assets_real_runtime_routing_binding_immutability_and_lifecycle',),
     'dashboard': (
         'dashboard_serves_embedded_spa_assets_and_cloudflare_v4_api',
     ),
-    'p3-services-hard': ('p3_services_native_rpc_type_pipeline_and_lifecycle_matrix',),
-    'p3-services-events': (
+    'services-rpc': ('p3_services_native_rpc_type_pipeline_and_lifecycle_matrix',),
+    'services-events': (
         'p3_service_calls_from_queue_cron_do_and_workflow_event_sources',
     ),
     # Every fault point still gets its own real child; SIGKILL follows a state marker.
-    'p2-1': (
+    'scheduler': (
         'p2_1_fault_child',
         'p2_1_five_fresh_process_crash_boundaries_recover_exactly',
         'p2_1_schema_and_product_scope_remain_frozen',
     ),
-    'p2-2': (
+    'queues': (
         'commit_crash::p2_2_queue_commit_child',
         'commit_crash::p2_2_sigkill_after_commit_preserves_message_and_counters',
     ),
@@ -100,14 +100,14 @@ ONCE = {
         'evidence::failure_evidence_copy_preserves_files_modes_and_symlinks',
     ),
     # Default Node builtins, process.env isolation, and fail-closed stubs.
-    'p0-2': ('nodejs::p0_2_nodejs_default_surface_isolation_and_unsupported_stubs',),
-    'p6-cf-resources': (
+    'workers': ('nodejs::p0_2_nodejs_default_surface_isolation_and_unsupported_stubs',),
+    'cf-resources': (
         'fixed_cf_resource_commands_use_live_v4_authorities',
         'w2_cf_limits_settings_clone_and_restart',
     ),
-    'p6-cloudflare-sdk': ('official_cloudflare_sdk_matches_live_ocd_contract',),
-    'p20-cf-cli': ('target_commands_and_cf_wrapper_preserve_the_day1_boundary',),
-    'p5-ai-provider-qualification': (
+    'cloudflare-sdk': ('official_cloudflare_sdk_matches_live_ocd_contract',),
+    'cf-cli': ('target_commands_and_cf_wrapper_preserve_the_day1_boundary',),
+    'ai-provider-qualification': (
         'bailian-embedding-deepseek-chat',
         'bailian-embedding-cohere-rerank-deepseek-chat',
         'bailian-embedding-bailian-rerank-deepseek-chat',
@@ -116,47 +116,47 @@ ONCE = {
 }
 
 TIMING = {
-    'p23-containers': (
+    'containers': (
         'ordinary_sdk_native_execution_code_deploy_rollout_and_restart_use_real_containers',
     ),
-    'p22-browser-run': (
+    'browser': (
         'fixed_clients_actions_public_cf_and_restart_use_real_browser',
         'managed::managed_puppeteer_actions_frames_and_restart_use_real_browser',
         'managed::managed_playwright_default_page_uses_real_browser',
     ),
-    'p21-python-runtime': ('runtime::p21_python_runtime_ffi_stdlib_wait_until_network_restart_rollback',),
-    'p21-python-main': ('python_main::p21_python_main_upload_prepare_dispatch_restart_rollback',),
-    'p21-python-services': ('services::p21_python_services_fetch_named_rpc_callback',),
-    'p21-python-queues': ('queues::p21_python_queues_produce_consume_retry_dlq_replay',),
-    'p21-python-durable-objects': ('durable_objects::p21_python_durable_objects_fetch_rpc_storage_alarm_restart_rollback',),
-    'p21-python-workflows': ('workflows::p21_python_workflows_steps_events_retry_pause_restart_rollback',),
-    'p21-python-frameworks': (
+    'python-runtime': ('runtime::p21_python_runtime_ffi_stdlib_wait_until_network_restart_rollback',),
+    'python-main': ('python_main::p21_python_main_upload_prepare_dispatch_restart_rollback',),
+    'python-services': ('services::p21_python_services_fetch_named_rpc_callback',),
+    'python-queues': ('queues::p21_python_queues_produce_consume_retry_dlq_replay',),
+    'python-durable-objects': ('durable_objects::p21_python_durable_objects_fetch_rpc_storage_alarm_restart_rollback',),
+    'python-workflows': ('workflows::p21_python_workflows_steps_events_retry_pause_restart_rollback',),
+    'python-frameworks': (
         'frameworks::p21_python_django_framework_http_smoke',
         'frameworks::p21_python_flask_framework_http_smoke',
         'frameworks::p21_python_fastapi_framework_http_smoke',
     ),
-    'p0-1': ('p0_1_process_gate', 'round_drop_recovers_orphan_without_platform_handle'),
+    'daemon': ('p0_1_process_gate', 'round_drop_recovers_orphan_without_platform_handle'),
     # Cohesive real-runtime matrices also own concurrent requests, stream cleanup,
     # generation changes or drain assertions. Do not demote the entire matrix.
-    'p0-2': (
+    'workers': (
         'p0_2_real_worker_create_validate_dispatch_promote_rollback_restart',
         'resource_limits_recovery::w2_resource_limits_protect_neighbors_and_recover_a_wedged_generation',
     ),
-    'p0-3': ('p0_3_real_binding_matrix',),
-    'p0-4': ('p0_4_real_kv_matrix',),
-    'p0-5': (
+    'bindings': ('p0_3_real_binding_matrix',),
+    'kv': ('p0_4_real_kv_matrix',),
+    'r2': (
         'p0_5_real_r2_facade_matrix',
         'uploads::concurrent_large_upload_keeps_runtime_responsive',
     ),
-    'p0-6': ('p0_6_real_d1_facade_and_backend_matrix',),
-    'p0-7': (
+    'd1': ('p0_6_real_d1_facade_and_backend_matrix',),
+    'durable-objects': (
         'p0_7_real_durable_objects_matrix',
         'loader_capacity::durable_objects_preserve_loader_capacity_and_persist_through_restart',
     ),
-    'p0-8': ('p0_8_real_scheduler_alarm_matrix',),
-    'p0-exit': ('p0_real_combined_exit_matrix',),
-    'p1-crash': ('p1_ocd_sigkill_reclaims_orphan_and_restarts_cleanly',),
-    'p2-2': (
+    'alarms': ('p0_8_real_scheduler_alarm_matrix',),
+    'core-products': ('p0_real_combined_exit_matrix',),
+    'crash-recovery': ('p1_ocd_sigkill_reclaims_orphan_and_restarts_cleanly',),
+    'queues': (
         'p2_2_real_queue_producer_matrix',
         'scheduler::p2_2_real_queue_scheduler_matrix',
     ),
@@ -171,21 +171,21 @@ TIMING = {
         'durable_batches::production_batches_enforce_join_limits_and_replay_large_outputs',
         'durable_execution::production_driver_replays_waits_retries_and_events_after_runtime_restart',
     ),
-    'p2-exit': ('p2_chain_preserves_queue_handoff_frozen_workflow_and_due_work_across_sigkill',),
-    'p3-services-product': (
+    'queue-workflow-recovery': ('p2_chain_preserves_queue_handoff_frozen_workflow_and_due_work_across_sigkill',),
+    'services-product': (
         'p3_services_real_runtime_authority_routing_budget_and_lifecycle_matrix',
     ),
-    'p3-services-recovery': (
+    'services-recovery': (
         'p3_service_generation_exit_releases_inflight_handles_and_pins',
     ),
     # Owns background cache commits, refresh/purge fencing, and native transform admission.
-    'p3-cache-images': (
+    'cache-images': (
         'p3_cache_images_real_runtime_semantics_and_lifecycle_matrix',
     ),
-    'p6-cf-resources': (
+    'cf-resources': (
         'worker_loader::worker_loader_native_binding_versions_delete_and_restart',
     ),
-    'p5-search': ('p5_real_vectorize_ai_search_and_markdown_matrix',),
+    'search': ('p5_real_vectorize_ai_search_and_markdown_matrix',),
     'runtime': (
         'argv_exact_stdin_fd3_and_unix_probe',
         'begin_drain_during_startup_cancels_the_attempt',

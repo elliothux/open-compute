@@ -136,7 +136,7 @@ Browser Run 已实现 external CDP 和 managed backend：未配置可用 backend
 真实正式 pinned workerd 与 chrome-headless-shell 覆盖固定 cf 的上传/session/Live View、
 `@cloudflare/puppeteer` 1.4.0、`@cloudflare/playwright` 1.3.6 默认页面及额外 context、
 九项 Quick Actions、SDK 7.2.0 的原始响应、DevTools JSON/WebSocket 和 restart。
-`p22-browser-run` 的三个产品用例拥有这些路径；权限、CDP/context/file fencing、下载策略、
+`browser` 的三个产品用例拥有这些路径；权限、CDP/context/file fencing、下载策略、
 生命周期、SQLite history、metrics、Custom AI 和 Dashboard 另有各自的回归。
 这些证据不将 Browser 的全部 417 个 stable members/overloads 自动变为 qualified。
 
@@ -394,7 +394,7 @@ D1 `WrappedBinding`。D1 使用上游 `cloudflare-internal:d1-api` wrapper，转
 此行为依据正式 workerd pin 的上游基线 `d99bc6b777e35d72d71c2f1fe2fd1db53284528a` 中
 [D1Database](https://github.com/cloudflare/workerd/blob/d99bc6b777e35d72d71c2f1fe2fd1db53284528a/src/cloudflare/internal/d1-api.ts) 与
 [WrappedBinding serialization](https://github.com/cloudflare/workerd/blob/d99bc6b777e35d72d71c2f1fe2fd1db53284528a/src/workerd/api/wrapped-binding.c%2B%2B)，
-并由 `p6-cf-resources` 验证 parent 写入、child 绑定查询和精确 env keys。测试 compatibility date 为
+并由 `cf-resources` 验证 parent 写入、child 绑定查询和精确 env keys。测试 compatibility date 为
 `2026-09-08`，未启用实验性 `d1_binding_jsrpc`；D1 继续通过原生 Fetcher 的 HTTP 契约访问平台 authority。
 这项证据限定于当前正式 pin，不声明 hosted Cloudflare 差分已通过。
 
@@ -497,7 +497,7 @@ qualification 仍是有效证据，但当前 token 不能生成新的合并报�
 `blocked`；账号权限条件解除前，不得声称 Workflow 已完成真实 Cloudflare differential qualification，
 也不得把其它七项结果外推为“所有产品均与 Cloudflare 托管端实测一致”。
 
-本地证据由 `p3-contract` 的 type/catalog/config/deviation/source 双射、产品 Gates、真实 pinned
+本地证据由 `contract` 的 type/catalog/config/deviation/source 双射、产品 Gates、真实 pinned
 workerd、SQLite 与选定的 Local/S3 object authority、restart/crash tests 和最终 workspace/coverage 共同组成。最终命令、报告和
 实际限制记录在归档完成报告中；机器可读 capability/catalog 仍是支持状态的唯一 authority。
 

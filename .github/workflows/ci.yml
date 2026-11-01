@@ -126,7 +126,7 @@ jobs:
           lfs: true
       - uses: ./.github/actions/setup-open-compute
         with:
-          browser-fixture: ${{ contains(needs.failfast.outputs.gate_targets, 'p22-browser-run') && 'true' || 'false' }}
+          browser-fixture: ${{ contains(needs.failfast.outputs.gate_targets, 'browser') && 'true' || 'false' }}
       - uses: ./.github/actions/prepare-container-fixture-images
         id: container-images
       - name: Build runtime and application assets
@@ -138,10 +138,10 @@ jobs:
           set -euo pipefail
           read -r -a targets <<< "$GATE_TARGETS"
           command=(./test/gate.py)
-          if [[ " $GATE_TARGETS " == *" p0-2 "* ]]; then
+          if [[ " $GATE_TARGETS " == *" workers "* ]]; then
             command=(env OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO=1 ./test/test-p0-2-egress-linux.sh)
           fi
-          if [[ " $GATE_TARGETS " == *" p23-containers "* ]]; then
+          if [[ " $GATE_TARGETS " == *" containers "* ]]; then
             cargo build --locked -p open-compute-service --bin ocd --features test-support
             bash test/containers-fixture/with-ci-linux-engine.sh \
               --images '${{ steps.container-images.outputs.directory }}' \

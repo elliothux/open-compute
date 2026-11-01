@@ -14,7 +14,7 @@ open-compute runs Cloudflare Workers on one machine for small teams. `ocd` (Rust
 
 ```sh
 bun install && bun run build  # inputs: docs/references/single-binary.md
-./test/gate.py <targets> --keep-going  # --list shows targets and cases
+./test/gate.py runtime contract kv --keep-going  # --list shows domain targets and cases
 cargo fmt --all --check && ./test/check-rust-clippy.sh
 ```
 

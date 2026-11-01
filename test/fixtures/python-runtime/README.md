@@ -115,7 +115,7 @@ arbitrary isolate selection between requests. Host networking uses explicit
 loopback HTTP and TCP fixtures under the documented operator-owned policy.
 
 Build/capture and validation evidence is preserved in
-`.temp/p21-python-runtime/`, `.temp/p21-python-cache/` and
+`.temp/python-runtime/`, `.temp/p21-python-cache/` and
 `.temp/p21-python-assets-runtime/`, `.temp/p21-python-images/` and
 `.temp/p21-python-ai-vectorize/` and `.temp/p21-python-artifacts/` and `.temp/p21-python-ai-search/`.
 Previous raw inputs remain in those

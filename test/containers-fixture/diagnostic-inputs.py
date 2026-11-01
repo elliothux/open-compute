@@ -37,10 +37,10 @@ def gate_commands(workspace, outbound_contexts=False):
         command = ['./test/test-p0-2-egress-linux.sh', '--workspace', '--jobs', '2']
         return [command + ['--list'], command]
     if outbound_contexts:
-        command = ['./test/test-p0-2-egress-linux.sh', 'p0-2', 'p0-8', 'workflow-runtime',
+        command = ['./test/test-p0-2-egress-linux.sh', 'workers', 'alarms', 'workflow-runtime',
                    '--keep-going', '--jobs', '1']
         return [command + ['--list'], command]
-    return [['./test/gate.py', 'p23-containers', *options] for options in (
+    return [['./test/gate.py', 'containers', *options] for options in (
         ['--list'], ['--keep-going', '--jobs', '1'])]
 
 

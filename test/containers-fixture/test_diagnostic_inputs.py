@@ -80,14 +80,14 @@ class DiagnosticInputsTest(unittest.TestCase):
             '--workspace', '--jobs', '2'])
         self.assertNotIn('--keep-going', acceptance)
         self.assertEqual(diagnostic.gate_commands(False), [
-            ['./test/gate.py', 'p23-containers', '--list'],
-            ['./test/gate.py', 'p23-containers', '--keep-going', '--jobs', '1']])
+            ['./test/gate.py', 'containers', '--list'],
+            ['./test/gate.py', 'containers', '--keep-going', '--jobs', '1']])
 
     def test_outbound_contexts_collect_all_affected_native_targets_in_one_batch(self):
         discovery, execution = diagnostic.gate_commands(False, True)
         self.assertEqual(discovery, execution + ['--list'])
         self.assertEqual(execution, ['./test/test-p0-2-egress-linux.sh',
-            'p0-2', 'p0-8', 'workflow-runtime', '--keep-going', '--jobs', '1'])
+            'workers', 'alarms', 'workflow-runtime', '--keep-going', '--jobs', '1'])
 
     def test_storage_measurement_retains_only_owned_directory_sizes(self):
         with tempfile.TemporaryDirectory() as directory:

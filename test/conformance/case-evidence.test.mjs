@@ -14,7 +14,7 @@ function fixture() {
     JSON.stringify({ include: ["**/*.ts"] }),
   );
   writeFileSync(join(directory, "surface.ts"), "export {};\n");
-  const runtime = "p0-4::p0_4_real_kv_matrix";
+  const runtime = "kv::p0_4_real_kv_matrix";
   const compile = "ts::test/conformance/fixtures/kv/surface.ts";
   const catalog = {
     contracts: [{ positiveCases: [runtime], negativeCases: [runtime] }],

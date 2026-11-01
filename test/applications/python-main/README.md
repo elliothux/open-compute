@@ -1,6 +1,6 @@
 # Python main fixture
 
-This source owns the ordinary Python Worker for the planned `p21-python-main`
+This source owns the ordinary Python Worker for the planned `python-main`
 Gate: local package/data imports, vars, a required secret, KV/D1/R2 writes and
 reads, streaming, sanitized exceptions and host-network fetch.
 The secret-proof route returns an HMAC of a fixed test challenge, allowing the

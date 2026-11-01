@@ -24,10 +24,10 @@ workerd、进程级 shutdown 和 startup lifecycle case 留在独占 barrier。�
 已经启动，而且其产物不会流入 tag workflow，因此没有提供发布前拦截或构建复用。远端 dry-run 已删除；
 隔离 package 诊断改在本机 Docker 内完成，不再先消耗一轮 Actions runner。
 
-本地最终 Gate 的一次 `p5-search` 失败发生在 05:35:08 macOS 入睡至 05:51:54 DarkWake 的窗口；
+本地最终 Gate 的一次 `search` 失败发生在 05:35:08 macOS 入睡至 05:51:54 DarkWake 的窗口；
 该目标报告只累计 22.40 秒 active monotonic time，并在唤醒同秒得到 `RUNTIME_UNAVAILABLE`。同一源码保持
 唤醒后单目标 71.41 秒通过，因此不改产品 runtime、不加重试：本地 Gate 和 Docker dry-run 在 macOS
-自动使用 `caffeinate -is`，并把 p5-search 移到 single-binary 后的 fail-fast 段。正式 GitHub runner 不变。
+自动使用 `caffeinate -is`，并把 search 移到 single-binary 后的 fail-fast 段。正式 GitHub runner 不变。
 
 `main` 的旧轻量检查（`34015774164`）耗时 2 分 46 秒；加入生产 Clippy、no-default-features
 和 production hygiene 后，健康缓存的 `34974064143` 耗时 8 分 04 秒，半成品缓存下的
@@ -51,7 +51,7 @@ package 在编译后执行无 `--config` 的 capabilities 命令失败。两个 
 旧失败任务没有上传原生二进制，结束后的托管 VM 不能再取回；不能宣称能复用没有保存的 build。
 
 确定性发布错误也曾被发现得过晚：`34939860032` 与 `35001991046` 在 macOS workspace/coverage 跑到末尾后
-才由 `p3-contract` 报 source digest drift；`35001991046` 与 `35008672807` 又在三平台 package 完成后才由
+才由 `contract` 报 source digest drift；`35001991046` 与 `35008672807` 又在三平台 package 完成后才由
 assemble 报 SDK package report schema 不匹配。`35020012666` 到 publish 才发现 npm 认证缺失；后续 run 的
 `npm publish` 已成功，但紧接着的 registry read-back 因传播延迟返回 E404，继续轮询没有增加发布正确性。
 现在 main CI 与 tag release 都先执行秒级 `failfast`：source identity、release-tool/SDK report contract、
@@ -121,7 +121,7 @@ workspace/final binary。当前没有应用 benchmark，且仓库 cache 已接�
   Rust、runtime、workerd、`ci.yml`、共享 setup 或未知路径仍执行完整静态资格。汇总 job `ci` 保留不变，
   避免分支保护因跳过具体 job 失效。
 - tag qualification：`failfast` 先验证 release environment、source/release identity、notes、SDK report
-  contract、npm credential 和目标版本。三个 package job 成功后，Linux coverage 在受控 egress fixture 中执行唯一完整 workspace Gate，包含 `p0-2`。
+  contract、npm credential 和目标版本。三个 package job 成功后，Linux coverage 在受控 egress fixture 中执行唯一完整 workspace Gate，包含 `workers`。
 - 三个正式平台 package：身份验证后即并行构建。Linux coverage 校验并复用同次运行的 Linux x64 发行包作为 Broker，不再重复构建 debug Broker。publish 等待所有路径成功。macOS Intel 不再进入 package 矩阵。
 - package 与普通 production hygiene 使用同一 executable verifier，生成 mode 0600 临时配置再查询
   capabilities，同时核对 release identity、版本、licenses 和嵌入 docs；不初始化平台数据目录。

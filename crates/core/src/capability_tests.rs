@@ -55,7 +55,7 @@ fn supported_member(status: CapabilityStatus) -> CapabilityMemberV1 {
         signature_sha256: "b".repeat(64),
         status,
         compile_cases: vec!["raw-tcp-compile".to_owned()],
-        runtime_cases: vec!["p0-2::raw-tcp".to_owned()],
+        runtime_cases: vec!["workers::raw-tcp".to_owned()],
         deviations: if status == CapabilityStatus::SupportedWithDeviation {
             vec!["OC-WKR-TCP-001".to_owned()]
         } else {
@@ -274,7 +274,7 @@ fn capability_status_serialization_and_contract_are_strict() {
     capabilities.products.get_mut("queues").unwrap().members[0].status = CapabilityStatus::Blocked;
     capabilities.products.get_mut("queues").unwrap().members[0]
         .compile_cases
-        .push("p0-4::example".to_owned());
+        .push("kv::example".to_owned());
     assert!(!capabilities.validate());
     assert!(
         serde_json::from_str::<ProductCapabilityV1>(

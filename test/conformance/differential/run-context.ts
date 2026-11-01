@@ -113,7 +113,7 @@ export async function prepareRun(
   local = false,
   refresh = false,
 ): Promise<DifferentialContext> {
-  if (!local && required("OPEN_COMPUTE_CF_MUTATION_ACK") !== "p3-cf-diff")
+  if (!local && required("OPEN_COMPUTE_CF_MUTATION_ACK") !== "cf-diff")
     throw new Error("Cloudflare mutation acknowledgement is missing");
   const accountId = local ? "" : required("OPEN_COMPUTE_CF_ACCOUNT_ID");
   if (!local && !/^[0-9a-f]{32}$/.test(accountId))

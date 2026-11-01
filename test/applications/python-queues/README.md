@@ -1,7 +1,7 @@
 # Python Queue qualification application
 
 This application uses the unchanged `workers-runtime-sdk` 1.9.2. The owning
-`p21-python-queues` scenario deploys its genuine cf upload to an ordinary daemon
+`python-queues` scenario deploys its genuine cf upload to an ordinary daemon
 and compares Python and JavaScript against the same persisted Queue and KV.
 Compilation and input qualification do not establish a passing product Gate.
 

@@ -3,7 +3,7 @@
 set -eu
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-if [ "$#" -eq 0 ]; then set -- p0-2; fi
+if [ "$#" -eq 0 ]; then set -- workers; fi
 "$root/test/gate.py" "$@" --list >/dev/null
 http_port=38080
 tcp_port=38081

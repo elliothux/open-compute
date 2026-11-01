@@ -59,7 +59,7 @@ acceptance. Native stderr includes the test-owned framework secret on the
 intentional exception path and does not qualify production log sanitization.
 See `.temp/p21-python-build/frameworks-02/qualification-02.json`.
 
-These sources own the three registered `p21-python-frameworks` cases in the
+These sources own the three registered `python-frameworks` cases in the
 `p21_python_frameworks` executable. Django and ordinary Flask completed their full daemon cases in
 `20261005T001633-3d63ba3c`; the corrected FastAPI case passed separately
 in `.temp/p21-final-preflight/fastapi-minimum-case-01.log`. All three registered

@@ -146,10 +146,10 @@ exec env -i PATH="$PATH" CI_COMMAND_LOG="$CI_COMMAND_LOG" "$@"
 `,
     );
     for (const targets of [
-      "p0-5 p3-contract",
-      "p0-2 p3-contract",
-      "p23-containers p3-contract",
-      "p0-2 p23-containers p3-contract",
+      "r2 contract",
+      "workers contract",
+      "containers contract",
+      "workers containers contract",
     ]) {
       const log = join(root, "commands.jsonl");
       await writeFile(log, "");
@@ -175,7 +175,7 @@ exec env -i PATH="$PATH" CI_COMMAND_LOG="$CI_COMMAND_LOG" "$@"
         .trim()
         .split("\n")
         .map(JSON.parse);
-      assert.equal(calls.length, targets.includes("p23-containers") ? 2 : 1);
+      assert.equal(calls.length, targets.includes("containers") ? 2 : 1);
       if (calls.length === 2)
         assert.deepEqual(calls[0].args, [
           "build",
@@ -188,11 +188,11 @@ exec env -i PATH="$PATH" CI_COMMAND_LOG="$CI_COMMAND_LOG" "$@"
           "test-support",
         ]);
       assert.deepEqual(calls.at(-1), {
-        name: targets.includes("p0-2")
+        name: targets.includes("workers")
           ? "test-p0-2-egress-linux.sh"
           : "gate.py",
         args: [...targets.split(" "), "--keep-going", "--jobs", "2"],
-        ...(targets.includes("p0-2") ? { sudo: "1" } : {}),
+        ...(targets.includes("workers") ? { sudo: "1" } : {}),
       });
     }
   } finally {
@@ -471,7 +471,7 @@ test("release qualification and local Docker diagnostic keep their exact boundar
     /  coverage:\n[\s\S]*?CARGO_INCREMENTAL: "0"\n\s+CARGO_PROFILE_DEV_DEBUG: line-tables-only\n\s+CARGO_PROFILE_TEST_DEBUG: line-tables-only/,
   );
   assert.match(workflow, /browser-fixture: "true"/);
-  assert.doesNotMatch(workflow, /test-p0-2-egress-linux\.sh p0-2 --jobs 2/);
+  assert.doesNotMatch(workflow, /test-p0-2-egress-linux\.sh workers --jobs 2/);
   for (const source of [workflow]) {
     assert.match(
       source,

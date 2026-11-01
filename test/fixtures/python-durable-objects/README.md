@@ -20,7 +20,7 @@ continued operation of an independent JavaScript namespace. Public uploads only
 support self-owned namespaces; cross-Script DO bindings are rejected. It does
 not claim cross-Script access or hosted deletion prerequisites are equivalent.
 
-Build/capture evidence lives under `.temp/p21-python-durable-objects/`.
+Build/capture evidence lives under `.temp/python-durable-objects/`.
 The WebSocket extension's fresh build and cf upload capture live under
 `.temp/p21-python-do-websocket/`; the previous active upload is retained there.
 The official SDK and pylock remain unchanged. The same serial case now exercises

@@ -32,7 +32,7 @@ class Progress(unittest.TestCase):
     def record(self, status, seconds=None):
         output = io.StringIO()
         with patch.dict(os.environ, GITHUB_ACTIONS='true'), redirect_stdout(output):
-            gate.ci_progress('p23-containers', 'test', status, seconds)
+            gate.ci_progress('containers', 'test', status, seconds)
         return output.getvalue().encode()
 
     def test_parallel_target_status_records_are_complete_lines(self):
@@ -45,7 +45,7 @@ class Progress(unittest.TestCase):
 
         output = YieldingOutput()
         with redirect_stdout(output), ThreadPoolExecutor(max_workers=4) as executor:
-            futures = [executor.submit(gate.ci_progress, 'p23-containers', 'test', 'START')
+            futures = [executor.submit(gate.ci_progress, 'containers', 'test', 'START')
                        for _ in range(16)]
             for future in futures:
                 future.result()
@@ -56,7 +56,7 @@ class Progress(unittest.TestCase):
     def test_only_complete_bounded_status_records_are_forwarded(self):
         line = self.record('PASS', 1.25)
         self.assertEqual(json.loads(broker.gate_progress(line).split(' ', 1)[1]),
-                         dict(target='p23-containers', phase='test', status='PASS', seconds=1.25))
+                         dict(target='containers', phase='test', status='PASS', seconds=1.25))
         value = json.loads(line.split(b' ', 1)[1])
         for bad in [dict(value, message='private-token'), dict(value, target='/private/key'),
                     dict(value, phase=['test']), dict(value, status='UNKNOWN'),

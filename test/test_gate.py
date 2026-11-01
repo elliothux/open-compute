@@ -4,6 +4,7 @@ import io
 from contextlib import redirect_stderr
 import json
 import os
+import re
 import socket
 import shutil
 import subprocess
@@ -23,42 +24,57 @@ spec.loader.exec_module(gate)
 
 
 class GateTests(unittest.TestCase):
+    def test_documented_domain_names_cover_registry_and_reject_every_old_name(self):
+        source = (gate.ROOT / 'docs/references/testing.md').read_text()
+        rows = re.findall(r'^\| `([^`]+)` \| `([^`]+)` \|$', source, re.MULTILINE)
+        unchanged = {'runtime', 'single-binary', 'dashboard', 'workflow-runtime',
+                     'workflow-recovery', 'workflow-product', 'workflow', 'all',
+                     's3-provider-qualification'}
+        self.assertEqual({new for _, new in rows} | unchanged,
+                         gate.TARGETS.keys() | gate.GROUPS.keys())
+        self.assertEqual(len(rows), len(gate.TARGETS) + len(gate.GROUPS) - len(unchanged) + 1)
+        for old, new in rows:
+            self.assertTrue(gate.selection([new]), new)
+            if old != new:
+                with self.assertRaisesRegex(ValueError, 'unknown Gate target'):
+                    gate.selection([old])
+
     def test_refresh_is_explicit_and_only_for_live_differential(self):
-        target = gate.TypedTarget(None, 'p3-cf-diff', 'cloudflare-differential', '/repo', True,
-                                  gate.ONCE['p3-cf-diff'], '/bun', ('differential.ts',))
+        target = gate.TypedTarget(None, 'cf-diff', 'cloudflare-differential', '/repo', True,
+                                  gate.ONCE['cf-diff'], '/bun', ('differential.ts',))
         with patch.object(gate, 'validate_contract_case_mapping'), \
-             patch.object(gate, 'resolve_targets', return_value={'p3-cf-diff': target}), \
+             patch.object(gate, 'resolve_targets', return_value={'cf-diff': target}), \
              patch.object(gate, 'round_plan', wraps=gate.round_plan) as plan, \
-             patch.object(gate.sys, 'argv', ['gate.py', 'p3-cf-diff', '--refresh', '--list']):
+             patch.object(gate.sys, 'argv', ['gate.py', 'cf-diff', '--refresh', '--list']):
             self.assertEqual(gate.main(), 0)
-            self.assertEqual(plan.call_args.args[0]['p3-cf-diff'].argv,
+            self.assertEqual(plan.call_args.args[0]['cf-diff'].argv,
                              ('differential.ts', '--refresh'))
-        for targets in [['p3-recorded'], ['p3-cf-diff', 'p3-contract'], ['--workspace']]:
+        for targets in [['recorded'], ['cf-diff', 'contract'], ['--workspace']]:
             with patch.object(gate, 'validate_contract_case_mapping'), \
                  patch.object(gate, 'resolve_targets') as resolve, \
                  patch.object(gate.sys, 'argv', ['gate.py', *targets, '--refresh']):
-                with self.assertRaisesRegex(ValueError, '--refresh requires only p3-cf-diff'):
+                with self.assertRaisesRegex(ValueError, '--refresh requires only cf-diff'):
                     gate.main()
                 resolve.assert_not_called()
 
     def test_recorded_contract_gate_owns_the_local_runner_without_cloudflare_credentials(self):
-        self.assertEqual(gate.CARGO_TARGETS['p3-recorded'],
+        self.assertEqual(gate.CARGO_TARGETS['recorded'],
                          ('open-compute-service', 'recorded_contracts', True))
-        self.assertEqual(gate.ONCE['p3-recorded'], ('portable_recordings_match_local_ocd',))
-        self.assertIn('p3-recorded', gate.selection(['all']))
+        self.assertEqual(gate.ONCE['recorded'], ('portable_recordings_match_local_ocd',))
+        self.assertIn('recorded', gate.selection(['all']))
         source = (gate.ROOT / 'crates/service/tests/recorded_contracts.rs').read_text()
         self.assertIn('platform_process::spawn', source)
         self.assertIn('command.env_clear()', source)
         self.assertIn('"--local"', source)
 
     def test_python_main_is_one_exclusive_registered_scenario_in_acceptance_groups(self):
-        name = 'p21-python-main'
+        name = 'python-main'
         case = 'python_main::p21_python_main_upload_prepare_dispatch_restart_rollback'
         self.assertEqual(gate.CARGO_TARGETS[name], ('open-compute-service', 'p21_python_main', True))
         self.assertEqual(gate.TIMING[name], (case,))
         self.assertFalse(gate.ONCE.get(name, ()))
         self.assertEqual(gate.GROUPS['all'].count(name), 1)
-        self.assertEqual(gate.P3_PRODUCT_TARGETS.count(name), 1)
+        self.assertEqual(gate.PRODUCT_SCENARIOS.count(name), 1)
         metadata = {'workspace_members': ['service'], 'packages': [{
             'id': 'service', 'name': 'open-compute-service', 'manifest_path': '/repo/crates/service/Cargo.toml',
             'targets': [{'name': 'p21_python_main', 'kind': ['test'], 'test': True}],
@@ -77,7 +93,7 @@ class GateTests(unittest.TestCase):
         self.assertEqual(workspace[name].name, 'p21_python_main')
 
     def test_containers_owns_one_exclusive_ordinary_sdk_native_scenario(self):
-        name = 'p23-containers'
+        name = 'containers'
         case = 'ordinary_sdk_native_execution_code_deploy_rollout_and_restart_use_real_containers'
         self.assertEqual(gate.CARGO_TARGETS[name], ('open-compute-service', 'p23_containers', True))
         self.assertEqual(gate.TIMING[name], (case,))
@@ -166,7 +182,7 @@ class GateTests(unittest.TestCase):
                                   gate.TARGETS[name][2]) for name in names}
 
     def test_python_frameworks_require_three_cases_in_one_exclusive_native_inventory(self):
-        name = 'p21-python-frameworks'
+        name = 'python-frameworks'
         cases = tuple(sorted(
             f'frameworks::p21_python_{framework}_framework_http_smoke'
             for framework in ('django', 'flask', 'fastapi')
@@ -175,7 +191,7 @@ class GateTests(unittest.TestCase):
         self.assertEqual(tuple(sorted(gate.TIMING[name])), cases)
         self.assertFalse(gate.ONCE.get(name, ()))
         self.assertEqual(gate.GROUPS['all'].count(name), 1)
-        self.assertEqual(gate.P3_PRODUCT_TARGETS.count(name), 1)
+        self.assertEqual(gate.PRODUCT_SCENARIOS.count(name), 1)
         catalog = json.loads((gate.ROOT / 'test/conformance/catalog.json').read_text())
         references = {f'{name}::{case}' for case in cases}
         for contract in catalog['contracts']:
@@ -204,13 +220,13 @@ class GateTests(unittest.TestCase):
                 gate.verify_case_inventory(targets, [{'target': name, 'log': str(log)}])
 
     def test_python_services_owns_native_case_and_matching_contract_evidence(self):
-        name = 'p21-python-services'
+        name = 'python-services'
         case = 'services::p21_python_services_fetch_named_rpc_callback'
         self.assertEqual(gate.CARGO_TARGETS[name], ('open-compute-service', 'p21_python_services', True))
         self.assertEqual(gate.TIMING[name], (case,))
         self.assertFalse(gate.ONCE.get(name, ()))
         self.assertEqual(gate.GROUPS['all'].count(name), 1)
-        self.assertEqual(gate.P3_PRODUCT_TARGETS.count(name), 1)
+        self.assertEqual(gate.PRODUCT_SCENARIOS.count(name), 1)
         metadata = {'workspace_members': ['service'], 'packages': [{
             'id': 'service', 'name': 'open-compute-service', 'manifest_path': '/repo/crates/service/Cargo.toml',
             'targets': [{'name': 'p21_python_services', 'kind': ['test'], 'test': True}],
@@ -240,13 +256,13 @@ class GateTests(unittest.TestCase):
                 gate.verify_case_inventory(targets, [{'target': name, 'log': str(log)}])
 
     def test_python_queues_owns_native_case_and_matching_contract_evidence(self):
-        name = 'p21-python-queues'
+        name = 'python-queues'
         case = 'queues::p21_python_queues_produce_consume_retry_dlq_replay'
         self.assertEqual(gate.CARGO_TARGETS[name], ('open-compute-service', 'p21_python_queues', True))
         self.assertEqual(gate.TIMING[name], (case,))
         self.assertFalse(gate.ONCE.get(name, ()))
         self.assertEqual(gate.GROUPS['all'].count(name), 1)
-        self.assertEqual(gate.P3_PRODUCT_TARGETS.count(name), 1)
+        self.assertEqual(gate.PRODUCT_SCENARIOS.count(name), 1)
         metadata = {'workspace_members': ['service'], 'packages': [{
             'id': 'service', 'name': 'open-compute-service', 'manifest_path': '/repo/crates/service/Cargo.toml',
             'targets': [{'name': 'p21_python_queues', 'kind': ['test'], 'test': True}],
@@ -276,13 +292,13 @@ class GateTests(unittest.TestCase):
                 gate.verify_case_inventory(targets, [{'target': name, 'log': str(log)}])
 
     def test_python_workflows_owns_native_case_and_matching_contract_evidence(self):
-        name = 'p21-python-workflows'
+        name = 'python-workflows'
         case = 'workflows::p21_python_workflows_steps_events_retry_pause_restart_rollback'
         self.assertEqual(gate.CARGO_TARGETS[name], ('open-compute-service', 'p21_python_workflows', True))
         self.assertEqual(gate.TIMING[name], (case,))
         self.assertFalse(gate.ONCE.get(name, ()))
         self.assertEqual(gate.GROUPS['all'].count(name), 1)
-        self.assertEqual(gate.P3_PRODUCT_TARGETS.count(name), 1)
+        self.assertEqual(gate.PRODUCT_SCENARIOS.count(name), 1)
         metadata = {'workspace_members': ['service'], 'packages': [{
             'id': 'service', 'name': 'open-compute-service', 'manifest_path': '/repo/crates/service/Cargo.toml',
             'targets': [{'name': 'p21_python_workflows', 'kind': ['test'], 'test': True}],
@@ -312,13 +328,13 @@ class GateTests(unittest.TestCase):
                 gate.verify_case_inventory(targets, [{'target': name, 'log': str(log)}])
 
     def test_python_runtime_owns_native_case_and_matching_contract_evidence(self):
-        name = 'p21-python-runtime'
+        name = 'python-runtime'
         case = 'runtime::p21_python_runtime_ffi_stdlib_wait_until_network_restart_rollback'
         self.assertEqual(gate.CARGO_TARGETS[name], ('open-compute-service', 'p21_python_runtime', True))
         self.assertEqual(gate.TIMING[name], (case,))
         self.assertFalse(gate.ONCE.get(name, ()))
         self.assertEqual(gate.GROUPS['all'].count(name), 1)
-        self.assertEqual(gate.P3_PRODUCT_TARGETS.count(name), 1)
+        self.assertEqual(gate.PRODUCT_SCENARIOS.count(name), 1)
         metadata = {'workspace_members': ['service'], 'packages': [{
             'id': 'service', 'name': 'open-compute-service', 'manifest_path': '/repo/crates/service/Cargo.toml',
             'targets': [{'name': 'p21_python_runtime', 'kind': ['test'], 'test': True}],
@@ -348,13 +364,13 @@ class GateTests(unittest.TestCase):
                 gate.verify_case_inventory(targets, [{'target': name, 'log': str(log)}])
 
     def test_python_durable_objects_owns_native_case_and_matching_contract_evidence(self):
-        name = 'p21-python-durable-objects'
+        name = 'python-durable-objects'
         case = 'durable_objects::p21_python_durable_objects_fetch_rpc_storage_alarm_restart_rollback'
         self.assertEqual(gate.CARGO_TARGETS[name], ('open-compute-service', 'p21_python_durable_objects', True))
         self.assertEqual(gate.TIMING[name], (case,))
         self.assertFalse(gate.ONCE.get(name, ()))
         self.assertEqual(gate.GROUPS['all'].count(name), 1)
-        self.assertEqual(gate.P3_PRODUCT_TARGETS.count(name), 1)
+        self.assertEqual(gate.PRODUCT_SCENARIOS.count(name), 1)
         metadata = {'workspace_members': ['service'], 'packages': [{
             'id': 'service', 'name': 'open-compute-service', 'manifest_path': '/repo/crates/service/Cargo.toml',
             'targets': [{'name': 'p21_python_durable_objects', 'kind': ['test'], 'test': True}],
@@ -462,9 +478,9 @@ class GateTests(unittest.TestCase):
             execute.assert_not_called()
 
     def test_overlapping_selections_run_each_physical_target_once(self):
-        selected = gate.selection(['p0-2', 'p2-3', 'workflow', 'p1-8', 'p0-7'])
+        selected = gate.selection(['workers', 'workers', 'workflow', 'hibernation', 'durable-objects'])
         self.assertEqual(len(selected), len(set(gate.TARGETS[name][:2] for name in selected)))
-        self.assertEqual(selected.count('p0-2'), 1)
+        self.assertEqual(selected.count('workers'), 1)
         self.assertEqual(selected.count('workflow-product'), 1)
         with self.assertRaises(ValueError):
             gate.selection(['g0'])
@@ -511,19 +527,19 @@ class GateTests(unittest.TestCase):
         def execute(name, executable, directory, target):
             calls.append(name)
             return {'target': name, 'exit_code': 1}
-        selected = ['p0-2', 'p0-3', 'p0-4']
+        selected = ['workers', 'bindings', 'kv']
         with tempfile.TemporaryDirectory() as temp:
             results = gate.run_round(self.targets(selected), {n: n for n in selected},
                                      Path(temp)/'round', 1, execute)
-        self.assertEqual(calls, ['p0-2'])
+        self.assertEqual(calls, ['workers'])
         self.assertEqual(len(results), 1)
 
     def test_keep_going_collects_failures_without_retrying_targets(self):
         calls = []
-        selected = ['p0-2', 'p0-3', 'p0-4']
+        selected = ['workers', 'bindings', 'kv']
         def execute(name, executable, directory, target):
             calls.append(name)
-            return {'target': name, 'exit_code': int(name != 'p0-3')}
+            return {'target': name, 'exit_code': int(name != 'bindings')}
         with tempfile.TemporaryDirectory() as temp:
             results = gate.run_round(self.targets(selected), {n: n for n in selected},
                                      Path(temp)/'round', 1, execute, keep_going=True)
@@ -532,7 +548,7 @@ class GateTests(unittest.TestCase):
 
     def test_workspace_can_rerun_without_freezing_source_or_inputs(self):
         targets = {name: target._replace(cases=gate.ONCE.get(name, ()) + gate.TIMING[name])
-                   for name, target in self.targets(['p0-2']).items()}
+                   for name, target in self.targets(['workers']).items()}
         with tempfile.TemporaryDirectory() as temp, \
              patch.object(gate, 'ROOT', Path(temp)), \
              patch.object(gate, 'verify_inputs', return_value={}) as inputs, \
@@ -546,7 +562,7 @@ class GateTests(unittest.TestCase):
              patch.object(gate.subprocess, 'check_output', return_value='revision'), \
              patch.object(gate.sys, 'argv', ['gate.py', '--workspace']), \
              patch.dict(os.environ, OPEN_COMPUTE_GATE_ROUNDS='1'), \
-             patch.object(gate, 'run_round', return_value=[{'target': 'p0-2', 'exit_code': 0}]):
+             patch.object(gate, 'run_round', return_value=[{'target': 'workers', 'exit_code': 0}]):
             # Old acceptance reports, including failures, do not gate new executions.
             previous = Path(temp)/'.temp/gate-run/failed/previous/report.json'
             previous.parent.mkdir(parents=True)
@@ -572,18 +588,18 @@ class GateTests(unittest.TestCase):
                  patch.object(gate, 'validate_contract_case_mapping'), \
                  patch.object(gate, 'write_contract_report'), \
                  patch.object(gate, 'source_identity', return_value='unchanged'), \
-                 patch.object(gate, 'resolve_targets', return_value=self.targets(['p0-2'])), \
+                 patch.object(gate, 'resolve_targets', return_value=self.targets(['workers'])), \
                  patch.object(gate, 'build_targets', return_value=({}, {'invocations': 1})), \
                  patch.object(gate, 'verify_case_inventory', return_value={
                      name: target._replace(cases=gate.TIMING[name])
-                     for name, target in self.targets(['p0-2']).items()}), \
+                     for name, target in self.targets(['workers']).items()}), \
                  patch.object(gate.platform, 'platform', return_value='test-host'), \
                  patch.object(gate.subprocess, 'check_output', return_value='revision'), \
-                 patch.object(gate.sys, 'argv', ['gate.py', 'p0-2']), \
+                 patch.object(gate.sys, 'argv', ['gate.py', 'workers']), \
                  patch.dict(os.environ, OPEN_COMPUTE_GATE_ROUNDS=rounds), \
                  patch.object(gate, 'run_round', side_effect=[
-                     [{'target': 'p0-2', 'exit_code': int(prepare_failure)}],
-                     *[[{'target': 'p0-2', 'exit_code': int(failure)}]] * expected,
+                     [{'target': 'workers', 'exit_code': int(prepare_failure)}],
+                     *[[{'target': 'workers', 'exit_code': int(failure)}]] * expected,
                  ]) as run:
                 self.assertEqual(gate.main(), int(failure))
                 self.assertEqual(run.call_count, expected + 1)
@@ -614,12 +630,12 @@ class GateTests(unittest.TestCase):
                      patch.object(gate, 'validate_contract_case_mapping'), \
                      patch.object(gate, 'write_contract_report'), \
                      patch.object(gate, 'source_identity', return_value='unchanged'), \
-                     patch.object(gate, 'resolve_targets', return_value=self.targets(['p0-2'])), \
+                     patch.object(gate, 'resolve_targets', return_value=self.targets(['workers'])), \
                      patch.object(gate, 'build_targets', side_effect=RuntimeError('original build failure')), \
                      patch.object(gate, 'run_round') as run, \
                      patch.object(gate.platform, 'platform', return_value='test-host'), \
                      patch.object(gate.subprocess, 'check_output', return_value='revision'), \
-                     patch.object(gate.sys, 'argv', ['gate.py', 'p0-2']), \
+                     patch.object(gate.sys, 'argv', ['gate.py', 'workers']), \
                      patch.dict(os.environ, OPEN_COMPUTE_GATE_ROUNDS='1'), \
                      patch.object(Path, 'mkdir', create), patch.object(Path, 'write_text', write), \
                      redirect_stderr(errors):
@@ -639,8 +655,8 @@ class GateTests(unittest.TestCase):
              patch.dict(os.environ, OPEN_COMPUTE_GATE_ROUNDS='3',
                         BUN_RUNTIME_TRANSPILER_CACHE_PATH='unowned-cache',
                         NODE_DISABLE_COMPILE_CACHE='0'):
-            target = self.targets(['p0-2'])['p0-2']
-            result = gate.execute_target('p0-2', '/compiled/test', Path(temp)/'prepare', target,
+            target = self.targets(['workers'])['workers']
+            result = gate.execute_target('workers', '/compiled/test', Path(temp)/'prepare', target,
                                          list_only=True)
             self.assertEqual(result['exit_code'], 0)
             self.assertEqual(run.call_args.args[0], ['/compiled/test', '--list'])
@@ -651,7 +667,7 @@ class GateTests(unittest.TestCase):
 
     def test_p5_search_defaults_fixture_embedding_key(self):
         with tempfile.TemporaryDirectory() as temp, patch.object(gate, 'ROOT', Path(temp)):
-            target = self.targets(['p5-search'])['p5-search']
+            target = self.targets(['search'])['search']
             captured = {}
             def execute(command, **kwargs):
                 captured['env'] = kwargs['env']
@@ -659,7 +675,7 @@ class GateTests(unittest.TestCase):
             with patch.dict(os.environ, {'PATH': '/usr/bin'}, clear=True), \
                  patch.object(gate.subprocess, 'run', side_effect=execute):
                 result = gate.execute_target(
-                    'p5-search', '/compiled/test', Path(temp)/'default', target)
+                    'search', '/compiled/test', Path(temp)/'default', target)
             self.assertEqual(result['exit_code'], 0)
             self.assertEqual(
                 captured['env']['OPEN_COMPUTE_TEST_EMBEDDING_API_KEY'], 'fixture-secret')
@@ -669,7 +685,7 @@ class GateTests(unittest.TestCase):
                     'OPEN_COMPUTE_TEST_EMBEDDING_API_KEY': 'operator-key',
             }), patch.object(gate.subprocess, 'run', side_effect=execute):
                 result = gate.execute_target(
-                    'p5-search', '/compiled/test', Path(temp)/'operator', target)
+                    'search', '/compiled/test', Path(temp)/'operator', target)
             self.assertEqual(result['exit_code'], 0)
             self.assertEqual(
                 captured['env']['OPEN_COMPUTE_TEST_EMBEDDING_API_KEY'], 'operator-key')
@@ -677,7 +693,7 @@ class GateTests(unittest.TestCase):
             with patch.dict(os.environ, {'PATH': '/usr/bin'}, clear=True), \
                  patch.object(gate.subprocess, 'run', side_effect=execute):
                 result = gate.execute_target(
-                    'p0-2', '/compiled/test', Path(temp)/'other', self.targets(['p0-2'])['p0-2'])
+                    'workers', '/compiled/test', Path(temp)/'other', self.targets(['workers'])['workers'])
             self.assertEqual(result['exit_code'], 0)
             self.assertNotIn('OPEN_COMPUTE_TEST_EMBEDDING_API_KEY', captured['env'])
 
@@ -700,7 +716,7 @@ class GateTests(unittest.TestCase):
             parent = Path(temp) / ('long-report-name-' * 8)
             parent.mkdir()
             temporary_paths = []
-            target = self.targets(['p0-2'])['p0-2']
+            target = self.targets(['workers'])['workers']
             def execute(command, **kwargs):
                 scratch = Path(kwargs['env']['TMPDIR'])
                 temporary_paths.append(scratch)
@@ -709,14 +725,14 @@ class GateTests(unittest.TestCase):
                     listener.bind(str(Path(nested)/'socket'))
                 return SimpleNamespace(returncode=0)
             with patch.object(gate.subprocess, 'run', side_effect=execute):
-                result = gate.execute_target('p0-2', '/compiled/test', parent/'pass', target)
+                result = gate.execute_target('workers', '/compiled/test', parent/'pass', target)
             self.assertEqual(result['exit_code'], 0)
             self.assertFalse(temporary_paths[0].exists())
             def leak(command, **kwargs):
                 (Path(kwargs['env']['TMPDIR'])/'evidence').write_text('preserve')
                 return SimpleNamespace(returncode=0)
             with patch.object(gate.subprocess, 'run', side_effect=leak):
-                result = gate.execute_target('p0-2', '/compiled/test', parent/'leak', target)
+                result = gate.execute_target('workers', '/compiled/test', parent/'leak', target)
             self.assertEqual(result['exit_code'], 1)
             self.assertEqual((parent/'leak/tmp/evidence').read_text(), 'preserve')
 
@@ -727,7 +743,7 @@ class GateTests(unittest.TestCase):
             local.mkdir()
             repository = root / 'shared-source'
             repository.mkdir()
-            target = self.targets(['p0-2'])['p0-2']
+            target = self.targets(['workers'])['workers']
             captured = {}
             def execute(command, **kwargs):
                 scratch = Path(kwargs['env']['TMPDIR'])
@@ -744,7 +760,7 @@ class GateTests(unittest.TestCase):
                  patch.object(gate.tempfile, 'tempdir', str(local)), \
                  patch.object(gate.subprocess, 'run', side_effect=execute), \
                  patch.object(gate.os, 'rename', side_effect=OSError(18, 'cross-device link')):
-                result = gate.execute_target('p0-2', '/compiled/test', root/'failure', target)
+                result = gate.execute_target('workers', '/compiled/test', root/'failure', target)
             self.assertEqual(result['exit_code'], 1)
             retained = root / 'failure/tmp'
             self.assertEqual((retained/'evidence').read_bytes(), b'retained fixture bytes')
@@ -791,17 +807,17 @@ class GateTests(unittest.TestCase):
             'targets': [{'name': 'open_compute_runtime', 'kind': ['lib'], 'test': True}]}]}
         with patch.object(gate.subprocess, 'check_output', return_value=json.dumps(metadata)), \
              patch.object(gate, 'CARGO_TARGETS', {
-                 name: gate.CARGO_TARGETS[name] for name in ('p0-2', 'p5-search', 'single-binary')
+                 name: gate.CARGO_TARGETS[name] for name in ('workers', 'search', 'single-binary')
              }):
             targets = gate.resolve_targets([], True)
         self.assertEqual({target.name for target in targets.values()},
                           {'cli', 'open_compute_service', 'open_compute_runtime',
                           'p0_2_runtime_gate', 'p5_search_gate', 'single_binary', 'new_test', 'ocd',
-                          'p3-contract'})
-        self.assertNotIn('p3-cf-diff', targets)
+                          'contract'})
+        self.assertNotIn('cf-diff', targets)
         self.assertEqual(
             list(targets)[:3],
-            ['open-compute-service.test.cli', 'single-binary', 'p5-search'],
+            ['open-compute-service.test.cli', 'single-binary', 'search'],
         )
         self.assertTrue(targets['open-compute-service.test.cli'].exclusive)
         self.assertTrue(targets['single-binary'].exclusive)
@@ -812,8 +828,8 @@ class GateTests(unittest.TestCase):
             targets[gate.SERVICE_PROCESS_TARGET],
         )
         self.assertTrue(targets['open-compute-runtime.lib.open_compute_runtime'].exclusive)
-        self.assertTrue(targets['p0-2'].exclusive)
-        self.assertTrue(gate.CARGO_TARGETS['p0-5'][2])
+        self.assertTrue(targets['workers'].exclusive)
+        self.assertTrue(gate.CARGO_TARGETS['r2'][2])
         self.assertTrue(targets['open-compute-service.test.new_test'].exclusive)
         self.assertTrue(all(target.cwd == '/repo/crates/service'
                             for target in targets.values() if target.package_id == 'service'))
@@ -822,7 +838,7 @@ class GateTests(unittest.TestCase):
                 gate.resolve_targets([], True)
 
     def test_workspace_rejects_gate_selection_before_build(self):
-        with patch.object(gate.sys, 'argv', ['gate.py', '--workspace', 'p0-2']), \
+        with patch.object(gate.sys, 'argv', ['gate.py', '--workspace', 'workers']), \
              patch.object(gate, 'resolve_targets') as resolve:
             with self.assertRaisesRegex(ValueError, 'cannot be combined'):
                 gate.main()
@@ -844,8 +860,8 @@ class GateTests(unittest.TestCase):
         metadata = {'workspace_members': [], 'packages': []}
         with patch.object(gate.subprocess, 'check_output', return_value=json.dumps(metadata)), \
              patch.object(gate.shutil, 'which', side_effect=lambda name: '/bin/bun' if name == 'bun' else None):
-            targets = gate.resolve_targets(['p5-ai-provider-qualification'], False)
-        target = targets['p5-ai-provider-qualification']
+            targets = gate.resolve_targets(['ai-provider-qualification'], False)
+        target = targets['ai-provider-qualification']
         # The harness rebuilds the Rust gate; build.rs requires both pinned runtime inputs.
         self.assertIn('OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE', target.env_allowlist)
         self.assertIn('OPEN_COMPUTE_BUILD_CADDY', target.env_allowlist)
@@ -853,7 +869,7 @@ class GateTests(unittest.TestCase):
         self.assertIn('CARGO_INCREMENTAL', target.env_allowlist)
 
     def test_diagnostic_workspace_runs_complete_inventory_once_and_only_timing_twice_more(self):
-        targets = self.targets(['p0-1', 'p1-security', 'p2-1', 'workflow-product'])
+        targets = self.targets(['daemon', 'isolation', 'scheduler', 'workflow-product'])
         targets['unit'] = gate.Target('package', 'lib', 'lib', '/repo', False)
         targets[gate.SERVICE_LIB_TARGET] = gate.Target(
             'service', 'open_compute_service', 'lib', '/repo', False)
@@ -862,19 +878,19 @@ class GateTests(unittest.TestCase):
         plans = gate.round_plan(targets, 3)
         self.assertEqual(plans[0], targets)
         for plan in plans[1:]:
-            self.assertEqual(set(plan), {'p0-1', 'workflow-product'})
+            self.assertEqual(set(plan), {'daemon', 'workflow-product'})
             self.assertNotIn(gate.SERVICE_LIB_TARGET, plan)
             self.assertNotIn(gate.SERVICE_PROCESS_TARGET, plan)
             for name, target in plan.items():
                 self.assertEqual(set(target.cases), set(gate.TIMING[name]))
                 self.assertFalse(set(target.cases) & set(gate.ONCE.get(name, ())))
         self.assertEqual(gate.round_plan(targets, 1), [targets])
-        deterministic = self.targets(['p1-security', 'p2-1'])
+        deterministic = self.targets(['isolation', 'scheduler'])
         self.assertEqual(gate.round_plan(deterministic, 3), [deterministic])
 
     def test_diagnostic_main_records_mixed_rounds_and_stops_after_second_round_failure(self):
         for failure in [False, True]:
-            selected = ['p1-security', 'workflow-product']
+            selected = ['isolation', 'workflow-product']
             targets = {name: target._replace(cases=tuple(sorted(
                 gate.ONCE.get(name, ()) + gate.TIMING.get(name, ()))))
                 for name, target in self.targets(selected).items()}
@@ -894,7 +910,7 @@ class GateTests(unittest.TestCase):
                  patch.object(gate, 'verify_case_inventory', return_value=targets), \
                  patch.object(gate.platform, 'platform', return_value='test-host'), \
                  patch.object(gate.subprocess, 'check_output', return_value='revision'), \
-                 patch.object(gate.sys, 'argv', ['gate.py', 'p1-security', 'workflow-product']), \
+                 patch.object(gate.sys, 'argv', ['gate.py', 'isolation', 'workflow-product']), \
                  patch.dict(os.environ, OPEN_COMPUTE_GATE_ROUNDS='3'), \
                  patch.object(gate, 'run_round', side_effect=run):
                 self.assertEqual(gate.main(), int(failure))
@@ -914,14 +930,14 @@ class GateTests(unittest.TestCase):
              patch.object(gate, 'validate_contract_case_mapping'), \
              patch.object(gate, 'write_contract_report'), \
              patch.object(gate, 'source_identity', return_value='unchanged'), \
-             patch.object(gate, 'resolve_targets', return_value=self.targets(['p0-2'])), \
+             patch.object(gate, 'resolve_targets', return_value=self.targets(['workers'])), \
              patch.object(gate, 'build_targets', return_value=({}, {})), \
              patch.object(gate, 'verify_case_inventory', side_effect=ValueError('registry mismatch')), \
              patch.object(gate.platform, 'platform', return_value='test-host'), \
              patch.object(gate.subprocess, 'check_output', return_value='revision'), \
-             patch.object(gate.sys, 'argv', ['gate.py', 'p0-2']), \
+             patch.object(gate.sys, 'argv', ['gate.py', 'workers']), \
              patch.dict(os.environ, OPEN_COMPUTE_GATE_ROUNDS='3'), \
-             patch.object(gate, 'run_round', return_value=[{'target': 'p0-2', 'exit_code': 0}]) as run:
+             patch.object(gate, 'run_round', return_value=[{'target': 'workers', 'exit_code': 0}]) as run:
             self.assertEqual(gate.main(), 1)
             self.assertEqual(run.call_count, 1)
             report = json.loads(next(Path(temp).rglob('report.json')).read_text())
@@ -932,7 +948,7 @@ class GateTests(unittest.TestCase):
         gate.validate_registry(gate.TARGETS)
         with self.assertRaisesRegex(ValueError, 'registry differ'):
             gate.validate_registry({**gate.TARGETS, 'unreviewed': ()})
-        with patch.dict(gate.ONCE, {'p0-2': gate.TIMING['p0-2']}):
+        with patch.dict(gate.ONCE, {'workers': gate.TIMING['workers']}):
             with self.assertRaisesRegex(ValueError, 'duplicate'):
                 gate.validate_registry(gate.TARGETS)
         for cases in [(), ('same', 'same')]:
@@ -942,15 +958,15 @@ class GateTests(unittest.TestCase):
                     gate.validate_registry(gate.TARGETS)
         with tempfile.TemporaryDirectory() as temp:
             log = Path(temp)/'list.log'
-            targets = self.targets(['p1-security'])
-            expected = gate.ONCE['p1-security']
+            targets = self.targets(['isolation'])
+            expected = gate.ONCE['isolation']
             for cases in [expected, expected[:1], (*expected, 'unreviewed')]:
                 log.write_text('\n'.join(f'{name}: test' for name in cases)
                                + f'\n\n{len(cases)} tests, 0 benchmarks\n')
-                prepared = [{'target': 'p1-security', 'log': str(log)}]
+                prepared = [{'target': 'isolation', 'log': str(log)}]
                 if cases == expected:
                     found = gate.verify_case_inventory(targets, prepared)
-                    self.assertEqual(found['p1-security'].cases, tuple(sorted(expected)))
+                    self.assertEqual(found['isolation'].cases, tuple(sorted(expected)))
                 else:
                     with self.assertRaisesRegex(ValueError, 'registry mismatch'):
                         gate.verify_case_inventory(targets, prepared)
@@ -1012,7 +1028,7 @@ class GateTests(unittest.TestCase):
                 ])
 
     def test_contract_mapping_validates_member_runtime_evidence_before_build(self):
-        registered = f'p0-2::{gate.TIMING["p0-2"][0]}'
+        registered = f'workers::{gate.TIMING["workers"][0]}'
         with tempfile.TemporaryDirectory() as temp, patch.object(gate, 'ROOT', Path(temp)):
             root = Path(temp) / 'test/conformance'
             root.mkdir(parents=True)
@@ -1026,7 +1042,7 @@ class GateTests(unittest.TestCase):
             }
             (root / 'catalog.json').write_text(json.dumps(catalog))
             gate.validate_contract_case_mapping()
-            catalog['memberEvidence'][0]['runtimeCases'] = ['p0-2::missing']
+            catalog['memberEvidence'][0]['runtimeCases'] = ['workers::missing']
             (root / 'catalog.json').write_text(json.dumps(catalog))
             with self.assertRaisesRegex(ValueError, 'unregistered Gate cases'):
                 gate.validate_contract_case_mapping()
@@ -1037,7 +1053,7 @@ class GateTests(unittest.TestCase):
 
     def test_exact_case_selection_rejects_zero_passes_ignored_and_partial_execution(self):
         with tempfile.TemporaryDirectory() as temp, patch.object(gate, 'ROOT', Path(temp)):
-            target = self.targets(['p0-2'])['p0-2']._replace(cases=('case', 'case::nested'))
+            target = self.targets(['workers'])['workers']._replace(cases=('case', 'case::nested'))
             for index, (passed, ignored, expected) in enumerate([(2, 0, 0), (0, 0, 1),
                                                                (1, 0, 1), (1, 1, 1)]):
                 def execute(command, **kwargs):
@@ -1046,7 +1062,7 @@ class GateTests(unittest.TestCase):
                                            f'{ignored} ignored; 0 measured; 3 filtered out;\n')
                     return SimpleNamespace(returncode=0)
                 with patch.object(gate.subprocess, 'run', side_effect=execute):
-                    result = gate.execute_target('p0-2', '/compiled/test', Path(temp)/str(index), target)
+                    result = gate.execute_target('workers', '/compiled/test', Path(temp)/str(index), target)
                 self.assertEqual(result['exit_code'], expected)
 
     def test_diagnostic_rounds_reject_coverage_before_build(self):
@@ -1061,10 +1077,10 @@ class GateTests(unittest.TestCase):
                 resolve.assert_not_called()
 
     def test_process_gate_requires_lsof_before_runtime_checks_or_build(self):
-        targets = self.targets(['p0-1'])
+        targets = self.targets(['daemon'])
         with patch.object(gate.shutil, 'which', return_value=None), \
              patch.object(gate, 'verify_inputs') as runtime:
-            with self.assertRaisesRegex(ValueError, 'p0-1 requires lsof'):
+            with self.assertRaisesRegex(ValueError, 'daemon requires lsof'):
                 gate.verify_selected_inputs(targets)
             runtime.assert_not_called()
         for executable in ('/usr/sbin/lsof', 'lsof'):
@@ -1073,7 +1089,7 @@ class GateTests(unittest.TestCase):
                 self.assertEqual(gate.verify_selected_inputs(targets), {'verified': True})
         with patch.object(gate.shutil, 'which') as tool, \
              patch.object(gate, 'verify_inputs', return_value={'verified': True}):
-            self.assertEqual(gate.verify_selected_inputs(self.targets(['p0-2'])), {'verified': True})
+            self.assertEqual(gate.verify_selected_inputs(self.targets(['workers'])), {'verified': True})
             tool.assert_not_called()
 
     def test_coverage_rejects_extra_rounds_before_tool_checks_or_cleanup(self):
@@ -1357,7 +1373,7 @@ if '--list' not in sys.argv:
                     gate.discovered_cases(log, 'bun-test')
 
             target = gate.TypedTarget(
-                None, 'p3-contract', 'bun-test', temp, False, ('first', 'second'),
+                None, 'contract', 'bun-test', temp, False, ('first', 'second'),
                 '/usr/bin/bun', ('/repo/check.ts',), ('--list',), ('PATH', 'ALLOWED'),
                 30, 'light', 'contract-checker')
 
@@ -1383,7 +1399,7 @@ if '--list' not in sys.argv:
                                           'SECRET': 'must-not-pass'}, clear=True), \
                  patch.object(gate.subprocess, 'run', side_effect=execute):
                 result = gate.execute_target(
-                    'p3-contract', '/usr/bin/bun', Path(temp) / 'execute', target)
+                    'contract', '/usr/bin/bun', Path(temp) / 'execute', target)
             self.assertEqual(result['exit_code'], 0)
             self.assertEqual(result['cases_passed'], 2)
             self.assertEqual((Path(temp) / 'execute/stderr.log').read_text(),
@@ -1418,7 +1434,7 @@ if '--list' not in sys.argv:
             diff = root / 'diff-report.json'
             diff.write_text('{"schemaVersion":1,"status":"passed"}')
             report['results'][0]['targets'].append({
-                'target': 'p3-cf-diff', 'exit_code': 0, 'cases': ['portable'],
+                'target': 'cf-diff', 'exit_code': 0, 'cases': ['portable'],
                 'diff_report': str(diff),
             })
             gate.write_contract_report(root, report)

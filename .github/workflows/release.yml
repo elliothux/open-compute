@@ -306,15 +306,15 @@ jobs:
           BAILIAN_API_KEY: ${{ secrets.BAILIAN_API_KEY }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           COHERE_API_KEY: ${{ secrets.COHERE_API_KEY }}
-        run: ./test/gate.py p5-ai-provider-qualification --jobs 1
+        run: ./test/gate.py ai-provider-qualification --jobs 1
       # The harness redacts provider credentials from captured case output, and
       # Actions masks registered secrets; retained tmp/ evidence is never uploaded.
       - name: Show AI provider qualification diagnostics
         if: failure()
         run: |
           shopt -s nullglob
-          for log in .temp/gate-run/failed/*/round-*/p5-ai-provider-qualification/output.log \
-            .temp/gate-run/failed/*/prepare/p5-ai-provider-qualification/output.log; do
+          for log in .temp/gate-run/failed/*/round-*/ai-provider-qualification/output.log \
+            .temp/gate-run/failed/*/prepare/ai-provider-qualification/output.log; do
             echo "=== $log"
             cat "$log"
           done

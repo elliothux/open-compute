@@ -16,7 +16,7 @@ SDK 1.9.2 and its wheel SHA-256
 Metadata preserves default/named Worker exports and the two declared Service
 bindings. The product case changes only isolated test binding values.
 
-Build/capture evidence is retained under `.temp/p21-python-services/`. The
+Build/capture evidence is retained under `.temp/python-services/`. The
 complete ordinary daemon case passed in `20261005T004230-800b724a`
 (257.47 seconds, 1 pass/0 ignored). The registered case also passed in complete
 workspace coverage. Final uninstrumented acceptance is recorded separately. Regeneration uses a fresh `.temp/`
