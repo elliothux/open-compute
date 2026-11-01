@@ -106,6 +106,8 @@
 
 ### R4.6 用成熟 crate 替换自写代码
 
+状态：**已完成**（2026-11-01）。semver 和 croner 已替换；croner 让 `a/b` 按 Cloudflare 实测语义展开为 `a-最大值/b`。reqwest 早已在用。其余各项不做：`service-manager` 和 `self-replace` 无法覆盖现有的 launchd bootout、指定目标路径和 fsync 语义，替换反而增加代码；`persist_noclobber` 可删的代码不足 50 行，现有实现已用 `create_new` 保证独占；std 的 `UnixStream::peer_cred()` 尚未稳定，现有调用已经是成熟库接口。
+
 每行一次提交：
 
 | 自写代码                                 | 替换为                                       |
