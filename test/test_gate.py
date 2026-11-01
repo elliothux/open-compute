@@ -26,7 +26,7 @@ spec.loader.exec_module(gate)
 class GateTests(unittest.TestCase):
     def test_documented_domain_names_cover_registry_and_reject_every_old_name(self):
         source = (gate.ROOT / 'docs/references/testing.md').read_text()
-        rows = re.findall(r'^\| `([^`]+)` \| `([^`]+)` \|$', source, re.MULTILINE)
+        rows = re.findall(r'^\|\s*`([^`]+)`\s*\|\s*`([^`]+)`\s*\|$', source, re.MULTILINE)
         unchanged = {'runtime', 'single-binary', 'dashboard', 'workflow-runtime',
                      'workflow-recovery', 'workflow-product', 'workflow', 'all',
                      's3-provider-qualification'}

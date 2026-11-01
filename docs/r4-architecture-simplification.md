@@ -155,6 +155,8 @@ KV 产品模块加 `kv` feature 试点：改 KV 后重编译 7.8 s→6.1 s，关
 
 ### R4.10 测试与 CI
 
+nextest 替换实测（2026-11-02，nextest 0.9.150）：`runtime daemon kv r2 d1 contract` 第二轮 247.0 s→264.3 s（+7.0%），保留输入校验、金丝雀、隔离、登记、互斥与 90% 覆盖率的前提下净增 140 行，未满足净删除，已还原。
+
 状态：**已完成**（2026-11-02）。已删除 compile IPC/source-digest 握手和 final 冻结/重复运行策略；Python 矩阵从 2,465 s 降至 1,365 s；R2 上传缩为 3 个分片；摘要只覆盖 Git 跟踪的源码输入。PR 按受影响产品选择 Gate，发布只跑一轮完整测试并保留 90% coverage；Rust 工具直接用 cargo；新增录制合同 Gate，Gate 目标改为领域名。
 完整 nextest 替换延期：仍需迁移 typed runner、用例登记和覆盖率证据，不能只替换进程调度。共享 daemon 延期：现有崩溃/重启用例依赖独立状态和进程生命周期，需先拆分隔离边界；跨 account 共用一个 workerd 跳过，因为这会改变一个实例对应一个 account 的生产架构。
 
