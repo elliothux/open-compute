@@ -9,17 +9,19 @@ from ci_scope import BASELINE_PATH, PRODUCT_TARGETS, affected_targets, changed_f
 
 class CiScopeTests(unittest.TestCase):
     def test_product_target_unions_and_shared_fallback(self):
-        self.assertEqual(affected_targets(['crates/service/src/r2_api.rs']), ['p0-5', 'p3-contract'])
+        self.assertEqual(affected_targets(['crates/service/src/r2_api.rs']), ['p0-5', 'p3-recorded', 'p3-contract'])
         self.assertEqual(affected_targets([
             'crates/service/src/r2_api.rs', 'crates/storage/src/d1.rs',
             'crates/service/src/r2_backend/tests/multipart.rs',
-        ]), ['p0-5', 'p0-6', 'p3-contract'])
+        ]), ['p0-5', 'p0-6', 'p3-recorded', 'p3-contract'])
         self.assertEqual(affected_targets(['crates/service/tests/p0_5_r2_support/uploads.rs']),
-                         ['p0-5', 'p3-contract'])
+                         ['p0-5', 'p3-recorded', 'p3-contract'])
         self.assertEqual(affected_targets(['test/applications/python-queues/src/entry.py']),
-                         ['p21-python-queues', 'p3-contract'])
+                         ['p3-recorded', 'p21-python-queues', 'p3-contract'])
         for path in ['crates/core/src/ids.rs', 'Cargo.lock', 'packages/runtime/src/loader.ts']:
             self.assertEqual(affected_targets([path]), list(PRODUCT_TARGETS), path)
+        self.assertEqual(affected_targets(['test/conformance/fixtures/kv/portable-namespace/contract.json']), ['p3-recorded', 'p3-contract'])
+        self.assertIn('p3-recorded', PRODUCT_TARGETS)
         self.assertNotIn('single-binary', PRODUCT_TARGETS)
         self.assertNotIn('p3-cf-diff', PRODUCT_TARGETS)
         self.assertNotIn('p5-ai-provider-qualification', PRODUCT_TARGETS)
@@ -38,8 +40,8 @@ class CiScopeTests(unittest.TestCase):
             git('add', '.')
             base = git('write-tree')
             for destination, expected in [
-                    (None, ['p0-5', 'p3-contract']),
-                    ('d1.rs', ['p0-5', 'p0-6', 'p3-contract']),
+                    (None, ['p0-5', 'p3-recorded', 'p3-contract']),
+                    ('d1.rs', ['p0-5', 'p0-6', 'p3-recorded', 'p3-contract']),
                     ('shared.rs', list(PRODUCT_TARGETS))]:
                 git('read-tree', '--reset', '-u', base)
                 if destination:

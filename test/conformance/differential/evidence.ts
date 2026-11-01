@@ -1,82 +1,10 @@
-import { createHash } from "node:crypto";
-import { appendFile, readFile, stat } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-import { command } from "../adapters/command.ts";
+import { appendFile } from "node:fs/promises";
 import { fetchObservation, observationUrl } from "../adapters/transport.ts";
 import type { JsonRecord, PortableFixture } from "../adapters/types.ts";
-import { processEnv } from "./environment.ts";
-
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+import { sourceIdentity as trackedSourceIdentity } from "../checks/context.ts";
 
 export async function sourceIdentity(): Promise<string> {
-  const env = processEnv({});
-  const tracked = await command(
-    "git",
-    ["diff", "--name-only", "-z", "--no-ext-diff", "HEAD"],
-    {
-      cwd: ROOT,
-      env,
-      timeout: 30_000,
-    },
-  );
-  const untracked = await command(
-    "git",
-    ["ls-files", "-z", "--others", "--exclude-standard"],
-    {
-      cwd: ROOT,
-      env,
-      timeout: 30_000,
-    },
-  );
-  const names = [
-    ...new Set(
-      `${tracked.stdout}\0${untracked.stdout}`.split("\0").filter(Boolean),
-    ),
-  ]
-    .filter((name) => !name.split("/").includes("__pycache__"))
-    .sort();
-  const digest = createHash("sha256").update("open-compute-working-tree/v2\0");
-  for (const name of names) {
-    const path = resolve(ROOT, name);
-    if (!path.startsWith(`${ROOT}/`))
-      throw new Error("working-tree source identity escapes the repository");
-    try {
-      const info = await stat(path);
-      if (info.isDirectory()) {
-        // A submodule gitlink: identify it by its checked-out commit.
-        const head = await command("git", ["rev-parse", "HEAD"], {
-          cwd: path,
-          env,
-          timeout: 30_000,
-        });
-        digest
-          .update("gitlink\0")
-          .update(name)
-          .update("\0")
-          .update(head.stdout);
-        continue;
-      }
-      if (!info.isFile())
-        throw new Error("working-tree source identity is not a regular file");
-      digest
-        .update("file\0")
-        .update(name)
-        .update("\0")
-        .update(await readFile(path));
-    } catch (error) {
-      if (
-        error !== null &&
-        typeof error === "object" &&
-        Reflect.get(error, "code") === "ENOENT"
-      ) {
-        digest.update("deleted\0").update(name).update("\0");
-      } else {
-        throw error;
-      }
-    }
-  }
-  return digest.digest("hex");
+  return trackedSourceIdentity();
 }
 
 export async function recordOwnership(

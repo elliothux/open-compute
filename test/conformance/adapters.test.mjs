@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -246,4 +246,141 @@ test("observation mismatches identify the first canonical JSON path", async () =
       server.close((error) => (error ? reject(error) : resolve())),
     );
   }
+});
+
+test("Cloudflare refresh collects normalized responses, preserves unchanged recordings, and records provenance once", async () => {
+  const { refreshRecordings } = await import("./differential/runner.ts");
+  const root = await fixture();
+  await mkdir(join(root, "test/conformance"), { recursive: true });
+  const baselinePath = join(root, "test/conformance/baseline.json");
+  await writeFile(baselinePath, '{"schemaVersion":1}\n');
+  const [loaded] = await loadPortableFixtures(root);
+  const unchangedRoot = await fixture({ id: "workers/portable/unchanged" });
+  const [unchanged] = await loadPortableFixtures(unchangedRoot);
+  const unchangedPath = join(unchanged.root, "contract.json");
+  const unchangedBytes = await readFile(unchangedPath, "utf8");
+  const unchangedTime = (await stat(unchangedPath, { bigint: true })).mtimeNs;
+  const changedPath = join(loaded.root, "contract.json");
+  const server = createServer((_request, response) => {
+    response.writeHead(201, { "content-type": "application/json" });
+    response.end('{"z":2,"a":1}');
+  });
+  await new Promise((accept) => server.listen(0, "127.0.0.1", accept));
+  try {
+    const url = `http://127.0.0.1:${server.address().port}/`;
+    await assert.rejects(
+      observe(url, loaded, "cloudflare"),
+      /observation differs/,
+    );
+    const cloudflare = await observe(url, loaded, "cloudflare", {}, false);
+    assert.deepEqual(cloudflare, [{ status: 201, json: { a: 1, z: 2 } }]);
+    await assert.rejects(
+      observe(url, loaded, "open-compute"),
+      /observation differs/,
+    );
+    const current = {
+      ...loaded,
+      observations: loaded.observations.map((entry) => ({
+        ...entry,
+        expect: cloudflare[0],
+      })),
+    };
+    assert.deepEqual(await observe(url, current, "open-compute"), cloudflare);
+    const results = [
+      { id: loaded.id, status: "passed", cloudflare },
+      {
+        id: unchanged.id,
+        status: "passed",
+        cloudflare: unchanged.observations.map((entry) => entry.expect),
+      },
+    ];
+    const original = await readFile(changedPath, "utf8");
+    await assert.rejects(
+      refreshRecordings(
+        root,
+        [loaded, unchanged],
+        [results[0]],
+        "qualification",
+      ),
+      /complete, passing/,
+    );
+    await assert.rejects(
+      refreshRecordings(
+        root,
+        [loaded],
+        [{ ...results[0], status: "failed" }],
+        "qualification",
+      ),
+      /complete, passing/,
+    );
+    await assert.rejects(
+      refreshRecordings(root, [loaded], [results[0]], "a".repeat(32)),
+      /alias/,
+    );
+    await assert.rejects(
+      refreshRecordings(root, [loaded], [results[0]], "qualification", [
+        '"z": 2',
+      ]),
+      /private identity or secret/,
+    );
+    assert.equal(await readFile(changedPath, "utf8"), original);
+    await refreshRecordings(
+      root,
+      [loaded, unchanged],
+      results,
+      "qualification",
+    );
+    assert.deepEqual(
+      JSON.parse(await readFile(changedPath, "utf8")).observations[0].expect,
+      cloudflare[0],
+    );
+    assert.equal(await readFile(unchangedPath, "utf8"), unchangedBytes);
+    assert.equal(
+      (await stat(unchangedPath, { bigint: true })).mtimeNs,
+      unchangedTime,
+    );
+    const baseline = JSON.parse(await readFile(baselinePath, "utf8"));
+    assert.deepEqual(baseline.portableRecording, {
+      date: new Date().toISOString().slice(0, 10),
+      cfVersion: "1.0.0-beta.12",
+      accountAlias: "qualification",
+    });
+    const reloaded = (await loadPortableFixtures(root))[0];
+    await refreshRecordings(root, [reloaded], [results[0]], "qualification");
+    assert.equal(
+      await readFile(baselinePath, "utf8"),
+      `${JSON.stringify(baseline, null, 2)}\n`,
+    );
+  } finally {
+    await new Promise((accept, reject) =>
+      server.close((error) => (error ? reject(error) : accept())),
+    );
+  }
+});
+
+test("recorded mode rejects external endpoints and live refresh before any mutation", async () => {
+  const { validatedEndpoint } = await import("./differential/run-context.ts");
+  const { runDifferential } = await import("./differential/runner.ts");
+  for (const url of [
+    "https://example.com",
+    "http://example.com",
+    "http://secret@127.0.0.1",
+    "http://127.0.0.1/path",
+  ]) {
+    process.env.OPEN_COMPUTE_RECORDED_TEST_ENDPOINT = url;
+    assert.throws(
+      () => validatedEndpoint("OPEN_COMPUTE_RECORDED_TEST_ENDPOINT", true),
+      /endpoint/,
+    );
+  }
+  process.env.OPEN_COMPUTE_RECORDED_TEST_ENDPOINT = "http://127.0.0.1:8787";
+  assert.equal(
+    validatedEndpoint("OPEN_COMPUTE_RECORDED_TEST_ENDPOINT", true).hostname,
+    "127.0.0.1",
+  );
+  delete process.env.OPEN_COMPUTE_RECORDED_TEST_ENDPOINT;
+  await assert.rejects(
+    runDifferential("/unused", [], true, true),
+    /cannot refresh Cloudflare/,
+  );
 });

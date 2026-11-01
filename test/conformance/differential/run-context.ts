@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { mkdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { command } from "../adapters/command.ts";
 import { CF_VERSION } from "../adapters/runtime-contract.ts";
@@ -14,6 +14,9 @@ import { resourceCounts } from "./owned-resources.ts";
 
 export interface DifferentialContext {
   readonly root: string;
+  readonly local: boolean;
+  readonly refresh: boolean;
+  readonly publicEndpoint: URL;
   readonly accountId: string;
   readonly accountAlias: string;
   readonly token?: string;
@@ -38,8 +41,11 @@ function required(name: string): string {
   return value;
 }
 
-function safeAlias(value: string): string {
-  if (!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(value))
+export function safeAlias(value: string): string {
+  if (
+    !/^[a-z0-9][a-z0-9._-]{0,63}$/.test(value) ||
+    /^[0-9a-f]{32}$/.test(value)
+  )
     throw new Error("Cloudflare account alias is invalid");
   return value;
 }
@@ -61,9 +67,17 @@ async function executable(name: string): Promise<string> {
   return path;
 }
 
-function validatedEndpoint(): URL {
-  const endpoint = new URL(required("OPEN_COMPUTE_ENDPOINT"));
+export function validatedEndpoint(
+  name = "OPEN_COMPUTE_ENDPOINT",
+  local = false,
+): URL {
+  const endpoint = new URL(required(name));
   if (
+    endpoint.username ||
+    endpoint.password ||
+    (local &&
+      (endpoint.protocol !== "http:" ||
+        !["127.0.0.1", "localhost", "[::1]"].includes(endpoint.hostname))) ||
     endpoint.pathname !== "/" ||
     endpoint.search ||
     endpoint.hash ||
@@ -96,16 +110,25 @@ export function sanitizedError(
 export async function prepareRun(
   root: string,
   selected: readonly PortableFixture[],
+  local = false,
+  refresh = false,
 ): Promise<DifferentialContext> {
-  if (required("OPEN_COMPUTE_CF_MUTATION_ACK") !== "p3-cf-diff")
+  if (!local && required("OPEN_COMPUTE_CF_MUTATION_ACK") !== "p3-cf-diff")
     throw new Error("Cloudflare mutation acknowledgement is missing");
-  const accountId = required("OPEN_COMPUTE_CF_ACCOUNT_ID");
-  if (!/^[0-9a-f]{32}$/.test(accountId))
+  const accountId = local ? "" : required("OPEN_COMPUTE_CF_ACCOUNT_ID");
+  if (!local && !/^[0-9a-f]{32}$/.test(accountId))
     throw new Error("Cloudflare account ID is invalid");
-  const accountAlias = safeAlias(required("OPEN_COMPUTE_CF_ACCOUNT_ALIAS"));
-  const token = process.env.CLOUDFLARE_API_TOKEN;
-  const cf = await executable("OPEN_COMPUTE_CF_CLI");
-  const endpoint = validatedEndpoint();
+  const accountAlias = local
+    ? "local"
+    : safeAlias(required("OPEN_COMPUTE_CF_ACCOUNT_ALIAS"));
+  const token = local ? undefined : process.env.CLOUDFLARE_API_TOKEN;
+  const cf = local
+    ? join(root, "node_modules/.bin/cf")
+    : await executable("OPEN_COMPUTE_CF_CLI");
+  const endpoint = validatedEndpoint("OPEN_COMPUTE_ENDPOINT", local);
+  const publicEndpoint = process.env.OPEN_COMPUTE_PUBLIC_ENDPOINT
+    ? validatedEndpoint("OPEN_COMPUTE_PUBLIC_ENDPOINT", local)
+    : endpoint;
   const openComputeInternalAccount = uuid(
     required("OPEN_COMPUTE_ACCOUNT_ID"),
     "open-compute internal data-plane account",
@@ -116,30 +139,48 @@ export async function prepareRun(
     openComputeApiBase,
     adminToken,
   );
-  const cloudflareEnv = processEnv({
-    CLOUDFLARE_ACCOUNT_ID: accountId,
-    ...(token === undefined ? {} : { CLOUDFLARE_API_TOKEN: token }),
-  });
+  const cloudflareEnv = local
+    ? {}
+    : processEnv({
+        CLOUDFLARE_ACCOUNT_ID: accountId,
+        ...(token === undefined ? {} : { CLOUDFLARE_API_TOKEN: token }),
+      });
   const openComputeEnv = processEnv({
     CLOUDFLARE_ACCOUNT_ID: openComputeAccount,
     CLOUDFLARE_API_BASE_URL: openComputeApiBase.href,
     CLOUDFLARE_API_TOKEN: adminToken,
+    ...(local
+      ? {
+          HTTP_PROXY: "http://127.0.0.1:9",
+          HTTPS_PROXY: "http://127.0.0.1:9",
+          ALL_PROXY: "http://127.0.0.1:9",
+          NO_PROXY: "127.0.0.1,localhost,::1",
+        }
+      : {}),
   });
-  const version = await command(cf, ["--version"], {
-    cwd: root,
-    env: cloudflareEnv,
-    timeout: 20_000,
-  });
-  const escapedCfVersion = CF_VERSION.replaceAll(".", "\\.");
-  if (
-    !new RegExp(`(?:^|\\s)v?${escapedCfVersion}(?:\\s|$)`).test(
-      `${version.stdout}\n${version.stderr}`,
-    )
-  ) {
-    throw new Error("Cf version differs from baseline");
+  if (local) {
+    const metadata = JSON.parse(
+      await readFile(join(root, "node_modules/cf/package.json"), "utf8"),
+    ) as { version: string };
+    if (metadata.version !== CF_VERSION)
+      throw new Error("Cf version differs from baseline");
+  } else {
+    const version = await command(cf, ["--version"], {
+      cwd: root,
+      env: cloudflareEnv,
+      timeout: 20_000,
+    });
+    const escapedCfVersion = CF_VERSION.replaceAll(".", "\\.");
+    if (
+      !new RegExp(`(?:^|\\s)v?${escapedCfVersion}(?:\\s|$)`).test(
+        `${version.stdout}\n${version.stderr}`,
+      )
+    ) {
+      throw new Error("Cf version differs from baseline");
+    }
+    await verifyCfAccount(cf, accountId, cloudflareEnv);
+    await verifyCfAccount(cf, openComputeAccount, openComputeEnv);
   }
-  await verifyCfAccount(cf, accountId, cloudflareEnv);
-  await verifyCfAccount(cf, openComputeAccount, openComputeEnv);
   const prefix = `oc-p34-${Date.now().toString(36)}-${randomBytes(4).toString("hex")}`;
   const revision = (
     await command("git", ["rev-parse", "HEAD"], {
@@ -176,6 +217,9 @@ export async function prepareRun(
   );
   return {
     root,
+    local,
+    refresh,
+    publicEndpoint,
     accountId,
     accountAlias,
     ...(token === undefined ? {} : { token }),

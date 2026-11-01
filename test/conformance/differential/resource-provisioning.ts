@@ -27,193 +27,71 @@ export async function provisionResources(
   configs: DifferentialConfigs,
   context: DifferentialContext,
 ): Promise<void> {
-  const { cf, cloudflareEnv, openComputeEnv, journalPath } = context;
-  for (const workflow of resources.workflows) {
-    await ensureWorkflowAbsent(
-      workflow.name,
-      configs.cloudflarePreflight,
-      cf,
-      cloudflareEnv,
-    );
-    workflow.cloudflareAbsent = true;
-    await ensureWorkflowAbsent(
-      workflow.name,
-      configs.openComputePreflight,
-      cf,
-      openComputeEnv,
-    );
-    workflow.openComputeAbsent = true;
-  }
-  for (const namespace of resources.kvNamespaces) {
-    await ensureCloudflareKvAbsent(
-      namespace.name,
-      configs.cloudflarePreflight,
-      cf,
-      cloudflareEnv,
-    );
-    namespace.cloudflareAbsent = true;
-    await ensureCloudflareKvAbsent(
-      namespace.name,
-      configs.openComputePreflight,
-      cf,
-      openComputeEnv,
-    );
-    namespace.openComputeAbsent = true;
-    namespace.cloudflareOwned = true;
-    namespace.cloudflareId = await createCloudflareKv(
-      namespace.name,
-      configs.cloudflarePreflight,
-      cf,
-      cloudflareEnv,
-    );
-    await recordOwnership(journalPath, {
-      target: "cloudflare",
-      kind: "kv_namespace",
-      name: namespace.name,
-      binding: namespace.binding,
-      id: namespace.cloudflareId,
-    });
-    namespace.openComputeOwned = true;
-    namespace.openComputeId = await createCloudflareKv(
-      namespace.name,
-      configs.openComputePreflight,
-      cf,
-      openComputeEnv,
-    );
-    await recordOwnership(journalPath, {
-      target: "open-compute",
-      kind: "kv_namespace",
-      name: namespace.name,
-      binding: namespace.binding,
-      id: namespace.openComputeId,
-    });
-  }
-  for (const database of resources.d1Databases) {
-    await ensureCloudflareD1Absent(
-      database.name,
-      configs.cloudflarePreflight,
-      cf,
-      cloudflareEnv,
-    );
-    database.cloudflareAbsent = true;
-    await ensureCloudflareD1Absent(
-      database.name,
-      configs.openComputePreflight,
-      cf,
-      openComputeEnv,
-    );
-    database.openComputeAbsent = true;
-    database.cloudflareOwned = true;
-    database.cloudflareId = await createCloudflareD1(
-      database.name,
-      configs.cloudflarePreflight,
-      cf,
-      cloudflareEnv,
-    );
-    await recordOwnership(journalPath, {
-      target: "cloudflare",
-      kind: "d1_database",
-      name: database.name,
-      binding: database.binding,
-      id: database.cloudflareId,
-    });
-    database.openComputeOwned = true;
-    database.openComputeId = await createCloudflareD1(
-      database.name,
-      configs.openComputePreflight,
-      cf,
-      openComputeEnv,
-    );
-    await recordOwnership(journalPath, {
-      target: "open-compute",
-      kind: "d1_database",
-      name: database.name,
-      binding: database.binding,
-      id: database.openComputeId,
-    });
-  }
-  for (const bucket of resources.r2Buckets) {
-    await ensureCloudflareR2Absent(
-      bucket.name,
-      configs.cloudflarePreflight,
-      cf,
-      cloudflareEnv,
-    );
-    bucket.cloudflareAbsent = true;
-    await ensureCloudflareR2Absent(
-      bucket.name,
-      configs.openComputePreflight,
-      cf,
-      openComputeEnv,
-    );
-    bucket.openComputeAbsent = true;
-    bucket.cloudflareOwned = true;
-    await createCloudflareR2(
-      bucket.name,
-      configs.cloudflarePreflight,
-      cf,
-      cloudflareEnv,
-    );
-    await recordOwnership(journalPath, {
-      target: "cloudflare",
-      kind: "r2_bucket",
-      name: bucket.name,
-      binding: bucket.binding,
-    });
-    bucket.openComputeOwned = true;
-    await createCloudflareR2(
-      bucket.name,
-      configs.openComputePreflight,
-      cf,
-      openComputeEnv,
-    );
-    await recordOwnership(journalPath, {
-      target: "open-compute",
-      kind: "r2_bucket",
-      name: bucket.name,
-      binding: bucket.binding,
-    });
-  }
-  for (const queue of resources.queues) {
-    await ensureQueueAbsent(
-      queue.name,
-      configs.cloudflarePreflight,
-      cf,
-      cloudflareEnv,
-    );
-    queue.cloudflareAbsent = true;
-    await ensureQueueAbsent(
-      queue.name,
-      configs.openComputePreflight,
-      cf,
-      openComputeEnv,
-    );
-    queue.openComputeAbsent = true;
-    queue.cloudflareOwned = true;
-    await createQueue(
-      queue.name,
-      configs.cloudflarePreflight,
-      cf,
-      cloudflareEnv,
-    );
-    await recordOwnership(journalPath, {
-      target: "cloudflare",
-      kind: "queue_producer",
-      name: queue.name,
-      binding: queue.binding,
-    });
-    queue.openComputeOwned = true;
-    await createQueue(
-      queue.name,
-      configs.openComputePreflight,
-      cf,
-      openComputeEnv,
-    );
-    await recordOwnership(journalPath, {
-      target: "open-compute",
-      kind: "queue_producer",
-      name: queue.name,
-      binding: queue.binding,
-    });
+  const { cf, journalPath } = context;
+  for (const target of context.local
+    ? (["open-compute"] as const)
+    : (["cloudflare", "open-compute"] as const)) {
+    const cloudflare = target === "cloudflare";
+    const config = cloudflare
+      ? configs.cloudflarePreflight
+      : configs.openComputePreflight;
+    const env = cloudflare ? context.cloudflareEnv : context.openComputeEnv;
+    const absent = cloudflare ? "cloudflareAbsent" : "openComputeAbsent";
+    const owned = cloudflare ? "cloudflareOwned" : "openComputeOwned";
+    const id = cloudflare ? "cloudflareId" : "openComputeId";
+    for (const workflow of resources.workflows) {
+      await ensureWorkflowAbsent(workflow.name, config, cf, env);
+      workflow[absent] = true;
+    }
+    for (const namespace of resources.kvNamespaces) {
+      await ensureCloudflareKvAbsent(namespace.name, config, cf, env);
+      namespace[absent] = true;
+      namespace[owned] = true;
+      namespace[id] = await createCloudflareKv(namespace.name, config, cf, env);
+      await recordOwnership(journalPath, {
+        target,
+        kind: "kv_namespace",
+        name: namespace.name,
+        binding: namespace.binding,
+        id: namespace[id],
+      });
+    }
+    for (const database of resources.d1Databases) {
+      await ensureCloudflareD1Absent(database.name, config, cf, env);
+      database[absent] = true;
+      database[owned] = true;
+      database[id] = await createCloudflareD1(database.name, config, cf, env);
+      await recordOwnership(journalPath, {
+        target,
+        kind: "d1_database",
+        name: database.name,
+        binding: database.binding,
+        id: database[id],
+      });
+    }
+    for (const bucket of resources.r2Buckets) {
+      await ensureCloudflareR2Absent(bucket.name, config, cf, env);
+      bucket[absent] = true;
+      bucket[owned] = true;
+      await createCloudflareR2(bucket.name, config, cf, env);
+      await recordOwnership(journalPath, {
+        target,
+        kind: "r2_bucket",
+        name: bucket.name,
+        binding: bucket.binding,
+      });
+    }
+    for (const queue of resources.queues) {
+      await ensureQueueAbsent(queue.name, config, cf, env);
+      queue[absent] = true;
+      queue[owned] = true;
+      await createQueue(queue.name, config, cf, env);
+      await recordOwnership(journalPath, {
+        target,
+        kind: "queue_producer",
+        name: queue.name,
+        binding: queue.binding,
+      });
+    }
   }
 }

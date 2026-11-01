@@ -73,6 +73,12 @@ Dashboard 的 Browser Run 绑定测试：启动配置了 Browser Run 的隔离 o
 | `runtime`、`single-binary`                                         | supervisor、单文件离线启动、单 daemon 双实例                                            |
 | `p0`、`p1`、`p2`、`p3`、`all`                                      | 对应集合；多个选择取并集                                                                |
 
+## 录制的 Cloudflare 合同
+
+`./test/gate.py p3-recorded` 用现有 harness 启动独立 ocd、本地 S3 fixture 和临时目录，运行全部 portable fixture；只访问 loopback，不需要 Cloudflare 凭据。它复用 differential runner 的 cf 本地部署、观测与 JSON 归一化，比较现有 `contract.json`；PR 的产品或 runtime 改动会选择此目标。
+
+发版前在专用账号运行 `p3-cf-diff`。显式刷新用 `./test/gate.py p3-cf-diff --refresh`（单个 fixture 可用 `bun test/conformance/differential.ts --refresh --case <id>`），需要相同的 `OPEN_COMPUTE_CF_*`、本地 endpoint/account/admin token 和 Cloudflare 授权。全部选中 fixture 的 Cloudflare 与 ocd 观测一致且清理成功后，只改观测变化的 `contract.json`，在 `baseline.json.portableRecording` 记一次日期、cf 版本和账号 alias，并更新 `sourceDigest`；失败不改录制。
+
 ## Python Workers
 
 七个 `p21-python-*` 目标共九个用例。每个用例启动真实 daemon，使用正式 pin 的 workerd、SQLite 和 SigV4 fixture，对比 Python 与

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "sourceDigest": "2e462639368d7600de672f395ad1218bc41b430ea41d01ad3aaf2b3e1a740435",
+  "sourceDigest": "abf3a56ffb78ec25feeb158c0aa310a79b066ec51e6e30d812f635ea43862a24",
   "sourceDigestScope": "tracked production, test, toolchain, manifest, and embedded runbook inputs; excludes rule files, .agents/**, .claude/**, other docs, generated Python caches, and test/conformance/baseline.json",
   "workerdLockSha256": "d755339d9a60a3df06a9e43d874bc5a8c7035e73e5b31c8048b156ba38a189e6",
   "workerd": {

@@ -66,217 +66,108 @@ export async function cleanupFixtureResources({
     if (ownership.openComputeOwned) {
       await bestEffortFixtureCleanup(ownership.openComputeUrl, fixture, {
         connection: "close",
+        host: `${name}.${context.openComputeInternalAccount}.localhost`,
       });
     }
   }
 
-  const cfWorker = ownership.cloudflareOwned
-    ? await cleanupCloudflare(name, configs.cloudflare, cf, cloudflareEnv)
-    : notCreated(ownership.cloudflareAbsent);
-  const cfBindings: JsonRecord[] = [];
-  for (const namespace of [...resources.kvNamespaces].reverse()) {
-    cfBindings.push(
-      namespace.cloudflareOwned
-        ? await cleanupCloudflareKv(
-            namespace.name,
-            namespace.cloudflareId,
-            configs.cloudflarePreflight,
-            cf,
-            cloudflareEnv,
-          )
-        : notCreated(namespace.cloudflareAbsent),
-    );
+  const outcomes: Record<string, JsonRecord> = {};
+  for (const target of context.local
+    ? (["open-compute"] as const)
+    : (["cloudflare", "open-compute"] as const)) {
+    const cloudflare = target === "cloudflare";
+    const absent = cloudflare ? "cloudflareAbsent" : "openComputeAbsent";
+    const owned = cloudflare ? "cloudflareOwned" : "openComputeOwned";
+    const id = cloudflare ? "cloudflareId" : "openComputeId";
+    const config = cloudflare
+      ? configs.cloudflarePreflight
+      : configs.openComputePreflight;
+    const env = cloudflare ? cloudflareEnv : openComputeEnv;
+    const worker = (
+      cloudflare ? ownership.cloudflareOwned : ownership.openComputeOwned
+    )
+      ? await cleanupCloudflare(
+          name,
+          cloudflare ? configs.cloudflare : configs.openCompute,
+          cf,
+          env,
+        )
+      : notCreated(
+          cloudflare ? ownership.cloudflareAbsent : ownership.openComputeAbsent,
+        );
+    const bindings: JsonRecord[] = [];
+    for (const namespace of [...resources.kvNamespaces].reverse()) {
+      bindings.push(
+        namespace[owned]
+          ? await cleanupCloudflareKv(
+              namespace.name,
+              namespace[id],
+              config,
+              cf,
+              env,
+            )
+          : notCreated(namespace[absent]),
+      );
+    }
+    for (const database of [...resources.d1Databases].reverse()) {
+      bindings.push(
+        database[owned]
+          ? await cleanupCloudflareD1(
+              database.name,
+              database[id],
+              config,
+              cf,
+              env,
+            )
+          : notCreated(database[absent]),
+      );
+    }
+    for (const bucket of [...resources.r2Buckets].reverse()) {
+      bindings.push(
+        bucket[owned]
+          ? await cleanupCloudflareR2(bucket.name, config, cf, env)
+          : notCreated(bucket[absent]),
+      );
+    }
+    for (const queue of [...resources.queues].reverse()) {
+      bindings.push(
+        queue[owned]
+          ? await cleanupQueue(queue.name, config, cf, env)
+          : notCreated(queue[absent]),
+      );
+    }
+    for (const namespace of resources.durableObjectNamespaces) {
+      bindings.push({
+        deleted:
+          cloudflare || namespace.openComputeOwned
+            ? worker.deleted === true
+            : true,
+        status:
+          cloudflare || namespace.openComputeOwned
+            ? worker.deleted === true
+              ? "absent-with-owner-worker"
+              : "owner-worker-still-present"
+            : "not-created",
+        binding: namespace.binding,
+        className: namespace.className,
+        owner: name,
+      });
+    }
+    for (const workflow of [...resources.workflows].reverse()) {
+      bindings.push(
+        workflow[owned]
+          ? await cleanupWorkflow(workflow.name, config, cf, env)
+          : notCreated(workflow[absent]),
+      );
+    }
+    outcomes[target] = {
+      deleted: worker.deleted === true && allDeleted(bindings),
+      worker,
+      bindings,
+    };
   }
-  const cfD1Bindings: JsonRecord[] = [];
-  for (const database of [...resources.d1Databases].reverse()) {
-    cfD1Bindings.push(
-      database.cloudflareOwned
-        ? await cleanupCloudflareD1(
-            database.name,
-            database.cloudflareId,
-            configs.cloudflarePreflight,
-            cf,
-            cloudflareEnv,
-          )
-        : notCreated(database.cloudflareAbsent),
-    );
-  }
-  const cfR2Bindings: JsonRecord[] = [];
-  for (const bucket of [...resources.r2Buckets].reverse()) {
-    cfR2Bindings.push(
-      bucket.cloudflareOwned
-        ? await cleanupCloudflareR2(
-            bucket.name,
-            configs.cloudflarePreflight,
-            cf,
-            cloudflareEnv,
-          )
-        : notCreated(bucket.cloudflareAbsent),
-    );
-  }
-  const cfQueueBindings: JsonRecord[] = [];
-  for (const queue of [...resources.queues].reverse()) {
-    cfQueueBindings.push(
-      queue.cloudflareOwned
-        ? await cleanupQueue(
-            queue.name,
-            configs.cloudflarePreflight,
-            cf,
-            cloudflareEnv,
-          )
-        : notCreated(queue.cloudflareAbsent),
-    );
-  }
-  const cfDoBindings: JsonRecord[] = resources.durableObjectNamespaces.map(
-    (namespace) => ({
-      deleted: cfWorker.deleted === true,
-      status:
-        cfWorker.deleted === true
-          ? "absent-with-owner-worker"
-          : "owner-worker-still-present",
-      binding: namespace.binding,
-      className: namespace.className,
-      owner: name,
-    }),
-  );
-  const cfWorkflowBindings: JsonRecord[] = [];
-  for (const workflow of [...resources.workflows].reverse()) {
-    cfWorkflowBindings.push(
-      workflow.cloudflareOwned
-        ? await cleanupWorkflow(
-            workflow.name,
-            configs.cloudflarePreflight,
-            cf,
-            cloudflareEnv,
-          )
-        : notCreated(workflow.cloudflareAbsent),
-    );
-  }
-
-  const ocWorker = ownership.openComputeOwned
-    ? await cleanupCloudflare(name, configs.openCompute, cf, openComputeEnv)
-    : notCreated(ownership.openComputeAbsent);
-  const ocBindings: JsonRecord[] = [];
-  for (const namespace of [...resources.kvNamespaces].reverse()) {
-    ocBindings.push(
-      namespace.openComputeOwned
-        ? await cleanupCloudflareKv(
-            namespace.name,
-            namespace.openComputeId,
-            configs.openComputePreflight,
-            cf,
-            openComputeEnv,
-          )
-        : notCreated(namespace.openComputeAbsent),
-    );
-  }
-  const ocD1Bindings: JsonRecord[] = [];
-  for (const database of [...resources.d1Databases].reverse()) {
-    ocD1Bindings.push(
-      database.openComputeOwned
-        ? await cleanupCloudflareD1(
-            database.name,
-            database.openComputeId,
-            configs.openComputePreflight,
-            cf,
-            openComputeEnv,
-          )
-        : notCreated(database.openComputeAbsent),
-    );
-  }
-  const ocR2Bindings: JsonRecord[] = [];
-  for (const bucket of [...resources.r2Buckets].reverse()) {
-    ocR2Bindings.push(
-      bucket.openComputeOwned
-        ? await cleanupCloudflareR2(
-            bucket.name,
-            configs.openComputePreflight,
-            cf,
-            openComputeEnv,
-          )
-        : notCreated(bucket.openComputeAbsent),
-    );
-  }
-  const ocQueueBindings: JsonRecord[] = [];
-  for (const queue of [...resources.queues].reverse()) {
-    ocQueueBindings.push(
-      queue.openComputeOwned
-        ? await cleanupQueue(
-            queue.name,
-            configs.openComputePreflight,
-            cf,
-            openComputeEnv,
-          )
-        : notCreated(queue.openComputeAbsent),
-    );
-  }
-  const ocDoBindings: JsonRecord[] = resources.durableObjectNamespaces.map(
-    (namespace) => ({
-      deleted: namespace.openComputeOwned ? ocWorker.deleted === true : true,
-      status: namespace.openComputeOwned
-        ? ocWorker.deleted === true
-          ? "absent-with-owner-worker"
-          : "owner-worker-still-present"
-        : "not-created",
-      binding: namespace.binding,
-      className: namespace.className,
-      owner: name,
-    }),
-  );
-  const ocWorkflowBindings: JsonRecord[] = [];
-  for (const workflow of [...resources.workflows].reverse()) {
-    ocWorkflowBindings.push(
-      workflow.openComputeOwned
-        ? await cleanupWorkflow(
-            workflow.name,
-            configs.openComputePreflight,
-            cf,
-            openComputeEnv,
-          )
-        : notCreated(workflow.openComputeAbsent),
-    );
-  }
-
-  const cfDeleted =
-    cfWorker.deleted === true &&
-    allDeleted(cfBindings) &&
-    allDeleted(cfD1Bindings) &&
-    allDeleted(cfR2Bindings) &&
-    allDeleted(cfQueueBindings) &&
-    allDeleted(cfDoBindings) &&
-    allDeleted(cfWorkflowBindings);
-  const ocDeleted =
-    ocWorker.deleted === true &&
-    allDeleted(ocBindings) &&
-    allDeleted(ocD1Bindings) &&
-    allDeleted(ocR2Bindings) &&
-    allDeleted(ocQueueBindings) &&
-    allDeleted(ocDoBindings) &&
-    allDeleted(ocWorkflowBindings);
-  const cloudflare: JsonRecord = {
-    deleted: cfDeleted,
-    worker: cfWorker,
-    bindings: [
-      ...cfBindings,
-      ...cfD1Bindings,
-      ...cfR2Bindings,
-      ...cfQueueBindings,
-      ...cfDoBindings,
-      ...cfWorkflowBindings,
-    ],
-  };
-  const openCompute: JsonRecord = {
-    deleted: ocDeleted,
-    worker: ocWorker,
-    bindings: [
-      ...ocBindings,
-      ...ocD1Bindings,
-      ...ocR2Bindings,
-      ...ocQueueBindings,
-      ...ocDoBindings,
-      ...ocWorkflowBindings,
-    ],
-  };
+  const cloudflare = outcomes.cloudflare ?? { status: "not-selected" };
+  const openCompute = outcomes["open-compute"]!;
   await recordOwnership(journalPath, {
     target: "cleanup",
     kind: fixture.id,
@@ -286,6 +177,8 @@ export async function cleanupFixtureResources({
   return {
     cloudflare,
     openCompute,
-    deleted: cfDeleted && ocDeleted,
+    deleted: Object.values(outcomes).every(
+      (outcome) => outcome.deleted === true,
+    ),
   };
 }

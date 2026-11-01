@@ -8,6 +8,14 @@ const fixtures = await loadPortableFixtures(
   join(ROOT, "test/conformance/fixtures"),
 );
 const args = process.argv.slice(2);
+const local = args.includes("--local");
+const refresh = args.includes("--refresh");
+if (local && refresh)
+  throw new Error("--refresh requires live Cloudflare observations");
+for (const flag of ["--local", "--refresh"]) {
+  const index = args.indexOf(flag);
+  if (index !== -1) args.splice(index, 1);
+}
 
 if (args.length === 1 && args[0] === "--list") {
   process.stdout.write(
@@ -31,7 +39,7 @@ if (args.length === 1 && args[0] === "--list") {
   });
   if (new Set(requested).size !== requested.length)
     throw new Error("duplicate differential fixture");
-  const result = await runDifferential(ROOT, selectedFixtures);
+  const result = await runDifferential(ROOT, selectedFixtures, local, refresh);
   process.stdout.write(`${JSON.stringify(result)}\n`);
   if (result.status !== "passed") process.exitCode = 1;
 }

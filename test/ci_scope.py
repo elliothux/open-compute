@@ -87,7 +87,7 @@ def affected_targets(paths: list[str]) -> list[str]:
         else:
             return list(PRODUCT_TARGETS)
     if targets:
-        targets.add('p3-contract')
+        targets.update(('p3-contract', 'p3-recorded'))
     return [name for name in PRODUCT_TARGETS if name in targets]
 
 

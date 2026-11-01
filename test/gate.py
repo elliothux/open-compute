@@ -83,6 +83,7 @@ CARGO_TARGETS = {
     # Coverage instrumentation makes this real-workerd/search/provider matrix
     # contend with other process-heavy Gates and produce spurious backend failures.
     'p5-search': ('open-compute-service', 'p5_search_gate', True),
+    'p3-recorded': ('open-compute-service', 'recorded_contracts', True),
     'p6-cf-resources': ('open-compute-service', 'p6_cf_resource_gate', False),
     'p22-browser-run': ('open-compute-service', 'p22_browser_run', True),
     'p23-containers': ('open-compute-service', 'p23_containers', True),
@@ -121,7 +122,7 @@ GROUPS = {
     'p1': [name for name in CARGO_TARGETS if name.startswith('p1-')],
     'p2': [name for name in CARGO_TARGETS if name.startswith('p2-') or name.startswith('workflow-')],
     'p3': [
-        'p3-contract',
+        'p3-contract', 'p3-recorded',
         *[name for name in CARGO_TARGETS if name.startswith('p0-')],
         *[name for name in CARGO_TARGETS if name.startswith('p1-')],
         *[name for name in CARGO_TARGETS if name.startswith('p2-') or name.startswith('workflow-')],
@@ -352,7 +353,7 @@ def resolve_targets(selected, workspace):
                     'PATH', 'HOME', 'OPEN_COMPUTE_CF_MUTATION_ACK',
                     'OPEN_COMPUTE_CF_ACCOUNT_ID', 'OPEN_COMPUTE_CF_ACCOUNT_ALIAS',
                     'OPEN_COMPUTE_CF_CLI', 'CLOUDFLARE_API_TOKEN',
-                    'OPEN_COMPUTE_ENDPOINT', 'OPEN_COMPUTE_ACCOUNT_ID',
+                    'OPEN_COMPUTE_ENDPOINT', 'OPEN_COMPUTE_PUBLIC_ENDPOINT', 'OPEN_COMPUTE_ACCOUNT_ID',
                     'OPEN_COMPUTE_ADMIN_TOKEN',
                 ),
                 1800,
@@ -444,8 +445,7 @@ def source_identity_excluded(name):
 
 def source_identity():
     names = subprocess.check_output(
-        ['git', '-c', 'core.excludesFile=/dev/null', 'ls-files', '-z', '--cached', '--others',
-         '--exclude-standard'], cwd=ROOT,
+        ['git', '-c', 'core.excludesFile=/dev/null', 'ls-files', '-z', '--cached'], cwd=ROOT,
     ).split(b'\0')
     result = hashlib.sha256()
     for name in sorted(set(names) - {b''}):
@@ -975,6 +975,8 @@ def main():
     parser.add_argument('--list', action='store_true', help='validate and print the exact plan without building or running')
     parser.add_argument('--keep-going', action='store_true',
                         help='collect failures from every selected target once; never retry')
+    parser.add_argument('--refresh', action='store_true',
+                        help='refresh portable recordings after successful live p3-cf-diff')
     args = parser.parse_args()
     rounds = rounds_from_env()
     validate_registry(TARGETS)
@@ -991,7 +993,12 @@ def main():
     if not 1 <= args.jobs <= (os.cpu_count() or 1):
         raise ValueError('--jobs must be between 1 and the host CPU count')
     selected = selection(args.targets)
+    if args.refresh and (args.workspace or selected != ['p3-cf-diff']):
+        raise ValueError('--refresh requires only p3-cf-diff')
     targets = resolve_targets(selected, args.workspace)
+    if args.refresh:
+        target = targets['p3-cf-diff']
+        targets['p3-cf-diff'] = target._replace(argv=(*target.argv, '--refresh'))
     plans = round_plan(targets, rounds)
     plan = {'rounds': rounds, 'jobs': args.jobs, 'workspace': args.workspace, 'targets': list(targets),
             'purpose': 'coverage' if coverage else
@@ -1011,7 +1018,7 @@ def main():
     directory = ROOT / '.temp/gate-run' / run_id
     directory.mkdir(parents=True, mode=0o700)
     report = {**plan, 'source_sha256': source,
-        'source_scope': ('repository inputs including docs/references; excludes generated Python caches '
+        'source_scope': ('tracked repository inputs including docs/references; excludes generated Python caches '
                          'and unconsumed docs plans/history'),
         'revision': subprocess.check_output(
         ['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(), 'inputs': inputs,

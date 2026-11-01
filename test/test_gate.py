@@ -23,6 +23,34 @@ spec.loader.exec_module(gate)
 
 
 class GateTests(unittest.TestCase):
+    def test_refresh_is_explicit_and_only_for_live_differential(self):
+        target = gate.TypedTarget(None, 'p3-cf-diff', 'cloudflare-differential', '/repo', True,
+                                  gate.ONCE['p3-cf-diff'], '/bun', ('differential.ts',))
+        with patch.object(gate, 'validate_contract_case_mapping'), \
+             patch.object(gate, 'resolve_targets', return_value={'p3-cf-diff': target}), \
+             patch.object(gate, 'round_plan', wraps=gate.round_plan) as plan, \
+             patch.object(gate.sys, 'argv', ['gate.py', 'p3-cf-diff', '--refresh', '--list']):
+            self.assertEqual(gate.main(), 0)
+            self.assertEqual(plan.call_args.args[0]['p3-cf-diff'].argv,
+                             ('differential.ts', '--refresh'))
+        for targets in [['p3-recorded'], ['p3-cf-diff', 'p3-contract'], ['--workspace']]:
+            with patch.object(gate, 'validate_contract_case_mapping'), \
+                 patch.object(gate, 'resolve_targets') as resolve, \
+                 patch.object(gate.sys, 'argv', ['gate.py', *targets, '--refresh']):
+                with self.assertRaisesRegex(ValueError, '--refresh requires only p3-cf-diff'):
+                    gate.main()
+                resolve.assert_not_called()
+
+    def test_recorded_contract_gate_owns_the_local_runner_without_cloudflare_credentials(self):
+        self.assertEqual(gate.CARGO_TARGETS['p3-recorded'],
+                         ('open-compute-service', 'recorded_contracts', True))
+        self.assertEqual(gate.ONCE['p3-recorded'], ('portable_recordings_match_local_ocd',))
+        self.assertIn('p3-recorded', gate.selection(['all']))
+        source = (gate.ROOT / 'crates/service/tests/recorded_contracts.rs').read_text()
+        self.assertIn('platform_process::spawn', source)
+        self.assertIn('command.env_clear()', source)
+        self.assertIn('"--local"', source)
+
     def test_python_main_is_one_exclusive_registered_scenario_in_acceptance_groups(self):
         name = 'p21-python-main'
         case = 'python_main::p21_python_main_upload_prepare_dispatch_restart_rollback'

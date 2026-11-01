@@ -75,6 +75,7 @@ export async function observe(
   fixture: PortableFixture,
   target: "cloudflare" | "open-compute",
   requestHeaders: Readonly<Record<string, string>> = {},
+  checkExpected = true,
 ): Promise<unknown[]> {
   const results: unknown[] = [];
   for (const observation of fixture.observations) {
@@ -122,8 +123,9 @@ export async function observe(
     const normalizedBody = canonicalJson(body);
     const normalizedExpected = canonicalJson(observation.expect.json);
     if (
-      response.status !== observation.expect.status ||
-      JSON.stringify(normalizedBody) !== JSON.stringify(normalizedExpected)
+      checkExpected &&
+      (response.status !== observation.expect.status ||
+        JSON.stringify(normalizedBody) !== JSON.stringify(normalizedExpected))
     ) {
       const difference =
         response.status === observation.expect.status

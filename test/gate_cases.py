@@ -24,6 +24,7 @@ SERVICE_PROCESS_CASES = (
 )
 
 ONCE = {
+    'p3-recorded': ('portable_recordings_match_local_ocd',),
     'p23-containers': (
         'exec_options_probe::native_exec_streams_and_code_updates_preserve_owned_processes',
         'snapshots::snapshot_rootfs_excludes_helper_entities_and_hardlink_references',

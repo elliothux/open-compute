@@ -64,7 +64,9 @@ async function prepareFixtureFiles(
     ),
     openCompute: join(projectRoot, "open-compute", "cloudflare.config.ts"),
   };
-  for (const target of ["cloudflare", "open-compute"]) {
+  for (const target of context.local
+    ? ["open-compute"]
+    : ["cloudflare", "open-compute"]) {
     const directory = join(projectRoot, target);
     await mkdir(directory);
     await writeFile(
@@ -93,23 +95,25 @@ async function prepareFixtureFiles(
     )}\n`,
     { mode: 0o600 },
   );
-  await writeFile(
-    configs.cloudflarePreflight,
-    `export default ${JSON.stringify(
-      cloudflareBaseProject(
-        {
-          ...fixture,
-          source: join(projectRoot, "src/index.ts"),
-          root: dirname(configs.cloudflare),
-        },
-        name,
-        context.accountId,
-      ),
-      null,
-      2,
-    )}\n`,
-    { mode: 0o600 },
-  );
+  if (!context.local) {
+    await writeFile(
+      configs.cloudflarePreflight,
+      `export default ${JSON.stringify(
+        cloudflareBaseProject(
+          {
+            ...fixture,
+            source: join(projectRoot, "src/index.ts"),
+            root: dirname(configs.cloudflare),
+          },
+          name,
+          context.accountId,
+        ),
+        null,
+        2,
+      )}\n`,
+      { mode: 0o600 },
+    );
+  }
   await writeFile(
     configs.openComputePreflight,
     `export default ${JSON.stringify(
@@ -138,25 +142,27 @@ async function writeDeploymentConfigs(
   configs: DifferentialConfigs,
 ): Promise<void> {
   const names = bindingNames(resources);
-  await writeFile(
-    configs.cloudflare,
-    `export default ${JSON.stringify(
-      cloudflareProject(
-        {
-          ...fixture,
-          source: join(dirname(configs.cloudflare), "../src/index.ts"),
-          root: dirname(configs.cloudflare),
-        },
-        name,
-        context.accountId,
-        bindingIds(resources, "cloudflare"),
-        names,
-      ),
-      null,
-      2,
-    )}\n`,
-    { mode: 0o600 },
-  );
+  if (!context.local) {
+    await writeFile(
+      configs.cloudflare,
+      `export default ${JSON.stringify(
+        cloudflareProject(
+          {
+            ...fixture,
+            source: join(dirname(configs.cloudflare), "../src/index.ts"),
+            root: dirname(configs.cloudflare),
+          },
+          name,
+          context.accountId,
+          bindingIds(resources, "cloudflare"),
+          names,
+        ),
+        null,
+        2,
+      )}\n`,
+      { mode: 0o600 },
+    );
+  }
   await writeFile(
     configs.openCompute,
     `export default ${JSON.stringify(
@@ -283,22 +289,20 @@ export async function runFixture(
     openComputeAbsent: false,
     openComputeOwned: false,
     cloudflareUrl: undefined,
-    openComputeUrl: (() => {
-      const url = new URL("/", context.endpoint);
-      url.hostname = `${name}.${context.openComputeInternalAccount}.localhost`;
-      return url.href;
-    })(),
+    openComputeUrl: new URL("/", context.publicEndpoint).href,
   };
   let result: JsonRecord;
   let failure: string | undefined;
   try {
-    await ensureCloudflareAbsent(
-      name,
-      configs.cloudflarePreflight,
-      context.cf,
-      context.cloudflareEnv,
-    );
-    ownership.cloudflareAbsent = true;
+    if (!context.local) {
+      await ensureCloudflareAbsent(
+        name,
+        configs.cloudflarePreflight,
+        context.cf,
+        context.cloudflareEnv,
+      );
+      ownership.cloudflareAbsent = true;
+    }
     await ensureCloudflareAbsent(
       name,
       configs.openComputePreflight,
@@ -308,26 +312,48 @@ export async function runFixture(
     ownership.openComputeAbsent = true;
     await provisionResources(resources, configs, context);
     await writeDeploymentConfigs(context, fixture, name, resources, configs);
-    ownership.cloudflareUrl = await deployCloudflare(
-      context,
-      configs,
-      resources,
-      ownership,
-      name,
-    );
+    if (!context.local) {
+      ownership.cloudflareUrl = await deployCloudflare(
+        context,
+        configs,
+        resources,
+        ownership,
+        name,
+      );
+    }
     await deployOpenCompute(context, configs, resources, ownership, name);
-    const cloudflare = await observe(
-      ownership.cloudflareUrl,
-      fixture,
-      "cloudflare",
-    );
+    const cloudflare = context.local
+      ? undefined
+      : await observe(
+          ownership.cloudflareUrl!,
+          fixture,
+          "cloudflare",
+          {},
+          !context.refresh,
+        );
+    const expected =
+      context.refresh && cloudflare
+        ? {
+            ...fixture,
+            observations: fixture.observations.map((observation, index) => ({
+              ...observation,
+              expect: cloudflare[index] as typeof observation.expect,
+            })),
+          }
+        : fixture;
     const openCompute = await observe(
       ownership.openComputeUrl,
-      fixture,
+      expected,
       "open-compute",
-      { connection: "close" },
+      {
+        connection: "close",
+        host: `${name}.${context.openComputeInternalAccount}.localhost`,
+      },
     );
-    if (JSON.stringify(cloudflare) !== JSON.stringify(openCompute))
+    if (
+      cloudflare &&
+      JSON.stringify(cloudflare) !== JSON.stringify(openCompute)
+    )
       throw new Error(`${fixture.id}: normalized observations differ`);
     result = {
       id: fixture.id,
