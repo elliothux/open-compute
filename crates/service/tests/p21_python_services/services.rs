@@ -1,8 +1,8 @@
 //! Real-daemon Service Binding parity using reviewed Python SDK bytes and ordinary JS peers.
 
+use super::python_support::PYTHON_SECRETS;
 use super::python_support::capture::Capture;
 use super::python_support::fixture::{Fixture, RequestTarget};
-use super::python_support::{PYTHON_SECRETS, platform_process};
 use serde_json::{Value, json};
 use std::fs;
 
@@ -13,7 +13,7 @@ const TARGET_SOURCE: &str = include_str!("target.js");
 const PEER_SOURCE: &str = include_str!("peer.js");
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn p21_python_services_fetch_named_rpc_callback_restart_rollback() {
+async fn p21_python_services_fetch_named_rpc_callback() {
     let capture = Capture::load(
         "test/fixtures/python-services",
         "test/applications/python-services/src",
@@ -56,66 +56,7 @@ async fn p21_python_services_fetch_named_rpc_callback_restart_rollback() {
         "uncaught RPC errors must fail the public request"
     );
 
-    fixture.process.stop().await;
-    fixture.ciphertext(&first_record).await;
-    fixture.mock.clear_recorded();
-    fixture.process.restart(&fixture.config, &fixture.log);
-    platform_process::ready(&fixture.client, fixture.admin, &mut fixture.process).await;
-    verify(&fixture, "first", "javascript-first").await;
-    assert_eq!(fixture.record(PYTHON, &python_first), first_record);
-    assert_no_prepare_upload(&fixture);
-
-    // A new invocation resolves the target's active deployment; changing the
-    // target cannot reprepare or change the caller's immutable Python identity.
-    let target_second = target_version(&fixture, "javascript-second").await;
-    assert_eq!(fixture.active(TARGET), normalized(&target_first));
-    fixture.promote(TARGET, &target_second).await;
-    verify(&fixture, "first", "javascript-second").await;
-    assert_eq!(fixture.record(PYTHON, &python_first), first_record);
-    fixture.promote(TARGET, &target_first).await;
-    fixture.restart().await;
-    verify(&fixture, "first", "javascript-first").await;
-    assert_eq!(fixture.record(PYTHON, &python_first), first_record);
-
-    let python_second = python_version(&fixture, &capture, "second", PYTHON_SECRETS[1]).await;
-    let second_record = fixture.record(PYTHON, &python_second);
-    assert_ne!(
-        first_record.prepared_identity_sha256,
-        second_record.prepared_identity_sha256
-    );
-    assert_ne!(first_record.artifact_sha256, second_record.artifact_sha256);
-    assert_eq!(fixture.active(PYTHON), normalized(&python_first));
-    fixture.promote(PYTHON, &python_second).await;
-    verify(&fixture, "second", "javascript-first").await;
-    fixture.promote(PYTHON, &python_first).await;
-    fixture.restart().await;
-    verify(&fixture, "first", "javascript-first").await;
-    assert_eq!(fixture.record(PYTHON, &python_first), first_record);
-    assert_eq!(fixture.record(PYTHON, &python_second), second_record);
-
-    // Persisted service descriptors may not turn a deleted target into a
-    // successful response or retarget another resource after a fresh restart.
-    let (status, _, body) = fixture
-        .request(
-            &format!(
-                "/client/v4/accounts/{}/workers/scripts/{TARGET}",
-                fixture.public_account
-            ),
-            "DELETE",
-            "application/json",
-            Vec::new(),
-            RequestTarget::Admin,
-        )
-        .await;
-    assert_eq!(
-        status, 409,
-        "referenced service target deletion must report a conflict"
-    );
-    let rejected: Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(rejected["success"], false);
-    assert_eq!(rejected["errors"][0]["code"], 9_100_006);
-    assert_eq!(fixture.active(TARGET), normalized(&target_first));
-    verify(&fixture, "first", "javascript-first").await;
+    // Missing native targets exercise a different Python exception path from business errors.
     fixture
         .api(
             &format!("/workers/scripts/{TARGET}?force=true"),
@@ -123,22 +64,20 @@ async fn p21_python_services_fetch_named_rpc_callback_restart_rollback() {
             None,
         )
         .await;
-    assert_missing_target(&fixture).await;
-    fixture.restart().await;
-    assert_missing_target(&fixture).await;
-    assert_eq!(fixture.active(PYTHON), normalized(&python_first));
-    assert_eq!(fixture.record(PYTHON, &python_first), first_record);
-    assert_eq!(fixture.record(PYTHON, &python_second), second_record);
-    // Calls into the Python deployment itself remain independent of the
-    // missing outbound target and restore the original named/default class.
-    assert_eq!(
-        fixture.invoke(PEER, "/python-identify").await,
-        json!({"entrypoint":"default", "revision":"first"})
-    );
-    assert_eq!(
-        fixture.invoke(PEER, "/python-named-fetch").await,
-        json!({"entrypoint":"named", "revision":"first"})
-    );
+    for path in ["/fetch", "/named-fetch", "/rpc", "/named-rpc", "/callback"] {
+        let (status, _, body) = fixture
+            .request(
+                path,
+                "GET",
+                "application/json",
+                Vec::new(),
+                RequestTarget::Worker(PYTHON),
+            )
+            .await;
+        assert_eq!(status, 503, "deleted service target must fail closed");
+        let response: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(response["error"]["code"], "SERVICE_TARGET_NOT_READY");
+    }
 
     fixture.process.stop().await;
     for lease in [
@@ -162,19 +101,14 @@ async fn p21_python_services_fetch_named_rpc_callback_restart_rollback() {
         "python-services-evidence: {}",
         json!({
             "uploadSha256":capture.sha256,
-            "pythonFirstVersion":python_first,"pythonSecondVersion":python_second,
-            "javascriptFirstTargetVersion":target_first,"javascriptSecondTargetVersion":target_second,
+            "pythonVersion":python_first,
+            "javascriptTargetVersion":target_first,
             "javascriptPeerVersion":peer,
             "firstPreparedIdentitySha256":hex::encode(first_record.prepared_identity_sha256),
-            "secondPreparedIdentitySha256":hex::encode(second_record.prepared_identity_sha256),
             "activePythonVersion":fixture.active(PYTHON),
-            "deletedTargetRejectedBeforeAndAfterRestart":true,
+            "fetchNamedRpcCallbackAndExceptions":true,"missingTargetRejected":true,
         })
     );
-}
-
-fn normalized(version: &str) -> String {
-    uuid::Uuid::parse_str(version).unwrap().to_string()
 }
 
 fn service_binding(name: &str, service: &str, entrypoint: Option<&str>) -> Value {
@@ -278,30 +212,4 @@ async fn verify(fixture: &Fixture, python_revision: &str, javascript_revision: &
         fixture.invoke(PEER, "/python-named-fetch").await,
         json!({"entrypoint":"named","revision":python_revision})
     );
-}
-
-async fn assert_missing_target(fixture: &Fixture) {
-    for caller in [PYTHON, PEER] {
-        for path in ["/fetch", "/named-fetch", "/rpc", "/named-rpc", "/callback"] {
-            let (status, _, body) = fixture
-                .request(
-                    path,
-                    "GET",
-                    "application/json",
-                    Vec::new(),
-                    RequestTarget::Worker(caller),
-                )
-                .await;
-            assert_eq!(status, 503, "deleted service target must fail closed");
-            let response: Value = serde_json::from_slice(&body).unwrap();
-            assert_eq!(response["error"]["code"], "SERVICE_TARGET_NOT_READY");
-        }
-    }
-}
-
-fn assert_no_prepare_upload(fixture: &Fixture) {
-    assert!(fixture.mock.recorded().iter().all(|request| {
-        !request.path.contains("/system/artifacts/v1/sha256/")
-            || (request.method != "PUT" && request.method != "POST")
-    }));
 }

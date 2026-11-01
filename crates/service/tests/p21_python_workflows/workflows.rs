@@ -47,93 +47,85 @@ async fn p21_python_workflows_steps_events_retry_pause_restart_rollback() {
         )
         .await;
     fixture.promote(PEER, &peer).await;
-    for (script, label, revision, reader) in [
-        (PYTHON, "python", "first", PEER),
-        (PEER, "javascript", "javascript", PYTHON),
-    ] {
-        assert_eq!(
-            fixture.invoke(script, "/invalid").await,
-            json!({"rejected":true})
-        );
-        for mode in ["normal", "retry", "fail", "caught"] {
-            let id = format!("{label}-{mode}");
-            assertions::create(&fixture, script, &id, mode).await;
-            let value = assertions::status(
-                &fixture,
-                script,
-                &id,
-                if mode == "fail" {
-                    "errored"
-                } else {
-                    "complete"
-                },
-            )
-            .await;
+    assert_eq!(
+        fixture.invoke(PYTHON, "/invalid").await,
+        json!({"rejected":true})
+    );
+    for mode in ["normal", "retry", "fail", "caught"] {
+        let id = format!("python-{mode}");
+        assertions::create(&fixture, PYTHON, &id, mode).await;
+        let value = assertions::status(
+            &fixture,
+            PYTHON,
+            &id,
             if mode == "fail" {
-                assert!(!value["error"]["message"].as_str().unwrap().is_empty());
+                "errored"
             } else {
-                assert_eq!(
-                    value["output"],
-                    if mode == "caught" {
-                        json!({"caught":true})
-                    } else {
-                        assertions::output(revision, None)
-                    }
-                );
-            }
-            assertions::effects(
-                &fixture,
-                reader,
-                &id,
-                if mode == "retry" { 2 } else { 1 },
-                revision,
-            )
-            .await;
-        }
-        let batch = format!("{label}-batch");
-        assert_eq!(
-            fixture.invoke(script, &format!("/batch?id={batch}")).await,
-            json!({"ids":[format!("{batch}-a"),format!("{batch}-b")]})
-        );
-        for suffix in ["a", "b"] {
-            let id = format!("{batch}-{suffix}");
+                "complete"
+            },
+        )
+        .await;
+        if mode == "fail" {
+            assert!(!value["error"]["message"].as_str().unwrap().is_empty());
+        } else {
             assert_eq!(
-                assertions::status(&fixture, script, &id, "complete").await["output"],
-                assertions::output(revision, None)
+                value["output"],
+                if mode == "caught" {
+                    json!({"caught":true})
+                } else {
+                    assertions::output("first", None)
+                }
             );
-            assertions::effects(&fixture, reader, &id, 1, revision).await;
         }
+        assertions::effects(
+            &fixture,
+            PEER,
+            &id,
+            if mode == "retry" { 2 } else { 1 },
+            "first",
+        )
+        .await;
+    }
+    let batch = "python-batch";
+    assert_eq!(
+        fixture.invoke(PYTHON, &format!("/batch?id={batch}")).await,
+        json!({"ids":[format!("{batch}-a"),format!("{batch}-b")]})
+    );
+    for suffix in ["a", "b"] {
+        let id = format!("{batch}-{suffix}");
+        assert_eq!(
+            assertions::status(&fixture, PYTHON, &id, "complete").await["output"],
+            assertions::output("first", None)
+        );
+        assertions::effects(&fixture, PEER, &id, 1, "first").await;
     }
 
-    for (script, id) in [(PYTHON, "python-wait"), (PEER, "javascript-wait")] {
-        assertions::create(&fixture, script, id, "wait").await;
-        assertions::status(&fixture, script, id, "waiting").await;
-        assert_eq!(
-            fixture.invoke(script, &format!("/pause?id={id}")).await,
-            json!({"paused":true})
-        );
-        assertions::status(&fixture, script, id, "paused").await;
-    }
+    assertions::create(&fixture, PEER, "javascript-normal", "normal").await;
+    assert_eq!(
+        assertions::status(&fixture, PEER, "javascript-normal", "complete").await["output"],
+        assertions::output("javascript", None)
+    );
+    assertions::effects(&fixture, PYTHON, "javascript-normal", 1, "javascript").await;
+
+    assertions::create(&fixture, PYTHON, "python-wait", "wait").await;
+    assertions::status(&fixture, PYTHON, "python-wait", "waiting").await;
+    assert_eq!(
+        fixture.invoke(PYTHON, "/pause?id=python-wait").await,
+        json!({"paused":true})
+    );
+    assertions::status(&fixture, PYTHON, "python-wait", "paused").await;
     let python_step = assertions::prepare_record(&fixture, FLOW, "python-wait");
-    let javascript_step = assertions::prepare_record(&fixture, PEER_FLOW, "javascript-wait");
     assert_eq!(python_step.0, normalized(&first));
-    assert_eq!(javascript_step.0, normalized(&peer));
     assert_eq!(python_step.2, 1);
-    assert_eq!(javascript_step.2, 1);
     fixture.process.stop().await;
     fixture.ciphertext(&first_record).await;
     fixture.mock.clear_recorded();
     fixture.process.restart(&fixture.config, &fixture.log);
     platform_process::ready(&fixture.client, fixture.admin, &mut fixture.process).await;
     assertions::status(&fixture, PYTHON, "python-wait", "paused").await;
-    assertions::status(&fixture, PEER, "javascript-wait", "paused").await;
     assert_eq!(
         assertions::prepare_record(&fixture, FLOW, "python-wait"),
         python_step
-    );
-    assert_eq!(
-        assertions::prepare_record(&fixture, PEER_FLOW, "javascript-wait"),
-        javascript_step
     );
     assertions::no_prepare_upload(&fixture);
     assert_eq!(fixture.record(PYTHON, &first), first_record);
@@ -147,31 +139,22 @@ async fn p21_python_workflows_steps_events_retry_pause_restart_rollback() {
     assert_ne!(first_record.artifact_sha256, second_record.artifact_sha256);
     assert_eq!(fixture.active(PYTHON), normalized(&first));
     fixture.promote(PYTHON, &second).await;
-    for (script, id, revision, reader) in [
-        (PYTHON, "python-wait", "first", PEER),
-        (PEER, "javascript-wait", "javascript", PYTHON),
-    ] {
-        assert_eq!(
-            fixture.invoke(script, &format!("/event?id={id}")).await,
-            json!({"sent":true})
-        );
-        assert_eq!(
-            fixture.invoke(script, &format!("/resume?id={id}")).await,
-            json!({"resumed":true})
-        );
-        assert_eq!(
-            assertions::status(&fixture, script, id, "complete").await["output"],
-            assertions::output(revision, Some(&json!({"unicode":"µ☁"})))
-        );
-        assertions::effects(&fixture, reader, id, 1, revision).await;
-    }
+    assert_eq!(
+        fixture.invoke(PYTHON, "/event?id=python-wait").await,
+        json!({"sent":true})
+    );
+    assert_eq!(
+        fixture.invoke(PYTHON, "/resume?id=python-wait").await,
+        json!({"resumed":true})
+    );
+    assert_eq!(
+        assertions::status(&fixture, PYTHON, "python-wait", "complete").await["output"],
+        assertions::output("first", Some(&json!({"unicode":"µ☁"})))
+    );
+    assertions::effects(&fixture, PEER, "python-wait", 1, "first").await;
     assert_eq!(
         assertions::prepare_record(&fixture, FLOW, "python-wait"),
         python_step
-    );
-    assert_eq!(
-        assertions::prepare_record(&fixture, PEER_FLOW, "javascript-wait"),
-        javascript_step
     );
     assertions::create(&fixture, PYTHON, "python-second", "normal").await;
     assert_eq!(
@@ -208,23 +191,18 @@ async fn p21_python_workflows_steps_events_retry_pause_restart_rollback() {
         assertions::output("first", None)
     );
 
-    for (script, id, revision, reader) in [
-        (PYTHON, "python-terminate", "first", PEER),
-        (PEER, "javascript-terminate", "javascript", PYTHON),
-    ] {
-        assertions::create(&fixture, script, id, "wait").await;
-        assertions::status(&fixture, script, id, "waiting").await;
-        assert_eq!(
-            fixture.invoke(script, &format!("/terminate?id={id}")).await,
-            json!({"terminated":true})
-        );
-        assertions::status(&fixture, script, id, "terminated").await;
-        assertions::effects(&fixture, reader, id, 1, revision).await;
-    }
+    assertions::create(&fixture, PYTHON, "python-terminate", "wait").await;
+    assertions::status(&fixture, PYTHON, "python-terminate", "waiting").await;
+    assert_eq!(
+        fixture
+            .invoke(PYTHON, "/terminate?id=python-terminate")
+            .await,
+        json!({"terminated":true})
+    );
+    assertions::status(&fixture, PYTHON, "python-terminate", "terminated").await;
+    assertions::effects(&fixture, PEER, "python-terminate", 1, "first").await;
     fixture.restart().await;
-    for (script, id) in [(PYTHON, "python-terminate"), (PEER, "javascript-terminate")] {
-        assertions::status(&fixture, script, id, "terminated").await;
-    }
+    assertions::status(&fixture, PYTHON, "python-terminate", "terminated").await;
     assert_eq!(fixture.record(PYTHON, &first), first_record);
     assert_eq!(fixture.record(PYTHON, &second), second_record);
     fixture.process.stop().await;

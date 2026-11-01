@@ -1,4 +1,4 @@
-//! Real daemon framework deployment, snapshot integrity and recovery qualification.
+//! Real daemon framework HTTP, WSGI and ASGI adapter smoke tests.
 
 #![cfg(feature = "test-support")]
 

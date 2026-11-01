@@ -37,7 +37,7 @@ Assets 使用现有 private wrapped binding，公开名称为 `Fetcher`，让官
 
 原生 R2 延续 upstream 的已知长度流上传合同：定长分块流可写入，未知长度流抛出 `TypeError` 且不产生对象。D1 binding 延续上游 WrappedBinding 的序列化能力，父 Worker 的持久数据可由显式接收该 binding 的子 Worker 读取，子 `env` 仍仅包含声明的键；原生 KV/R2/Queue 的直接 transfer 拒绝保持。测试使用当前原生 public objects，未恢复已删除的 facade。
 
-Flask 带 request/app context 的流式响应受 [cloudflare/workers-py#287](https://github.com/cloudflare/workers-py/issues/287) 影响。用户于 2026-10-04 明确要求记录并暂缓。SDK 保持原版，普通 Flask HTTP、template、HEAD/status/query、secret、restart 和 rollback 仍需通过。该流式路由不计为通过；Django 和 FastAPI 的流式验收保留。原始失败与诊断证据保留，待上游修复后重验 body、并发上下文和 cancellation cleanup。
+Flask 带 request/app context 的流式响应受 [cloudflare/workers-py#287](https://github.com/cloudflare/workers-py/issues/287) 影响。用户于 2026-10-04 明确要求记录并暂缓。SDK 保持原版，普通 Flask 用例验证 HTTP、template、HEAD/status/query 与 secret。Main 用例集中验证 restart、rollback 和 prepared artifact 完整性。该流式路由不计为通过；Django 和 FastAPI 的流式验收保留。原始失败与诊断证据保留，待上游修复后重验 body、并发上下文和 cancellation cleanup。
 
 Dynamic Python 的 fresh isolate 仍受 `OC-WKR-LIMIT-001` 的一秒 startup 限制，未声明支持；普通部署 prepared artifact 的通过不能推出 Dynamic Python 通过。完整支持面由 [兼容矩阵](../references/cloudflare-compatibility.md)、[偏差](../references/p1-deviations.md)、机器可读合同与用户文档拥有。
 

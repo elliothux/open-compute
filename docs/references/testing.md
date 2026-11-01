@@ -76,7 +76,8 @@ Dashboard 的 Browser Run 绑定测试：启动配置了 Browser Run 的隔离 o
 ## Python Workers
 
 七个 `p21-python-*` 目标共九个用例。每个用例启动真实 daemon，使用正式 pin 的 workerd、SQLite 和 SigV4 fixture，对比 Python 与
-JavaScript 在同一产品上的行为，并覆盖重启和 rollback。Flask 的 request/app-context 流式响应受上游
+JavaScript 在同一产品上的行为。Main 集中验证 admission、package/import、prepared artifact 完整性、重启和 rollback。
+框架只验证 HTTP/WSGI/ASGI；产品用例保留 Python/JS binding、FFI、异常、流和取消，以及 Queue、DO 和 Workflow 的 Python 持久重放。Flask 的 request/app-context 流式响应受上游
 [workers-py#287](https://github.com/cloudflare/workers-py/issues/287) 阻塞，Flask 普通 HTTP 仍在测试中。
 
 ## 显式资格测试

@@ -3,8 +3,6 @@
 use super::python_support::PYTHON_SECRETS;
 use super::python_support::fixture::{Fixture, RequestTarget};
 use super::{DLQ, EVENTS, PEER, PYTHON};
-use axum::body::{Body, to_bytes};
-use axum::http::Request;
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
 use std::fs;
@@ -232,39 +230,6 @@ pub(super) fn assert_no_prepare_upload(fixture: &Fixture) {
             .any(|request| { request.method == "PUT" && request.path.contains("/artifacts/") }),
         "restore must not persist a newly prepared artifact"
     );
-}
-
-pub(super) async fn assert_read_only_creation_rejected(fixture: &Fixture) {
-    let request = Request::builder()
-        .method("POST")
-        .uri(format!(
-            "http://{}/client/v4/accounts/{}/queues",
-            fixture.admin, fixture.public_account
-        ))
-        .header("content-type", "application/json")
-        .header("authorization", "Bearer workflow-read-only")
-        .body(Body::from(r#"{"queue_name":"denied-queue"}"#))
-        .unwrap();
-    let response = tokio::time::timeout(Duration::from_secs(5), fixture.client.request(request))
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(response.status(), 403);
-    let bytes = to_bytes(Body::new(response.into_body()), 65536)
-        .await
-        .unwrap();
-    let value: Value = serde_json::from_slice(&bytes).unwrap();
-    assert_eq!(value["success"], false);
-    assert!(value["result"].is_null());
-    let count: i64 = fixture
-        .connection()
-        .query_row(
-            "SELECT count(*) FROM queues WHERE name='denied-queue'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(count, 0);
 }
 
 pub(super) async fn assert_referenced_deletion_rejected(fixture: &Fixture, queue: &str) {

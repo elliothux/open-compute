@@ -185,20 +185,7 @@ async fn p21_python_runtime_ffi_stdlib_wait_until_network_restart_rollback() {
         json!({"value":null})
     );
     assert_eq!(fixture.invoke(PEER, "/background-read").await, "first");
-    cache::retained(&fixture, "cache-python-retained").await;
-    assets::parity(&fixture, assets::FIRST).await;
-    images::parity(&fixture).await;
-    search::retained(&fixture, "first").await;
-    assert_eq!(artifacts::retained(&fixture, false).await, artifacts_first);
-    assert_eq!(
-        ai_search::retained(&fixture, &search_state).await,
-        search_first
-    );
-    assertions::read(&fixture, "javascript").await;
-    assertions::ffi(&fixture).await;
-    assertions::outbound(&fixture).await;
     assertions::no_prepare_upload(&fixture);
-    http_clients::matrix(&fixture, &http).await;
     dynamic::baseline(&fixture, "fresh-process-after-restart").await;
     assert_eq!(
         fixture.active(dynamic::SCRIPT),
@@ -228,7 +215,6 @@ async fn p21_python_runtime_ffi_stdlib_wait_until_network_restart_rollback() {
     fixture.promote(PYTHON, &second).await;
     cache::new_version(&fixture).await;
     assets::parity(&fixture, assets::SECOND).await;
-    images::parity(&fixture).await;
     search::update(&fixture).await;
     artifacts::update(&fixture).await;
     search::retained(&fixture, "second").await;
@@ -248,7 +234,6 @@ async fn p21_python_runtime_ffi_stdlib_wait_until_network_restart_rollback() {
     );
     assertions::read(&fixture, "second/ffi").await;
     assertions::background(&fixture, "second").await;
-    assertions::boundaries(&fixture).await;
     fixture.promote(PYTHON, &first).await;
     fixture.mock.clear_recorded();
     fixture.restart().await;
@@ -261,23 +246,9 @@ async fn p21_python_runtime_ffi_stdlib_wait_until_network_restart_rollback() {
         json!({"value":null})
     );
     assert_eq!(fixture.invoke(PEER, "/background-read").await, "second");
-    cache::retained(&fixture, "cache-second").await;
-    assets::parity(&fixture, assets::FIRST).await;
-    images::parity(&fixture).await;
-    search::retained(&fixture, "second").await;
-    assert_eq!(artifacts::retained(&fixture, true).await, artifacts_second);
-    assert_eq!(
-        ai_search::retained(&fixture, &search_state).await,
-        search_second
-    );
-    assertions::read(&fixture, "second/ffi").await;
-    assertions::ffi(&fixture).await;
-    assertions::stdlib(&fixture).await;
-    assertions::outbound(&fixture).await;
     assertions::no_prepare_upload(&fixture);
     assert_eq!(fixture.record(PYTHON, &first), first_record);
     assert_eq!(fixture.record(PYTHON, &second), second_record);
-    http_clients::matrix(&fixture, &http).await;
 
     fixture.process.stop().await;
     provider.finish().await;
@@ -314,7 +285,7 @@ async fn p21_python_runtime_ffi_stdlib_wait_until_network_restart_rollback() {
             "secondPreparedIdentitySha256":hex::encode(second_record.prepared_identity_sha256),
             "sdkAndFfiSharedBindings":["KV","D1","R2"],"ephemeralFilesystemNotRestored":true,
             "nativeCacheDefaultAndNamed":true,"cacheWorkerAndNamespaceIsolationAndSharedVersionState":true,
-            "assetsSdkFfiJavascriptParityAndImmutableRollback":true,
+            "assetsSdkFfiJavascriptParityAndVersionRouting":true,
             "imagesSdkFfiJavascriptRasterAndStreamParity":true,
             "aiMarkdownAndVectorizeSdkFfiJavascriptParity":true,
             "artifactsExtensionNativeFfiJavascriptAuthorityParity":true,

@@ -38,13 +38,18 @@ Artifacts binding。正式 runtime lock 的 `workersSdk` 字段记录 integratio
 Worker bundle 使用通用本地结构限制：4096 modules、单 module 8 MiB、总 module bytes 32 MiB、manifest 1 MiB，
 canonical artifact 默认 34 MiB。multipart streaming、离线 base64 encoder 和 framework importer 保持同一预算；
 扩大 `workers.max_bundle_bytes` 不解除结构限制。Cloudflare 当前声明 64 MiB uncompressed Worker size，
-本地差异记录于 [`OC-WKR-LIMIT-001`](p1-deviations.md)，不声明 hosted quota parity。Python 普通部署的已记录资格证据使用正式 R4 workerd pin、Pyodide `314.0.6_2026-08-17_6` 与未修改 SDK 1.9.2。Main、完整三框架、Services、Queues、self-owned DO、Workflows 与 Runtime 的九个 ordinary case 已在同一 workspace coverage 轮次通过；Django/FastAPI 包含流式响应，Flask 仅声明普通 HTTP/template。固定输入与测试合同见 [Python Workers](testing.md#python-workers)。最终未插桩 workspace 验收与具体报告由阶段完成记录拥有。
+本地差异记录于 [`OC-WKR-LIMIT-001`](p1-deviations.md)，不声明 hosted quota parity。Python 普通部署的已记录资格证据使用正式 R4 workerd pin、Pyodide `314.0.6_2026-08-17_6` 与未修改 SDK 1.9.2。
 
-Python Runtime 的单轮产品 case 包含原版 Pyodide requests 2.33.1 与同步/异步 httpx 0.28.1 的实际 HTTP 路径、HTTP exception、流、超时、连接拒绝、取消后的有界清理、native subrequest quota 和 restart/rollback。取消 Python task 不作为底层 Fetch 立即 abort 的保证；TLS、数据库驱动、AI/API client 与 HTTP MCP 仍留在 [#128](https://github.com/elliothux/open-compute/issues/128)。当前 Dynamic 基线另记录 fresh child、cached-key 尝试、普通 preparation 后和 daemon restart 后的结果；不拿普通 snapshot 或缓存 key 当成功 warm child。正式输入、执行结果与复现命令由 [P21](../implemented/p21-python-workers.md) 拥有，Dynamic 支持仍留在 [#126](https://github.com/elliothux/open-compute/issues/126)。
+Main、三种框架、Services、Queues、self-owned DO、Workflows 与 Runtime 共九个 ordinary case。Main 集中验证 admission、preparation、完整性与恢复；三种框架验证 HTTP/WSGI/ASGI。
+Django/FastAPI 包含流式响应，Flask 仅声明普通 HTTP/template。
 
-Python Queue 的 ordinary case 覆盖 json/text/bytes/V8 Date、50,000 中文字符、metadata、ack/retry/DLQ、暂停与 fresh restart、两个 Version 和 rollback。正式 fork 使用官方单 batch 参数调用 Python handler；force 只授权 backlog purge，不绕过 live referrer 删除保护。Python scheduled 的 controller/env/ctx、type/noRetry/waitUntil、短签名与输入拒绝已有 source/SDK 组件资格；这些组件不单独证明完整 Python Cron scheduler recovery。
+固定输入与测试合同见 [Python Workers](testing.md#python-workers)。最终未插桩 workspace 验收与具体报告由阶段完成记录拥有。
 
-普通 Python DO case 分别使用两个语言各自 self-owned namespace，覆盖 native ID/name、fetch/RPC、SQL/KV、abort replacement、持久 alarm、WebSocket 消息/attachment/close、promotion/rollback 和 SIGKILL orphan recovery。公开上传拒绝 cross-Script DO/Workflow，不声明 PITR、hibernation eviction 或 live socket 跨进程死亡。
+Python Runtime 的单轮产品 case 包含原版 Pyodide requests 2.33.1 与同步/异步 httpx 0.28.1 的实际 HTTP 路径、HTTP exception、流、超时、连接拒绝、取消后的有界清理、native subrequest quota。重启和 rollback 另验证 Python 临时文件系统与 prepared artifact，产品检查不随重启和 rollback 重复运行。取消 Python task 不作为底层 Fetch 立即 abort 的保证；TLS、数据库驱动、AI/API client 与 HTTP MCP 仍留在 [#128](https://github.com/elliothux/open-compute/issues/128)。当前 Dynamic 基线另记录 fresh child、cached-key 尝试、普通 preparation 后和 daemon restart 后的结果；不拿普通 snapshot 或缓存 key 当成功 warm child。正式输入、执行结果与复现命令由 [P21](../implemented/p21-python-workers.md) 拥有，Dynamic 支持仍留在 [#126](https://github.com/elliothux/open-compute/issues/126)。
+
+Python Queue 的 ordinary case 覆盖 json/text/bytes/V8 Date、50,000 中文字符、metadata、ack/retry/DLQ、暂停、持久消息跨 fresh restart 后由 Python 解码，以及 Python/JS consumer 切换。正式 fork 使用官方单 batch 参数调用 Python handler；force 只授权 backlog purge，不绕过 live referrer 删除保护。Python scheduled 的 controller/env/ctx、type/noRetry/waitUntil、短签名与输入拒绝已有 source/SDK 组件资格；这些组件不单独证明完整 Python Cron scheduler recovery。
+
+普通 Python DO case 分别使用两个语言各自 self-owned namespace，覆盖 native ID/name、fetch/RPC、SQL/KV、abort replacement、持久 alarm、WebSocket 消息/attachment/close、alarm/attachment 重放和 Python 类的 promotion/rollback。通用 SIGKILL orphan recovery 由进程 Gate 验证。公开上传拒绝 cross-Script DO/Workflow，不声明 PITR、hibernation eviction 或 live socket 跨进程死亡。
 
 Dynamic Worker 的 `WorkerCode.compatibilityDate` / `compatibilityFlags` 是独立的官方
 [Loader API 合同](https://developers.cloudflare.com/dynamic-workers/api-reference/)，并经过与普通 Version 相同的 pinned workerd
@@ -518,7 +523,7 @@ Flask `stream_with_context` 因此出现 request/app ContextVar 错误，可能�
 官方 stock workerd `v1.20260929.1` 配合未修改 SDK、直接 service binding 已复现；这不是托管端验证。
 Flask 带 request/app context 的流式响应暂不在本轮支持与验收范围，不能从普通 Flask HTTP/template
 Gate 推断 streaming 已通过。原应用路由、失败日志与诊断补丁保留，正式 SDK 不改动。
-其余 Flask HTTP、模板、不可变部署、restart/rollback、密文损坏拒绝和日志安全已在完整三框架聚合中通过。
+Flask 用例验证 HTTP、模板与日志安全；Main 用例验证不可变部署、restart/rollback 和密文损坏拒绝。
 TODO(P25)：上游发布修复后重新验证该路由的完整 body、并发上下文与 cancellation cleanup，恢复流式验收并移除该限制。
 证据见 `.temp/p20-python-flask/diagnostic-01.json` 和 `.temp/p21-flask-context-diagnostic/qualification-01.json`。
 

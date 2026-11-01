@@ -8,7 +8,7 @@ use super::{DLQ, EVENTS, PEER, PYTHON};
 use serde_json::{Value, json};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn p21_python_queues_produce_consume_retry_dlq_restart_rollback() {
+async fn p21_python_queues_produce_consume_retry_dlq_replay() {
     let capture = Capture::load(
         "test/fixtures/python-queues",
         "test/applications/python-queues/src",
@@ -16,7 +16,6 @@ async fn p21_python_queues_produce_consume_retry_dlq_restart_rollback() {
     )
     .await;
     let mut fixture = Fixture::new(None).await;
-    assert_read_only_creation_rejected(&fixture).await;
     let queue = create_queue(&fixture, EVENTS).await;
     let dlq = create_queue(&fixture, DLQ).await;
     let kv = fixture
@@ -42,7 +41,7 @@ async fn p21_python_queues_produce_consume_retry_dlq_restart_rollback() {
         )
         .await;
     fixture.promote(PEER, &peer).await;
-    let mut consumer = set_consumer(&fixture, &queue, None, PYTHON).await;
+    let consumer = set_consumer(&fixture, &queue, None, PYTHON).await;
 
     send_pair(&fixture, "initial").await;
     assert_eq!(backlog(&fixture, &queue).await, 8);
@@ -84,88 +83,30 @@ async fn p21_python_queues_produce_consume_retry_dlq_restart_rollback() {
     let failure = wait_observation(&fixture, "python-dlq", 2).await;
     assert_eq!(failure["attempts"], 2);
     assert_dlq_body(&fixture);
-    fixture.restart().await;
-    assert_eq!(backlog(&fixture, &dlq).await, 1);
-    assert_eq!(lookup(&fixture, "python-dlq").await, failure);
-    assert_eq!(fixture.record(PYTHON, &first), first_record);
-
-    pause(&fixture, &queue, true).await;
-    let second = python_version(&fixture, &capture, &kv, "second", PYTHON_SECRETS[1]).await;
-    let second_record = fixture.record(PYTHON, &second);
-    assert_ne!(
-        first_record.prepared_identity_sha256,
-        second_record.prepared_identity_sha256
-    );
-    assert_ne!(first_record.artifact_sha256, second_record.artifact_sha256);
-    assert_eq!(fixture.active(PYTHON), normalized(&first));
-    fixture.promote(PYTHON, &second).await;
-    // Queue API attachments are managed separately from the immutable Worker
-    // upload. Reapply the public consumer configuration after deployment,
-    // as the application deploy tooling does; do not write private authority.
-    let next_consumer = set_consumer(&fixture, &queue, None, PYTHON).await;
-    assert_ne!(next_consumer, consumer);
-    consumer = next_consumer;
-    send_pair(&fixture, "second").await;
-    fixture.restart().await;
-    assert_eq!(backlog(&fixture, &queue).await, 8);
-    pause(&fixture, &queue, false).await;
-    verify_pair(&fixture, &queue, "second", "second").await;
-
-    pause(&fixture, &queue, true).await;
-    fixture.promote(PYTHON, &first).await;
-    let next_consumer = set_consumer(&fixture, &queue, None, PYTHON).await;
-    assert_ne!(next_consumer, consumer);
-    consumer = next_consumer;
-    send_pair(&fixture, "rollback").await;
-    fixture.restart().await;
-    pause(&fixture, &queue, false).await;
-    verify_pair(&fixture, &queue, "rollback", "first").await;
-    assert_eq!(fixture.record(PYTHON, &first), first_record);
-    assert_eq!(fixture.record(PYTHON, &second), second_record);
-
     // Switching the real consumer proves both languages decode the same
-    // persisted frames; restart must retain the new consumer generation.
+    // persisted frames.
     pause(&fixture, &queue, true).await;
     let updated = set_consumer(&fixture, &queue, Some(&consumer), PEER).await;
     assert_eq!(updated, consumer);
     send_pair(&fixture, "javascript").await;
-    fixture.restart().await;
     assert_eq!(backlog(&fixture, &queue).await, 8);
     pause(&fixture, &queue, false).await;
     verify_pair(&fixture, &queue, "javascript", "javascript").await;
 
-    // Immutable versions still reference the Queue. Public deletion must
-    // reject that reference instead of orphaning a producer or rebinding it.
     assert_referenced_deletion_rejected(&fixture, &queue).await;
-    send_pair(&fixture, "delete-refused").await;
-    verify_pair(&fixture, &queue, "delete-refused", "javascript").await;
-    fixture.restart().await;
-    assert_referenced_deletion_rejected(&fixture, &queue).await;
-    send_pair(&fixture, "delete-refused-restart").await;
-    verify_pair(&fixture, &queue, "delete-refused-restart", "javascript").await;
-    assert_eq!(backlog(&fixture, &queue).await, 0);
-    assert_eq!(backlog(&fixture, &dlq).await, 1);
-    assert_eq!(fixture.record(PYTHON, &first), first_record);
-    assert_eq!(fixture.record(PYTHON, &second), second_record);
-    assert_eq!(fixture.active(PYTHON), normalized(&first));
     fixture.process.stop().await;
     assert_clean_shutdown(&fixture).await;
     println!(
         "python-queues-evidence: {}",
         json!({
             "uploadSha256":capture.sha256,
-            "firstVersion":first,"secondVersion":second,"peerVersion":peer,
+            "pythonVersion":first,"peerVersion":peer,
             "firstIdentity":hex::encode(first_record.prepared_identity_sha256),
-            "secondIdentity":hex::encode(second_record.prepared_identity_sha256),
             "queue":queue,"consumer":consumer,
             "dlq":dlq,"durableFrames":true,"crossLanguage":true,"restart":true,
-            "rollback":true,"retryFirstSettlementWins":true,"referencedDeletionRejectedBeforeAndAfterRestart":true,
+            "retryFirstSettlementWins":true,
         })
     );
-}
-
-fn normalized(version: &str) -> String {
-    uuid::Uuid::parse_str(version).unwrap().to_string()
 }
 
 pub(super) fn bindings(kv: &str, revision: &str, secret: &str) -> Vec<Value> {

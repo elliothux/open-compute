@@ -137,7 +137,7 @@ class GateTests(unittest.TestCase):
     def test_python_frameworks_require_three_cases_in_one_exclusive_native_inventory(self):
         name = 'p21-python-frameworks'
         cases = tuple(sorted(
-            f'frameworks::p21_python_{framework}_framework_deploy_restart_rollback'
+            f'frameworks::p21_python_{framework}_framework_http_smoke'
             for framework in ('django', 'flask', 'fastapi')
         ))
         self.assertEqual(gate.CARGO_TARGETS[name], ('open-compute-service', 'p21_python_frameworks', True))
@@ -150,9 +150,7 @@ class GateTests(unittest.TestCase):
         for contract in catalog['contracts']:
             for polarity in ('positiveCases', 'negativeCases'):
                 owned = references.intersection(contract[polarity])
-                expected = references if contract['id'] in (
-                    'workers.runtime.common', 'deployments.immutable.lifecycle',
-                ) else set()
+                expected = references if contract['id'] == 'workers.runtime.common' else set()
                 self.assertEqual(owned, expected, contract['id'])
         gate.validate_contract_case_mapping()
         metadata = {'workspace_members': ['service'], 'packages': [{
@@ -176,7 +174,7 @@ class GateTests(unittest.TestCase):
 
     def test_python_services_owns_native_case_and_matching_contract_evidence(self):
         name = 'p21-python-services'
-        case = 'services::p21_python_services_fetch_named_rpc_callback_restart_rollback'
+        case = 'services::p21_python_services_fetch_named_rpc_callback'
         self.assertEqual(gate.CARGO_TARGETS[name], ('open-compute-service', 'p21_python_services', True))
         self.assertEqual(gate.TIMING[name], (case,))
         self.assertFalse(gate.ONCE.get(name, ()))
@@ -197,7 +195,7 @@ class GateTests(unittest.TestCase):
         for contract in catalog['contracts']:
             owned = f'{name}::{case}'
             expected = contract['id'] in (
-                'workers.runtime.common', 'deployments.immutable.lifecycle', 'services.fetch.rpc',
+                'workers.runtime.common', 'services.fetch.rpc',
             )
             for polarity in ('positiveCases', 'negativeCases'):
                 self.assertEqual(owned in contract[polarity], expected, contract['id'])
@@ -212,7 +210,7 @@ class GateTests(unittest.TestCase):
 
     def test_python_queues_owns_native_case_and_matching_contract_evidence(self):
         name = 'p21-python-queues'
-        case = 'queues::p21_python_queues_produce_consume_retry_dlq_restart_rollback'
+        case = 'queues::p21_python_queues_produce_consume_retry_dlq_replay'
         self.assertEqual(gate.CARGO_TARGETS[name], ('open-compute-service', 'p21_python_queues', True))
         self.assertEqual(gate.TIMING[name], (case,))
         self.assertFalse(gate.ONCE.get(name, ()))
@@ -233,7 +231,7 @@ class GateTests(unittest.TestCase):
         for contract in catalog['contracts']:
             owned = f'{name}::{case}'
             expected = contract['id'] in (
-                'workers.runtime.common', 'deployments.immutable.lifecycle', 'queues.push.methods',
+                'workers.runtime.common', 'queues.push.methods',
             )
             for polarity in ('positiveCases', 'negativeCases'):
                 self.assertEqual(owned in contract[polarity], expected, contract['id'])

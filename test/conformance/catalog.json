@@ -40,11 +40,11 @@
         "p0-2::nodejs::p0_2_nodejs_default_surface_isolation_and_unsupported_stubs",
         "p3-cf-diff::workers/portable/runtime",
         "p21-python-main::python_main::p21_python_main_upload_prepare_dispatch_restart_rollback",
-        "p21-python-frameworks::frameworks::p21_python_django_framework_deploy_restart_rollback",
-        "p21-python-frameworks::frameworks::p21_python_flask_framework_deploy_restart_rollback",
-        "p21-python-frameworks::frameworks::p21_python_fastapi_framework_deploy_restart_rollback",
-        "p21-python-services::services::p21_python_services_fetch_named_rpc_callback_restart_rollback",
-        "p21-python-queues::queues::p21_python_queues_produce_consume_retry_dlq_restart_rollback",
+        "p21-python-frameworks::frameworks::p21_python_django_framework_http_smoke",
+        "p21-python-frameworks::frameworks::p21_python_flask_framework_http_smoke",
+        "p21-python-frameworks::frameworks::p21_python_fastapi_framework_http_smoke",
+        "p21-python-services::services::p21_python_services_fetch_named_rpc_callback",
+        "p21-python-queues::queues::p21_python_queues_produce_consume_retry_dlq_replay",
         "p21-python-durable-objects::durable_objects::p21_python_durable_objects_fetch_rpc_storage_alarm_restart_rollback",
         "p21-python-workflows::workflows::p21_python_workflows_steps_events_retry_pause_restart_rollback",
         "p21-python-runtime::runtime::p21_python_runtime_ffi_stdlib_wait_until_network_restart_rollback"
@@ -54,11 +54,11 @@
         "p0-2::nodejs::p0_2_nodejs_default_surface_isolation_and_unsupported_stubs",
         "p3-cf-diff::workers/portable/runtime",
         "p21-python-main::python_main::p21_python_main_upload_prepare_dispatch_restart_rollback",
-        "p21-python-frameworks::frameworks::p21_python_django_framework_deploy_restart_rollback",
-        "p21-python-frameworks::frameworks::p21_python_flask_framework_deploy_restart_rollback",
-        "p21-python-frameworks::frameworks::p21_python_fastapi_framework_deploy_restart_rollback",
-        "p21-python-services::services::p21_python_services_fetch_named_rpc_callback_restart_rollback",
-        "p21-python-queues::queues::p21_python_queues_produce_consume_retry_dlq_restart_rollback",
+        "p21-python-frameworks::frameworks::p21_python_django_framework_http_smoke",
+        "p21-python-frameworks::frameworks::p21_python_flask_framework_http_smoke",
+        "p21-python-frameworks::frameworks::p21_python_fastapi_framework_http_smoke",
+        "p21-python-services::services::p21_python_services_fetch_named_rpc_callback",
+        "p21-python-queues::queues::p21_python_queues_produce_consume_retry_dlq_replay",
         "p21-python-durable-objects::durable_objects::p21_python_durable_objects_fetch_rpc_storage_alarm_restart_rollback",
         "p21-python-workflows::workflows::p21_python_workflows_steps_events_retry_pause_restart_rollback",
         "p21-python-runtime::runtime::p21_python_runtime_ffi_stdlib_wait_until_network_restart_rollback"
@@ -113,11 +113,6 @@
         "p0-2::p0_2_real_worker_create_validate_dispatch_promote_rollback_restart",
         "p0-exit::p0_real_combined_exit_matrix",
         "p21-python-main::python_main::p21_python_main_upload_prepare_dispatch_restart_rollback",
-        "p21-python-frameworks::frameworks::p21_python_django_framework_deploy_restart_rollback",
-        "p21-python-frameworks::frameworks::p21_python_flask_framework_deploy_restart_rollback",
-        "p21-python-frameworks::frameworks::p21_python_fastapi_framework_deploy_restart_rollback",
-        "p21-python-services::services::p21_python_services_fetch_named_rpc_callback_restart_rollback",
-        "p21-python-queues::queues::p21_python_queues_produce_consume_retry_dlq_restart_rollback",
         "p21-python-durable-objects::durable_objects::p21_python_durable_objects_fetch_rpc_storage_alarm_restart_rollback",
         "p21-python-workflows::workflows::p21_python_workflows_steps_events_retry_pause_restart_rollback",
         "p21-python-runtime::runtime::p21_python_runtime_ffi_stdlib_wait_until_network_restart_rollback"
@@ -125,11 +120,6 @@
       "negativeCases": [
         "p0-2::p0_2_real_worker_create_validate_dispatch_promote_rollback_restart",
         "p21-python-main::python_main::p21_python_main_upload_prepare_dispatch_restart_rollback",
-        "p21-python-frameworks::frameworks::p21_python_django_framework_deploy_restart_rollback",
-        "p21-python-frameworks::frameworks::p21_python_flask_framework_deploy_restart_rollback",
-        "p21-python-frameworks::frameworks::p21_python_fastapi_framework_deploy_restart_rollback",
-        "p21-python-services::services::p21_python_services_fetch_named_rpc_callback_restart_rollback",
-        "p21-python-queues::queues::p21_python_queues_produce_consume_retry_dlq_restart_rollback",
         "p21-python-durable-objects::durable_objects::p21_python_durable_objects_fetch_rpc_storage_alarm_restart_rollback",
         "p21-python-workflows::workflows::p21_python_workflows_steps_events_retry_pause_restart_rollback",
         "p21-python-runtime::runtime::p21_python_runtime_ffi_stdlib_wait_until_network_restart_rollback"
@@ -190,11 +180,11 @@
         "p3-services-product::p3_services_real_runtime_authority_routing_budget_and_lifecycle_matrix",
         "p3-services-events::p3_service_calls_from_queue_cron_do_and_workflow_event_sources",
         "p3-services-recovery::p3_service_generation_exit_releases_inflight_handles_and_pins",
-        "p21-python-services::services::p21_python_services_fetch_named_rpc_callback_restart_rollback"
+        "p21-python-services::services::p21_python_services_fetch_named_rpc_callback"
       ],
       "negativeCases": [
         "p3-services-hard::p3_services_native_rpc_type_pipeline_and_lifecycle_matrix",
-        "p21-python-services::services::p21_python_services_fetch_named_rpc_callback_restart_rollback"
+        "p21-python-services::services::p21_python_services_fetch_named_rpc_callback"
       ],
       "deviations": ["OC-SERVICE-001"]
     },
@@ -372,13 +362,13 @@
         "p2-2::p2_2_real_queue_producer_matrix",
         "p2-2::scheduler::p2_2_real_queue_scheduler_matrix",
         "p3-cf-diff::queues/portable/producer",
-        "p21-python-queues::queues::p21_python_queues_produce_consume_retry_dlq_restart_rollback"
+        "p21-python-queues::queues::p21_python_queues_produce_consume_retry_dlq_replay"
       ],
       "negativeCases": [
         "p2-2::p2_2_real_queue_producer_matrix",
         "p2-2::commit_crash::p2_2_sigkill_after_commit_preserves_message_and_counters",
         "p3-cf-diff::queues/portable/producer",
-        "p21-python-queues::queues::p21_python_queues_produce_consume_retry_dlq_restart_rollback"
+        "p21-python-queues::queues::p21_python_queues_produce_consume_retry_dlq_replay"
       ],
       "deviations": ["OC-QUEUE-001"]
     },
