@@ -18,15 +18,7 @@
 
 formal pin 的唯一实时 authority 是 [workerd.lock.json](../../packages/runtime/workerd.lock.json)。以上是本次审查输入，不是让后续开发回退到这些版本的指令，也不是新的发行 pin。
 
-完整差异为 **117 个文件，新增 10,433 行、删除 911 行**。按文件路径划分：
-
-| 类别                         | 文件数 | 新增 / 删除 |
-| ---------------------------- | -----: | ----------: |
-| 生产代码、头文件及协议       |     62 | 5,141 / 313 |
-| 测试、fixture、测试 provider |     46 |   4,918 / 6 |
-| 构建、CI、README             |      9 |   374 / 592 |
-
-统计取 `git -C third_party/workerd diff --numstat <base> <fork>`：`/tests/`、`-test.`、`test-fixture`、`host-extension-test-provider` 归入测试，`.github/`、`BUILD.bazel`、`README.md` 归入构建文档，其余归入生产。此口径不逐行拆分内嵌测试。不能把全部新增行都当作运行时实现，也不能删回归测试来制造收薄数字。
+当前差异统计、补丁归属与删除条件以 [workerd 路线的补丁账本](README.md#补丁账本) 为准；上表仅保留 2026-10-04 的审查输入。W4 仍是待实施方案，不能把全部新增行都当作运行时实现，也不能删回归测试来制造收薄数字。
 
 本次依据是上述两份源码、当前调用方、所属测试源码和官方资料。没有重新构建 binary、下载运行时、部署远端资源或执行产品 Gate。最新 upstream 的 [29 个提交差异](https://github.com/cloudflare/workerd/compare/d99bc6b777e35d72d71c2f1fe2fd1db53284528a...92e6468fc4ec8f22a70cb55f93dd9c850de3e584) 没有补齐本方案关注的 dynamic Python dedicated snapshot 宿主入口、standalone limits 或 Loader delegation；其中 DO snapshot 更新不能当作 Python interpreter snapshot 支持的证据。
 

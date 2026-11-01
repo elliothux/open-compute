@@ -132,6 +132,8 @@
 
 ### R4.8 fork 瘦身
 
+状态：**补丁账本已完成**（2026-11-01），见 [workerd 路线](workerd/README.md#补丁账本)。HostExtension 接线收窄延期到下次上游 rebase，预计仅减少 10–40 行，且需要 fork 发行。私有 dynamic binding forwarding 保留，因为 stock Worker Loader 不能转发 KV/R2/Queue，删除会改变产品矩阵；Caddy 替换条件未满足，operator Caddyfile imports 与 `ocd caddy` 已超出 TLS/ACME/Host 路由，Container sidecar 仍需要 Go。
+
 与 [W4](workerd/w4-thin-fork.md) 一起执行：
 
 - 在 [workerd 路线](workerd/README.md) 补全补丁账本：每个补丁写用途、上游 issue 或 PR、删除条件。

@@ -7,7 +7,7 @@
 
 ## 用户结果
 
-宿主 Worker 可以从 `open-compute:worker-loader` 调用 `getWorker`／`loadWorker`，显式选择自己持有的受支持根 binding，并让 Dynamic Worker 使用等价产品 API 和相同资源 authority。标准 Loader 合同没有被放宽：通过普通 `WorkerCode.env` 传递 D1/KV/R2/Queue 根对象仍抛 `DataCloneError`。
+宿主 Worker 可以从 `open-compute:worker-loader` 调用 `getWorker`／`loadWorker`，显式选择自己持有的受支持根 binding，并让 Dynamic Worker 使用等价产品 API 和相同资源 authority。标准 Loader 合同没有被放宽：D1 可经 wrapped-binding 路径原生转移，通过普通 `WorkerCode.env` 传递 KV/R2/Queue 根对象仍抛 `DataCloneError`。
 
 ## 隔离与生命周期
 

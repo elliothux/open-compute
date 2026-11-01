@@ -104,7 +104,7 @@ Provider reference fixture 现由 open-compute 的 test-support Cargo 二进制
 `crates/service/src/bin/host_extension_test_provider/`（Rust，schema 拷贝随仓库提交）承担，product Gate 通过 `CARGO_BIN_EXE`
 直接定位；fork test target 保留 fork 自己的 C++ fixture。二者都不进入 release artifact。
 
-FD passing 正式使用 `--//:io_backend=cxx`。macOS release build同时保留
+FD passing 正式使用 Rust/Tokio I/O backend 的 SCM_RIGHTS 接收路径。macOS release build同时保留
 `--@rules_rust//:extra_exec_rustc_flag=-Cstrip=none`，避免 exec-configuration proc-macro dylib 被破坏；最终 `workerd` 仍以
 `--strip=always` 构建。formal source、四平台 binary/archive digest 与 build inputs 由
 [`workerd.lock.json`](../../packages/runtime/workerd.lock.json)唯一固定。
