@@ -100,7 +100,7 @@ def run(directory, engine_socket, binary, root, command):
     config = configuration(root / 'broker', engine_socket, report, volume, policy)
     require(binary.is_absolute() and binary.resolve() == binary
             and binary.stat().st_mode & 0o111, 'CANONICAL_EXECUTABLE_REQUIRED')
-    binary_sha, _, _ = consumer.oci.regular(binary, 1 << 30)
+    binary_sha, _, _ = consumer.oci.regular(binary, 4 << 30)  # with-broker.py BINARY_LIMIT
     docker = shutil.which('docker')
     require(docker is not None, 'DOCKER_CLI_REQUIRED')
     engine = helper.Engine(engine_socket)

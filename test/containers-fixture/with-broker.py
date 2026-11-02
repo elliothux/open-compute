@@ -18,6 +18,8 @@ import time
 import tomllib
 
 HERE = Path(__file__).resolve().parent
+# Unstripped Linux debug builds of ocd exceed 1 GiB.
+BINARY_LIMIT = 4 << 30
 spec = importlib.util.spec_from_file_location('prepare_input', HERE / 'prepare-input.py')
 prepare = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(prepare)
@@ -164,7 +166,7 @@ def clone_binary(source, expected, destination):
     with os.fdopen(source_fd, 'rb') as input_file:
         before = os.fstat(input_file.fileno())
         require(stat.S_ISREG(before.st_mode) and before.st_mode & 0o111
-                and 0 < before.st_size <= 1 << 30, 'BINARY_DIGEST_OR_MODE')
+                and 0 < before.st_size <= BINARY_LIMIT, 'BINARY_DIGEST_OR_MODE')
         output_fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         digest = hashlib.sha256()
         copied = 0
@@ -180,7 +182,7 @@ def clone_binary(source, expected, destination):
                 and prepare.oci.identity(before) == prepare.oci.identity(os.fstat(input_file.fileno()))
                 and prepare.oci.identity(before) == prepare.oci.identity(source.lstat()), 'BINARY_CHANGED')
     destination.chmod(0o555)
-    actual, _, _ = prepare.oci.regular(destination, 1 << 30)
+    actual, _, _ = prepare.oci.regular(destination, BINARY_LIMIT)
     require(actual == expected and prepare.oci.identity(before) == prepare.oci.identity(source.lstat())
             and destination.stat().st_nlink == 1
             and (destination.stat().st_dev, destination.stat().st_ino)
@@ -275,7 +277,7 @@ def main():
             result['mainExecuted'] = True
             done = subprocess.run(args.command, env=environment, stdout=log, stderr=subprocess.STDOUT)
             result['mainExitCode'] = done.returncode
-        require(prepare.oci.regular(clone, 1 << 30)[0] == args.binary_sha256, 'BINARY_CHANGED')
+        require(prepare.oci.regular(clone, BINARY_LIMIT)[0] == args.binary_sha256, 'BINARY_CHANGED')
         require(process.poll() is None and prepare.read_contract(Path(config['socket'])) == (body, authority),
                 'PROVIDER_CHANGED_DURING_COMMAND')
         after = inventory(config, environment)

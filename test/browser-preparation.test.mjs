@@ -46,7 +46,7 @@ test("CI browser AppArmor authorization and always cleanup preserve failure prop
   assert.equal(parsed.error, undefined);
   assert.equal(parsed.status, 0, parsed.stderr);
   const workflow = JSON.parse(parsed.stdout);
-  for (const name of ["coverage"]) {
+  for (const name of ["coverage-shards"]) {
     const steps = workflow.jobs[name].steps;
     const index = steps.findIndex(
       (step) => step.name === "Release the CI browser AppArmor profile",
@@ -135,7 +135,7 @@ test("browser preparation retains bounded stderr and precise early-exit evidence
       join(repository, ".github/workflows/release.yml"),
       "utf8",
     );
-    for (const job of ["coverage"]) {
+    for (const job of ["coverage-shards"]) {
       const body = workflow
         .split(`\n  ${job}:\n`)[1]
         .split(/\n  [a-z][\w-]*:\n/)[0];
