@@ -175,6 +175,8 @@ export function conformanceSelfTests(): void {
       "node",
       [
         "--test",
+        // Fail a stuck test by name well inside the Gate's 120 s target budget.
+        "--test-timeout=30000",
         join(ROOT, "test/conformance/adapters.test.mjs"),
         join(ROOT, "test/conformance/case-evidence.test.mjs"),
         join(ROOT, "test/conformance/inventory.test.mjs"),
