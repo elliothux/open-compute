@@ -14,6 +14,10 @@ inputs:
     description: Install Node.js (bun install cache is a separate step)
     required: false
     default: "true"
+  sccache:
+    description: Cache Rust compilation in GitHub Actions (CI only)
+    required: false
+    default: "false"
   llvm-cov:
     description: Install cargo-llvm-cov
     required: false
@@ -92,6 +96,22 @@ runs:
         key: ${{ runner.os }}-cargo-downloads-${{ hashFiles('Cargo.lock') }}
         restore-keys: |
           ${{ runner.os }}-cargo-downloads-
+
+    - name: Set up compiler cache
+      if: ${{ inputs.sccache == 'true' }}
+      uses: mozilla-actions/sccache-action@v0.0.11
+      with:
+        version: v0.16.0
+
+    - name: Enable compiler cache
+      if: ${{ inputs.sccache == 'true' }}
+      shell: bash
+      run: |
+        echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+        echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+        echo "CARGO_INCREMENTAL=0" >> "$GITHUB_ENV"
+        # Start with cache credentials before the Broker clears the Gate environment.
+        SCCACHE_GHA_ENABLED=true SCCACHE_IDLE_TIMEOUT=0 sccache --start-server
 
     - name: Install cargo-llvm-cov
       if: ${{ inputs.llvm-cov == 'true' }}

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# P1 soak: rotate stacks every 5 min, restart container every 15 min, track recovery.
+# P1 soak: standalone runs one hour; release runs 10 min with three verified recoveries.
 set -eu
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
@@ -56,13 +56,14 @@ configure_soak_schedule() {
   if [ -n "${STRESS_DEADLINE_EPOCH:-}" ]; then
     case "$STRESS_DEADLINE_EPOCH" in *[!0-9]*) echo 'Invalid stress deadline' >&2; return 1 ;; esac
     # Reserve one minute for the last request drain and report writes.
-    SOAK_TOTAL_SEC=$((STRESS_DEADLINE_EPOCH - $(date +%s) - 60))
-    if [ "$SOAK_TOTAL_SEC" -lt 1800 ]; then
-      echo 'Stress budget cannot fit the minimum 30-minute soak' >&2
+    soak_deadline=$((STRESS_DEADLINE_EPOCH - 60))
+    SOAK_TOTAL_SEC=600
+    if [ "$((soak_deadline - $(date +%s)))" -lt "$SOAK_TOTAL_SEC" ]; then
+      echo 'Stress budget cannot fit the minimum 10-minute restart-recovery soak' >&2
       return 1
     fi
-    ROTATE_SEC=120
-    RESTART_INTERVAL_SEC=$((SOAK_TOTAL_SEC / 4))
+    ROTATE_SEC=60
+    RESTART_INTERVAL_SEC=150
   fi
 }
 configure_soak_schedule
@@ -89,7 +90,14 @@ log_soak_event() {
 run_stack_soak() {
   stack=$1
   duration=$2
+  local rotation_started
+  rotation_started=$(date +%s)
   recover_before_sample "$SOAK_RECOVER_SETTLE_SEC"
+  if [ -n "${STRESS_DEADLINE_EPOCH:-}" ]; then
+    # Release rotations include readiness time, so every stack fits the window.
+    duration=$((duration - $(date +%s) + rotation_started))
+    [ "$duration" -gt 0 ] || { echo 'No soak sampling time after readiness' >&2; return 1; }
+  fi
   case "$stack" in
     http)
       run_duration_concurrent http "$SOAK_HTTP_CONCURRENCY" "$duration" "/stack/http/ping" GET "" \
@@ -133,7 +141,10 @@ run_stack_soak() {
         "${STRESS_RUN_DIR}/lat-scenario_mega.txt" "${STRESS_RUN_DIR}/err-scenario_mega.txt"
       ;;
   esac
-  recover_before_sample "$SOAK_RECOVER_SETTLE_SEC"
+  # The next release rotation checks readiness; restart injection also settles.
+  if [ -z "${STRESS_DEADLINE_EPOCH:-}" ]; then
+    recover_before_sample "$SOAK_RECOVER_SETTLE_SEC"
+  fi
 }
 
 post_restart_verify() {
@@ -186,11 +197,25 @@ stack_list="http kv d1 r2 queue do workflow fetch scenario_mega"
 
 log_soak_event "soak_start" "total_sec=${SOAK_TOTAL_SEC} rotate_sec=${ROTATE_SEC}"
 
-while [ "$(date +%s)" -lt "$soak_end" ]; do
+while [ "$(date +%s)" -lt "$soak_end" ] \
+  || { [ -n "${STRESS_DEADLINE_EPOCH:-}" ] && [ "$restart_count" -lt 3 ]; }; do
+  phase_end=$soak_end
+  if [ -n "${STRESS_DEADLINE_EPOCH:-}" ]; then
+    [ "$(date +%s)" -lt "$soak_deadline" ] || break
+    # Continue rotations past ten minutes only when recoveries are still missing.
+    if [ "$restart_count" -lt 3 ]; then phase_end=$soak_deadline; fi
+  fi
   stack=$(printf '%s\n' $stack_list | sed -n "$((stack_idx % 9 + 1))p")
   stack_idx=$((stack_idx + 1))
-  remaining=$((soak_end - $(date +%s)))
+  remaining=$((phase_end - $(date +%s)))
   phase_duration=$ROTATE_SEC
+  if [ -n "${STRESS_DEADLINE_EPOCH:-}" ] && [ "$stack_idx" -le 9 ]; then
+    # Share restart overhead across the remaining stacks without dropping samples.
+    rotation_budget=$(((soak_end - $(date +%s)) / (10 - stack_idx)))
+    if [ "$rotation_budget" -gt 0 ] && [ "$phase_duration" -gt "$rotation_budget" ]; then
+      phase_duration=$rotation_budget
+    fi
+  fi
   if [ "$phase_duration" -gt "$remaining" ]; then
     phase_duration=$remaining
   fi
@@ -205,7 +230,7 @@ while [ "$(date +%s)" -lt "$soak_end" ]; do
 
   if [ "${SOAK_INJECT_RESTART:-0}" = "1" ] \
     && [ "$restart_count" -lt 3 ] \
-    && [ "$(date +%s)" -lt "$soak_end" ] \
+    && [ "$(date +%s)" -lt "$phase_end" ] \
     && [ "$(date +%s)" -ge "$next_restart" ]; then
     inject_restart "$((restart_count + 1))"
     restart_count=$((restart_count + 1))

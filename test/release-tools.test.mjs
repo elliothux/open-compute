@@ -392,11 +392,11 @@ test("release qualification and local Docker diagnostic keep their exact boundar
   assert.doesNotMatch(workflow, /^cache-mode:/m);
   assert.match(
     workflow,
-    /  coverage-shards:\n    needs: \[failfast, fixture-images, package-linux-x64\]\n/,
+    /  coverage-shards:\n    needs: \[failfast, fixture-images\]\n/,
   );
   assert.match(
     workflow,
-    /name: Collect Rust coverage shard\n\s+env:\n\s+CARGO_BUILD_JOBS: "2"\n\s+OPEN_COMPUTE_COVERAGE_HTML: "0"\n\s+run: \|\n\s+bash test\/containers-fixture\/with-ci-linux-engine\.sh[\s\S]*?--command env OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO=1 \.\/test\/coverage\.sh --shard \$\{\{ matrix\.shard \}\}\/3 --jobs 2/,
+    /name: Collect Rust coverage shard[\s\S]*?OPEN_COMPUTE_COVERAGE_IMAGES:[\s\S]*?OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO: "1"[\s\S]*?run: \.\/test\/coverage\.sh --shard \$\{\{ matrix\.shard \}\}\/3 --jobs 2/,
   );
   assert.doesNotMatch(workflow, /\n  integration:/);
   assert.match(
@@ -449,7 +449,7 @@ test("release qualification and local Docker diagnostic keep their exact boundar
   );
   assert.doesNotMatch(
     workflow + ci + rustSetup,
-    /Swatinem\/rust-cache|sccache|rust-cache-key|rust-cache-save/,
+    /Swatinem\/rust-cache|rust-cache-key|rust-cache-save/,
   );
   assert.match(
     workflow,
@@ -593,34 +593,86 @@ test("release qualification and local Docker diagnostic keep their exact boundar
   assert.doesNotMatch(workflow, /tolerate-republish/);
 });
 
-test("Linux qualification reuses same-run packages without a dependency cycle or debug Broker build", async () => {
+test("coverage starts beside packages and builds only its Containers broker from source", async () => {
   const workflow = await readFile(releaseWorkflowPath, "utf8");
-  for (const name of ["coverage-shards"]) {
-    const job = workflow.split(`\n  ${name}:`)[1].split(/\n  [a-z][a-z-]*:/)[0];
-    assert.match(job, /needs: \[failfast, fixture-images, package-linux-x64\]/);
-    assert.match(
-      job,
-      /actions\/download-artifact@v8\n\s+with:\n\s+name: release-linux-x64/,
-    );
-    assert.match(
-      job,
-      /bun scripts\/verify-release-package\.ts "\$RUNNER_TEMP\/release-broker"/,
-    );
-    assert.match(
-      job,
-      /--binary "\$RUNNER_TEMP\/release-broker\/ocd-\$\{\{ needs\.package-linux-x64\.outputs\.tag \}\}-linux-x64"/,
-    );
-    assert.doesNotMatch(job, /cargo build|target\/debug\/ocd/);
-    // Only the verified fixture images may come from another run; the Broker is this run's package.
-    assert.deepEqual(job.match(/run-id: .*/g), [
-      "run-id: ${{ inputs.fixture-run-id }}",
-    ]);
-  }
+  const job = workflow
+    .split("\n  coverage-shards:")[1]
+    .split(/\n  [a-z][a-z-]*:/)[0];
+  assert.match(job, /needs: \[failfast, fixture-images\]/);
+  assert.doesNotMatch(
+    job,
+    /needs\.package|release-broker|name: release-linux-x64/,
+  );
+  assert.match(job, /inputs.target == 'linux-x64'/);
+  assert.ok(
+    job.indexOf("name: Verify candidate fixture provenance") <
+      job.indexOf("uses: .\/.github/actions/prepare-container-fixture-images"),
+  );
+  assert.deepEqual(job.match(/run-id: .*/g), [
+    "run-id: ${{ inputs.fixture-run-id }}",
+  ]);
+  const coverage = await readFile(
+    new URL("./coverage.sh", import.meta.url),
+    "utf8",
+  );
+  assert.match(
+    coverage,
+    /cargo test --locked --offline --all-features --no-run --workspace --all-targets/,
+  );
+  assert.match(coverage, /--binary "\$CARGO_TARGET_DIR\/debug\/ocd"/);
+  assert.match(
+    coverage,
+    /"containers" not in json.load\(sys.stdin\)\["targets"\]/,
+  );
+  assert.ok(
+    coverage.indexOf('eval "$coverage_env"') <
+      coverage.indexOf("cargo test --locked"),
+  );
+  assert.match(job, /zstd -T0/);
+  assert.match(workflow, /tar --use-compress-program=zstd -xf/);
   const packageJob = workflow
     .split("\n  package-other:")[1]
     .split("\n  package-linux-x64:")[0];
   assert.match(packageJob, /needs: \[failfast, fixture-images\]/);
   assert.doesNotMatch(packageJob, /needs:.*(?:coverage|integration)/);
+});
+
+test("Cargo-heavy jobs opt into the pinned compiler cache and report statistics", async () => {
+  const setup = await readFile(
+    new URL(
+      "../.github/actions/setup-open-compute/action.yml",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  assert.match(setup, /mozilla-actions\/sccache-action@v0\.0\.11/);
+  for (const setting of [
+    "SCCACHE_GHA_ENABLED=true",
+    "RUSTC_WRAPPER=sccache",
+    "CARGO_INCREMENTAL=0",
+  ])
+    assert.ok(setup.includes(setting));
+  assert.match(
+    setup,
+    /SCCACHE_GHA_ENABLED=true SCCACHE_IDLE_TIMEOUT=0 sccache --start-server/,
+  );
+  for (const [file, jobs] of [
+    [releaseWorkflowPath, ["coverage-shards", "package-other"]],
+    [
+      new URL("../.github/workflows/ci.yml", import.meta.url),
+      ["checks", "product-gates"],
+    ],
+  ]) {
+    const workflow = await readFile(file, "utf8");
+    for (const name of jobs) {
+      const body = workflow
+        .split(`\n  ${name}:`)[1]
+        .split(/\n  [a-z][a-z-]*:/)[0];
+      assert.match(body, /sccache: "true"/);
+      assert.match(body, /if: always\(\) && env.RUSTC_WRAPPER == 'sccache'/);
+      assert.match(body, /sccache --show-stats/);
+    }
+  }
 });
 
 test("recovery rebuilds the stress index without accepting failed or unknown results", async () => {
@@ -1302,6 +1354,20 @@ test("manual native qualification preserves immutable inputs and cannot publish"
   const step = workflow.jobs["package-other"].steps.find(
     (step) => step.id === "candidate",
   );
+  const coverageSteps = workflow.jobs["coverage-shards"].steps;
+  assert.deepEqual(
+    coverageSteps.find((step) => step.id === "candidate"),
+    step,
+  );
+  assert.ok(
+    coverageSteps.indexOf(
+      coverageSteps.find((step) => step.id === "candidate"),
+    ) <
+      coverageSteps.findIndex(
+        (step) =>
+          step.uses === "./.github/actions/prepare-container-fixture-images",
+      ),
+  );
   const check = new (Object.getPrototypeOf(async function () {}).constructor)(
     "github",
     "context",
@@ -1596,15 +1662,11 @@ test("native ARM fixture provenance binds the exact source, tree and workflow", 
   }
 });
 
-test("release coverage partitions wait only for x64 and publish waits for their merged result", async () => {
+test("release coverage partitions start independently and publish waits for their merged result", async () => {
   const { jobs } = await parseWorkflow(releaseWorkflowPath);
   const shards = jobs["coverage-shards"];
   assert.deepEqual(shards.strategy.matrix.shard, [1, 2, 3]);
-  assert.deepEqual(shards.needs, [
-    "failfast",
-    "fixture-images",
-    "package-linux-x64",
-  ]);
+  assert.deepEqual(shards.needs, ["failfast", "fixture-images"]);
   assert.equal(jobs.coverage.needs, "coverage-shards");
   assert.deepEqual(
     jobs["package-linux-x64"].steps,

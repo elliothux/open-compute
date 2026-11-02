@@ -89,7 +89,7 @@ object_list="$OPEN_COMPUTE_COVERAGE_RUN_DIR/object-list"
 if [ "$mode" = run ]; then
   mkdir -p "$OPEN_COMPUTE_COVERAGE_RUN_DIR/profiles"
   # Use cargo-llvm-cov's external-runner contract in its own existing build cache.
-  ./test/gate.py --workspace --list "$@" >/dev/null
+  gate_plan=$(./test/gate.py --workspace --list "$@")
   coverage_env=$(cargo llvm-cov show-env --sh)
   eval "$coverage_env"
   # Merge child-process profiles into LLVM's bounded pool instead of creating one
@@ -105,11 +105,29 @@ if [ "$mode" = run ]; then
     export RUSTFLAGS="${cov_flags}${RUSTFLAGS:+ $RUSTFLAGS}"
   fi
   unset RUSTC_WRAPPER
+  if [ "${GITHUB_ACTIONS:-}" = true ] && [ "$(uname -s)" = Linux ] \
+    && [ "${SCCACHE_GHA_ENABLED:-}" = true ]; then
+    export RUSTC_WRAPPER=sccache
+  fi
   export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-1}"
   if [ "${OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO:-}" = 1 ]; then
-    ./test/test-p0-2-egress-linux.sh --workspace "$@"
+    set -- ./test/test-p0-2-egress-linux.sh --workspace "$@"
   else
-    ./test/gate.py --workspace "$@"
+    set -- ./test/gate.py --workspace "$@"
+  fi
+  if [ -n "${OPEN_COMPUTE_COVERAGE_IMAGES:-}" ] \
+    && printf '%s' "$gate_plan" | python3 -c 'import json,sys; sys.exit("containers" not in json.load(sys.stdin)["targets"])'; then
+    # Match Gate's full feature graph, including dev dependencies, so its broker
+    # and test objects are reused without recompiling or losing exact profile inputs.
+    cargo test --locked --offline --all-features --no-run --workspace --all-targets
+    bash test/containers-fixture/with-ci-linux-engine.sh \
+      --images "$OPEN_COMPUTE_COVERAGE_IMAGES" \
+      --binary "$CARGO_TARGET_DIR/debug/ocd" \
+      --root /tmp/oc-ci-coverage \
+      --evidence "$PWD/.temp/containers-ci-engine" \
+      --command env OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO=1 "$@"
+  else
+    "$@"
   fi
 
   if [ "$sharded" = 1 ]; then

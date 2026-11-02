@@ -78,6 +78,7 @@ jobs:
           lfs: true
       - uses: ./.github/actions/setup-open-compute
         with:
+          sccache: "true"
           rust-components: ${{ matrix.rust_components }}
       - uses: ./.github/actions/prepare-container-fixture-images
       - name: Build and typecheck current runtime and tooling assets
@@ -115,6 +116,9 @@ jobs:
       - name: dependency boundaries
         if: matrix.suite == 'core'
         run: ./test/check-boundaries.sh
+      - name: Show compiler cache statistics
+        if: always() && env.RUSTC_WRAPPER == 'sccache'
+        run: sccache --show-stats
 
   product-gates:
     needs: [failfast, fixture-images]
@@ -126,6 +130,7 @@ jobs:
           lfs: true
       - uses: ./.github/actions/setup-open-compute
         with:
+          sccache: "true"
           browser-fixture: ${{ contains(needs.failfast.outputs.gate_targets, 'browser') && 'true' || 'false' }}
       - uses: ./.github/actions/prepare-container-fixture-images
         id: container-images
@@ -165,6 +170,9 @@ jobs:
           name: affected-product-gate-failures
           include-hidden-files: true
           path: .temp/gate-run/failed/
+      - name: Show compiler cache statistics
+        if: always() && env.RUSTC_WRAPPER == 'sccache'
+        run: sccache --show-stats
 
   frontend-checks:
     needs: failfast

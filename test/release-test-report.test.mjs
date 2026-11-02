@@ -25,7 +25,7 @@ test("release report requires one workspace coverage pass and all supported nati
     "utf8",
   );
   assert.doesNotMatch(workflow, /\n  integration:/);
-  assert.equal(workflow.match(/--command .*test\/coverage\.sh/g)?.length, 1);
+  assert.equal(workflow.match(/run: .*test\/coverage\.sh --shard/g)?.length, 1);
   assert.deepEqual(gateEvidence, [
     "coverage-shard-1",
     "coverage-shard-2",
@@ -110,10 +110,10 @@ test("release report publishes selected metrics and escaped case names; rejects 
   await writeJson(gatePath, gate);
   const stressPath = join(directory, "stress-qualification/qualification.json");
   const stress = JSON.parse(await readFile(stressPath, "utf8"));
-  assert.equal(report.stress.budgetSeconds, 3600);
-  assert.equal(report.stress.seconds, 3540);
+  assert.equal(report.stress.budgetSeconds, 2400);
+  assert.equal(report.stress.seconds, 1440);
   assert.doesNotMatch(rendered.html, /soak duration: one hour/);
-  for (const seconds of [0, 3601]) {
+  for (const seconds of [2401]) {
     stress.seconds = seconds;
     await writeJson(stressPath, stress);
     await assert.rejects(
@@ -121,20 +121,26 @@ test("release report publishes selected metrics and escaped case names; rejects 
       /stress budget/,
     );
   }
-  stress.seconds = 3509.75;
+  stress.seconds = 0;
   await writeJson(stressPath, stress);
   await assert.rejects(
     releaseTestReport(directory, identity, digest),
     /stage durations/,
   );
-  stress.seconds = 3540;
-  stress.runs.at(-1).soak.events.at(-1).elapsed_sec = 1799;
+  stress.seconds = 1409.75;
   await writeJson(stressPath, stress);
   await assert.rejects(
     releaseTestReport(directory, identity, digest),
-    /minimum 30-minute soak/,
+    /stage durations/,
   );
-  stress.runs.at(-1).soak.events.at(-1).elapsed_sec = 2700;
+  stress.seconds = 1440;
+  stress.runs.at(-1).soak.events.at(-1).elapsed_sec = 599;
+  await writeJson(stressPath, stress);
+  await assert.rejects(
+    releaseTestReport(directory, identity, digest),
+    /minimum 10-minute restart-recovery soak/,
+  );
+  stress.runs.at(-1).soak.events.at(-1).elapsed_sec = 600;
   stress.runs[3].seconds = 659;
   await writeJson(stressPath, stress);
   await assert.rejects(

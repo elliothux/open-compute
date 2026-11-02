@@ -1232,6 +1232,73 @@ if '--list' not in sys.argv:
                                         env=environment, timeout=10)
                 self.assertEqual(result.returncode, 1)
 
+    def test_coverage_ci_broker_shares_flags_target_and_wrapper_only_on_its_shard(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / 'test/containers-fixture').mkdir(parents=True)
+            script = root / 'test/coverage.sh'
+            shutil.copy2(gate.ROOT / 'test/coverage.sh', script)
+            (root / 'workerd').touch()
+            sources = {
+                'cargo': """import os,sys
+from pathlib import Path
+args = sys.argv[1:]
+if args[:2] == ['llvm-cov', 'show-env']:
+    print("export CARGO_LLVM_COV=1 RUSTC_WRAPPER=llvm-cov-wrapper CARGO_LLVM_COV_SHOW_ENV=1")
+    print("export __CARGO_LLVM_COV_RUSTC_WRAPPER_RUSTFLAGS='-C\\037instrument-coverage'")
+elif args[:1] == ['test']:
+    assert args == ['test', '--locked', '--offline', '--all-features', '--no-run', '--workspace', '--all-targets']
+    assert os.environ['RUSTC_WRAPPER'] == 'sccache'
+    assert 'instrument-coverage' in os.environ['RUSTFLAGS']
+    assert Path(os.environ['CARGO_TARGET_DIR']).resolve() == Path.cwd() / 'target/llvm-cov-target'
+    path = Path(os.environ['CARGO_TARGET_DIR']) / 'debug/ocd'
+    path.parent.mkdir(parents=True)
+    path.touch()
+    Path('broker-built').touch()
+elif args not in (['llvm-cov', '--version'], ['fetch', '--locked']):
+    sys.exit(9)
+""",
+                'uname': "print('Linux')",
+                'test/gate.py': """import os,sys,json
+from pathlib import Path
+containers = '--shard=2/3' in sys.argv
+if '--list' in sys.argv:
+    print(json.dumps({'targets': ['containers'] if containers else ['kv']}))
+else:
+    assert ('RUSTC_WRAPPER' in os.environ) == (os.environ.get('GITHUB_ACTIONS') == 'true')
+    assert os.environ.get('RUSTC_WRAPPER', 'sccache') == 'sccache'
+    assert 'CARGO_LLVM_COV_SHOW_ENV' not in os.environ
+    assert 'instrument-coverage' in os.environ['RUSTFLAGS']
+    assert Path('broker-built').exists() == containers
+    assert os.environ.get('FIXTURE_BROKER') == ('1' if containers else None)
+""",
+            }
+            for name, source in sources.items():
+                path = root / name
+                path.write_text(f'#!{sys.executable}\n' + source)
+                path.chmod(0o700)
+            wrapper = root / 'test/containers-fixture/with-ci-linux-engine.sh'
+            wrapper.write_text("""#!/bin/bash
+set -eu
+[ "$CARGO_LLVM_COV/$RUSTC_WRAPPER" = '1/sccache' ]
+[ -n "$LLVM_PROFILE_FILE" ]
+while [ "$1" != --binary ]; do shift; done
+[ "$2" = "$CARGO_TARGET_DIR/debug/ocd" ]
+while [ "$1" != --command ]; do shift; done
+shift
+exec env FIXTURE_BROKER=1 "$@"
+""")
+            environment = {'PATH': str(root) + os.pathsep + os.environ['PATH'],
+                           'OPEN_COMPUTE_TEST_WORKERD': str(root / 'workerd'),
+                           'OPEN_COMPUTE_COVERAGE_IMAGES': str(root / 'images'),
+                           'SCCACHE_GHA_ENABLED': 'true', 'GITHUB_ACTIONS': 'true',
+                           'RUSTC_WRAPPER': 'sccache'}
+            for shard, ci in [('1/3', 'true'), ('3/3', 'false'), ('2/3', 'true')]:
+                environment['GITHUB_ACTIONS'] = ci
+                result = subprocess.run([str(script), '--shard=' + shard],
+                                        capture_output=True, env=environment, timeout=10)
+                self.assertEqual(result.returncode, 0, result.stderr.decode())
+
     def test_report_source_identity_ignores_designs_and_python_caches_but_includes_runtime_inputs(self):
         names = ['crates/service/src/resources.rs', 'docs/references/runbooks/install.md',
                  'docs/plan.md', 'docs/implemented/report.md',

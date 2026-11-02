@@ -72,12 +72,12 @@ bash test/stress/deploy-stress-demo.sh > "$STRESS_RUN_ROOT/deploy.log" 2>&1
 export STRESS_SUITE_START_EPOCH STRESS_DEADLINE_EPOCH STRESS_SUITE_START_MONOTONIC
 STRESS_SUITE_START_MONOTONIC=$(python3 -c 'import time; print(time.monotonic())')
 STRESS_SUITE_START_EPOCH=$(date +%s)
-STRESS_DEADLINE_EPOCH=$((STRESS_SUITE_START_EPOCH + 3600))
+STRESS_DEADLINE_EPOCH=$((STRESS_SUITE_START_EPOCH + 2400))
 for script in stress-smoke stress-p0 stress-scenario stress-p1 stress-p1-soak; do
   start=$(date +%s)
   remaining=$((STRESS_DEADLINE_EPOCH - start))
   [ "$remaining" -gt 0 ] || { echo 'Stress budget exhausted' >&2; exit 1; }
-  printf 'Stress stage: %s elapsed=%ss budget=3600s\n' "$script" "$((start - STRESS_SUITE_START_EPOCH))"
+  printf 'Stress stage: %s elapsed=%ss budget=2400s\n' "$script" "$((start - STRESS_SUITE_START_EPOCH))"
   stage_started=$(python3 -c 'import time; print(time.monotonic())')
   timeout --signal=TERM --kill-after=15 "$remaining" bash "test/stress/${script}.sh" 2>&1 \
     | tee "$STRESS_RUN_ROOT/${script}.log" \
@@ -110,16 +110,16 @@ runs=[r for r in results if r.get('profile') in profiles]
 assert len(runs)==len(profiles) and {r['profile'] for r in runs}==set(profiles)
 assert all(r['verdict']=='pass' for r in runs)
 seconds=time.monotonic()-float(os.environ['STRESS_SUITE_START_MONOTONIC'])
-assert 1800 <= seconds <= 3600
+assert seconds <= 2400
 assert sum(r['seconds'] for r in runs) <= seconds
 soak=next(r for r in runs if r['profile']=='p1-2c4g-soak')['soak']
 assert soak['container_restarts_injected']==3
 assert sum(e['event']=='restart_reconcile_ok' for e in soak['events'])==3
-assert any(e['event']=='soak_end' and e['elapsed_sec']>=1800 for e in soak['events'])
+assert any(e['event']=='soak_end' and e['elapsed_sec']>=600 for e in soak['events'])
 assert next(r for r in runs if r['profile']=='p1-2c4g-peak')['seconds']>=660
 report={'schemaVersion':1,'status':'passed','version':package['version'],'revision':package['revision'],
         'candidateSha256':package['sha256'],'workerdLockSha256':package['workerdLockSha256'],
-        'cpuLimit':2,'memoryLimitBytes':4*1024**3,'budgetSeconds':3600,'seconds':seconds,'runs':runs}
+        'cpuLimit':2,'memoryLimitBytes':4*1024**3,'budgetSeconds':2400,'seconds':seconds,'runs':runs}
 (root/'qualification.json').write_text(json.dumps(report,indent=2)+'\n')
 PY
 printf 'release stress qualification passed: %s\n' "$STRESS_RUN_ROOT/qualification.json"

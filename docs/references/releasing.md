@@ -89,7 +89,8 @@ parser，producer 在写报告前即调用 consumer parser；schema 漂移不再
 
 三个正式平台在校验后并行打包。`package-linux-x64` 构建 Linux x64，`package-other` 用同一步骤构建 Darwin ARM64 和 Linux ARM64。
 `package` 等待三个平台成功；安装、stress、assemble 和 publish 仍等待全部包。
-三个 coverage shard 只等待 Linux x64 包，每片先验证包，再将包作为 Container Broker，在 Linux engine 和受控 egress 中执行 workspace 子集。
+三个 coverage shard 与 package 并行，只依赖 `failfast` 和 `fixture-images`；候选 dispatch 在各片下载前独立验证 fixture run 来源。
+只有含 `containers` 的第二片在 coverage 环境与 target 目录中先执行 Gate 的完整 workspace `cargo test --no-run` 构建，得到本提交的 test-support Broker，再进入 Linux engine；三片都在受控 egress 中执行 workspace 子集。
 `coverage` 合并三片的原始 profile 和各片的精确 object 集合，再检查 90.00% 行覆盖率；release report 要求三片各有一份成功的 Gate 报告。
 静态资格直接复用 release source commit 已通过的 main `ci`，不在 tag workflow 重跑。
 三个原生 runner 使用正式 workerd lock 打包自己的 `ocd`，并以 `OPEN_COMPUTE_TEST_OCD` 跑单文件隔离、
@@ -112,7 +113,8 @@ artifact 完全一致，则把它视为此前调用结果未知但发布已完�
 只读 `assemble` job 只接受三个精确命名的二进制和对应 package report；它重新核对版本、revision、workerd pin、
 lock SHA-256、文件大小与文件 SHA-256。组装还必须等待 coverage、gateway、AI/S3 provider、安装生命周期和 stress 全部成功，读取各 job 的同提交证据生成品牌 HTML 与 JSON 报告，将报告摘要和大小写入 `release.json`，并加入 `SHA256SUMS`。
 
-`stress` 使用已打包的 Linux x64 候选，在独立 Compose project 中实际限制 2 CPU / 4 GiB，在 60 分钟预算内依次执行 smoke、P0、scenario、P1 peak 和恢复 soak。每个峰值负载档持续 60 秒，原并发、速率和 SLO 保持。soak 使用预算中的剩余时间，至少持续 30 分钟，并完成 3 次重启和恢复核验。
+`stress` 使用已打包的 Linux x64 候选，在独立 Compose project 中实际限制 2 CPU / 4 GiB，在 40 分钟预算内依次执行 smoke、P0、scenario、P1 peak 和恢复 soak。每个峰值负载档持续 60 秒，原并发、速率和 SLO 保持。soak 固定以 600 秒为目标，轮换上限 60 秒、重启间隔 150 秒，完成 3 次重启和恢复核验。轮换包含 readiness 耗时，并为剩余 stack 分配重启开销；每个 stack 都必须有样本。
+600 秒结束时若还缺恢复核验，继续轮换至三次完成；整个 soak 在 suite deadline 前 60 秒强制结束，保留 drain 时间。
 
 预算从部署完成后开始；CI 另留 15 分钟用于准备、清理和上传。阶段耗时和总耗时应写入报告。超时、缩减负载档、零样本、超出错误率或延迟 SLO、缺失 stack、重启失败或恢复未验证均阻止发布。报告包含 Gate case、耗时、覆盖率、安装/升级步骤、逐 stack 样本和 p50/p95/p99、阈值以及恢复重启次数；只输出选定字段，不包含凭据、原始日志、API payload 或主机路径。
 
@@ -203,8 +205,8 @@ git tag -a vX.Y.Z -m "open-compute vX.Y.Z"
 git push origin vX.Y.Z
 ```
 
-每个 coverage shard 显式构建资产并准备锁定依赖，只等待 Linux x64 package 成功，再复用同次运行的包作为 Broker。
-入口先核对包报告的版本、revision、target、pin、长度和摘要，再查询二进制的嵌入身份；1 GiB 文件上限保持不变。
+每个 coverage shard 显式构建资产并准备锁定依赖，与 package 独立运行。Broker 来自本提交的完整插桩构建，Gate 复用相同 feature graph、普通二进制与测试产物，只重复 Cargo 的 fresh 检查；包仍由自己的 `single-binary` Gate、安装生命周期和 stress 验证。
+原始 profile 与精确 object 使用 `zstd -T0` 归档，上传关闭二次压缩，merge 解包后保持相同输入集合。
 merge 等待所有 shard；publish 等待三个正式平台包与完整成功证据。任务依赖见 [CI 构建性能](ci-build-performance.md#当前执行分工)。
 
 push tag 是唯一发布触发器。随后在 GitHub Actions 的 `release` workflow 中确认所有 qualification、

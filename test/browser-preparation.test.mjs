@@ -62,7 +62,9 @@ test("CI browser AppArmor authorization and always cleanup preserve failure prop
       /"\$OPEN_COMPUTE_CI_BROWSER_APPARMOR_EXECUTABLE"/,
     );
     assert.ok(
-      steps.slice(0, index).some((step) => step.run?.includes("--command")),
+      steps
+        .slice(0, index)
+        .some((step) => step.run?.includes("./test/coverage.sh")),
     );
     assert.ok(
       steps

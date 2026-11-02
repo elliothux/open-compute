@@ -34,6 +34,9 @@ ASSET_ENV = ('OPEN_COMPUTE_TEST_WORKERD', 'OPEN_COMPUTE_BUILD_CADDY',
 BUILD_ENV = ('RUSTUP_TOOLCHAIN', 'RUSTFLAGS', 'CARGO_TARGET_DIR', 'CARGO_BUILD_BUILD_DIR',
     'CARGO_BUILD_JOBS', 'CARGO_NET_OFFLINE', 'CARGO_INCREMENTAL', 'CARGO_PROFILE_DEV_DEBUG',
     'CARGO_PROFILE_TEST_DEBUG', 'CARGO_HOME', 'RUSTUP_HOME',
+    'RUSTC_WRAPPER', 'CARGO_ENCODED_RUSTFLAGS', 'CARGO_LLVM_COV',
+    'CARGO_LLVM_COV_TARGET_DIR', 'LLVM_PROFILE_FILE', 'OPEN_COMPUTE_COVERAGE_RUN_DIR',
+    '__CARGO_LLVM_COV_RUSTC_WRAPPER_RUSTFLAGS',
     'MALLOC_CONF', 'OPEN_COMPUTE_GATE_ROUNDS',
     'OPEN_COMPUTE_COVERAGE_HTML', 'GITHUB_ACTIONS', 'CI')
 
@@ -126,6 +129,7 @@ def relay_gate_progress(log):
 def command_environment(root, source):
     environment = {key: source[key] for key in ('PATH', 'HOME', 'USER', 'LOGNAME', 'LANG', 'TMPDIR',
         *ASSET_ENV, *BUILD_ENV) if key in source}
+    environment.update((key, value) for key, value in source.items() if key.startswith('SCCACHE_'))
     environment['DOCKER_CONFIG'] = str(root / 'docker-config')
     return environment
 

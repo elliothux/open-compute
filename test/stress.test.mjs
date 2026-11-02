@@ -170,6 +170,15 @@ for name in http kv d1 r2 queue do workflow fetch scenario_mega; do
   run_stack_soak "$name" 300
   [ "$stack" = "$name" ]
 done
+STRESS_DEADLINE_EPOCH=2000
+printf '1000' > "$STRESS_RUN_DIR/clock"
+date() { cat "$STRESS_RUN_DIR/clock"; }
+recover_calls=0
+recover_before_sample() { recover_calls=$((recover_calls + 1)); printf '1020' > "$STRESS_RUN_DIR/clock"; }
+run_stack_soak http 60
+[ "$recover_calls" -eq 1 ]
+printf '1000' > "$STRESS_RUN_DIR/clock"
+if run_stack_soak http 10; then exit 10; fi
 `,
     ],
     {
@@ -195,7 +204,7 @@ done
       "scenario_mega",
     ]
       .map((name) => `${name} 300\n`)
-      .join(""),
+      .join("") + "http 40\n",
   );
   await rm(directory, { recursive: true });
 });
@@ -230,7 +239,7 @@ test("release qualification selects five stages and retains soak recovery eviden
     ];
     const events = [
       ...Array.from({ length: 3 }, () => ({ event: "restart_reconcile_ok" })),
-      { event: "soak_end", elapsed_sec: 2700 },
+      { event: "soak_end", elapsed_sec: 600 },
     ];
     for (const [index, profile] of [
       ...profiles,
@@ -245,7 +254,7 @@ test("release qualification selects five stages and retains soak recovery eviden
           profile,
           verdict: "pass",
           seconds: profile.endsWith("soak")
-            ? 2700
+            ? 600
             : profile.endsWith("peak")
               ? 720
               : 30,
@@ -258,7 +267,7 @@ test("release qualification selects five stages and retains soak recovery eviden
     const collect = async () => {
       const { stdout: started } = await exec("python3", [
         "-c",
-        "import time; print(time.monotonic() - 3540)",
+        "import time; print(time.monotonic() - 1440)",
       ]);
       return exec("python3", ["-c", collector, directory, packagePath], {
         env: {
@@ -587,7 +596,7 @@ ${configuration}`;
   await rm(directory, { recursive: true });
 });
 
-test("release soak fits the remaining budget and covers every stack with exactly three recoveries", async () => {
+test("release soak uses ten minutes, extends for late recoveries, and stops at its reserve", async () => {
   const directory = await fixture();
   try {
     const source = await readFile(
@@ -613,17 +622,18 @@ test("release soak fits the remaining budget and covers every stack with exactly
       ${configure}
       STRESS_DEADLINE_EPOCH=3400
       configure_soak_schedule
-      [ "$SOAK_TOTAL_SEC/$ROTATE_SEC/$RESTART_INTERVAL_SEC" = '2340/120/585' ]
+      [ "$SOAK_TOTAL_SEC/$ROTATE_SEC/$RESTART_INTERVAL_SEC" = '600/60/150' ]
       SOAK_INJECT_RESTART=1
-      run_stack_soak() { echo "stack:$1" >> "$TRACE"; advance "$(( $2 + 30 ))"; }
-      inject_restart() { echo "restart:$1" >> "$TRACE"; advance 90; }
+      run_stack_soak() { echo "stack:$1" >> "$TRACE"; advance "$(( $2 + \${STACK_DELAY:-0} ))"; }
+      inject_restart() { echo "restart:$1" >> "$TRACE"; advance "\${RESTART_DELAY:-0}"; }
       log_soak_event() { :; }
       anomaly_count() { echo 0; }
       check_health_post_run() { :; }
       base_url=fixture
       ${source.slice(start, end)}
       [ "$restart_count" -eq 3 ]
-      [ "$(cat "$CLOCK")" -le 3400 ]
+      [ "$(cat "$CLOCK")" -ge 1600 ]
+      [ "$(cat "$CLOCK")" -le 3340 ]
     `;
     await exec("bash", ["-c", setup], { env, timeout: 5000 });
     const trace = (await readFile(env.TRACE, "utf8")).trim().split("\n");
@@ -643,7 +653,37 @@ test("release soak fits the remaining budget and covers every stack with exactly
       "scenario_mega",
     ])
       assert.ok(trace.includes(`stack:${stack}`), stack);
-    for (const deadline of ["2859", "invalid"]) {
+    await writeFile(clock, "1000");
+    await exec("bash", ["-c", setup], {
+      env: { ...env, STACK_DELAY: "180" },
+      timeout: 5000,
+    });
+    assert.ok(Number(await readFile(clock, "utf8")) > 1600);
+    await writeFile(clock, "1000");
+    await assert.rejects(
+      exec(
+        "bash",
+        [
+          "-c",
+          setup.replace(
+            "STRESS_DEADLINE_EPOCH=3400",
+            "STRESS_DEADLINE_EPOCH=1660",
+          ),
+        ],
+        { env: { ...env, STACK_DELAY: "180" }, timeout: 5000 },
+      ),
+    );
+    await writeFile(clock, "1000");
+    await exec(
+      "bash",
+      [
+        "-c",
+        `set -eu; ${configure}; SOAK_TOTAL_SEC=3600; ROTATE_SEC=300; RESTART_INTERVAL_SEC=900;
+      configure_soak_schedule; [ "$SOAK_TOTAL_SEC/$ROTATE_SEC/$RESTART_INTERVAL_SEC" = '3600/300/900' ]`,
+      ],
+      { env },
+    );
+    for (const deadline of ["1659", "invalid"]) {
       await writeFile(clock, "1000");
       await assert.rejects(
         exec(

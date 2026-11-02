@@ -15,9 +15,9 @@ source .temp/stress-run/.deploy_env
 
 ## Release qualification
 
-`./test/stress/qualify-release.sh ABS_CANDIDATE ABS_PACKAGE_REPORT` verifies the packaged Linux x64 executable and its source/runtime identity. The qualifier builds local images and runs five stages within a 60-minute suite budget. Docker enforces 2 CPUs and 4 GiB memory. The qualifier must not search or signal host workerd processes. Injected restarts select this project's `ocd` service. Each restart requires readiness and reconciliation checks.
+`./test/stress/qualify-release.sh ABS_CANDIDATE ABS_PACKAGE_REPORT` verifies the packaged Linux x64 executable and its source/runtime identity. The qualifier builds local images and runs five stages within a 40-minute suite budget. Docker enforces 2 CPUs and 4 GiB memory. The qualifier must not search or signal host workerd processes. Injected restarts select this project's `ocd` service. Each restart requires readiness and reconciliation checks.
 
-The suite clock starts after image preparation and deployment. Each peak load step lasts 60 seconds at the original rate and concurrency. The remaining time supplies at least 30 minutes of soak, with three verified restarts. The suite fails if it cannot fit these checks within 60 minutes. The CI job reserves another 15 minutes for preparation, cleanup, and artifact upload.
+The suite clock starts after image preparation and deployment. Each peak load step lasts 60 seconds at the original rate and concurrency. Release soak targets 600 seconds, with rotations of at most 60 seconds and restart injections every 150 seconds. Rotations include readiness time and share restart overhead across the remaining stacks so every stack produces samples. Three verified restarts remain required; if they finish late, rotations continue until all three pass. A hard timeout ends every child wait at the suite deadline minus a 60-second drain reserve. The suite fails if it cannot fit these checks within 40 minutes. The CI job reserves another 15 minutes for preparation, cleanup, and artifact upload.
 
 Release qualification rejects abbreviated load profiles, empty samples, excessive errors or latency, missing stack results, and failed recovery. The selected candidate digest and actual container limits accompany the results. Successful fixtures are torn down; failed project volumes and diagnostics remain under `.temp/release-stress/` for investigation. Release publication requires this job to pass and includes branded `test-report.html` plus `test-report.json`, bound into the manifest and SHA256SUMS.
 
@@ -114,7 +114,7 @@ Rate-based phases send one concurrent batch per second and wait for it before st
 
 Inter-stack cooldown defaults to 15 s (`STRESS_P1_COOLDOWN_SEC` to override). Disk preflight requires ≥5 GB free on `.temp/`.
 
-Standalone soak (`stress-p1-soak.sh`) rotates stacks every 5 minutes for one hour. Release qualification rotates stacks every 2 minutes until the suite deadline, with at least 30 minutes of soak. Both paths require three restarts, readiness checks, and reconciliation. The release report records actual phase durations.
+Standalone soak (`stress-p1-soak.sh`) rotates stacks every 5 minutes for one hour. Release qualification uses a minimum 10-minute restart-recovery phase with rotations of at most 60 seconds, extending only for missing restart recoveries within its deadline. Both paths require three restarts, readiness checks, and reconciliation. The release report records actual phase durations.
 
 Abbreviated runs (shorter session): `STRESS_P1_ABBREV=1` (~10% duration/rate), `STRESS_SOAK_ABBREV=1` (15 min soak).
 

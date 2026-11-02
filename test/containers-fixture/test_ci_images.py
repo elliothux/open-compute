@@ -59,7 +59,7 @@ class ImageWorkflowTests(unittest.TestCase):
         self.assertIn('X64) architecture=amd64', consumer)
         self.assertIn('ARM64) architecture=arm64', consumer)
         self.assertIn('name: p23-images-${{ steps.platform.outputs.architecture }}', consumer)
-        # Only coverage reuses a candidate fixture run, after package-linux-x64 verified it.
+        # Every cross-run consumer verifies candidate fixture provenance before download.
         self.assertIn('run-id: ${{ inputs.run-id || github.run_id }}', consumer)
         self.assertLess(consumer.index('test/containers-fixture/consume-images.py'),
                         consumer.index('echo "OPEN_COMPUTE_TEST_CONTAINERS_INPUT='))
@@ -88,19 +88,22 @@ class ImageWorkflowTests(unittest.TestCase):
         command = './test/coverage.sh --shard ${{ matrix.shard }}/3 --jobs 2'
         self.assertIn(command, coverage)
         self.assertIn('shard: [1, 2, 3]', coverage)
-        self.assertIn('needs: [failfast, fixture-images, package-linux-x64]', coverage)
+        self.assertIn('needs: [failfast, fixture-images]', coverage)
         self.assertIn('./test/coverage.sh merge', job(source, 'coverage'))
         self.assertNotIn('\n  integration:', source)
         self.assertEqual(source.count(command), 1)
-        self.assertIn('OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO=1', coverage)
+        self.assertIn('OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO: "1"', coverage)
         self.assertIn('runs-on: ubuntu-24.04', coverage)
         self.assertNotIn('intel', source.lower())
-        for body in (coverage,):
-            self.assertEqual(body.count('test/containers-fixture/with-ci-linux-engine.sh'), 1)
-            verify = body.index('bun scripts/verify-release-package.ts "$RUNNER_TEMP/release-broker"')
-            self.assertLess(verify, body.index('test/containers-fixture/with-ci-linux-engine.sh'))
-            self.assertIn('--binary "$RUNNER_TEMP/release-broker/ocd-${{ needs.package-linux-x64.outputs.tag }}-linux-x64"', body)
-            self.assertIn('.temp/containers-ci-engine/', body)
+        self.assertNotIn('release-broker', coverage)
+        self.assertNotIn('needs.package-linux-x64', coverage)
+        self.assertLess(coverage.index('name: Verify candidate fixture provenance'),
+                        coverage.index(PREPARE))
+        script = (ROOT / 'test/coverage.sh').read_text()
+        self.assertIn('"containers" not in json.load(sys.stdin)["targets"]', script)
+        self.assertIn('cargo test --locked --offline --all-features --no-run --workspace --all-targets', script)
+        self.assertIn('--binary "$CARGO_TARGET_DIR/debug/ocd"', script)
+        self.assertIn('.temp/containers-ci-engine/', coverage)
         matrix = re.search(r"^        include: (.+)$", job(source, 'package-other'), re.MULTILINE)
         self.assertIsNotNone(matrix)
         alternatives = re.findall(r"'(\[.*?\])'", matrix.group(1))
