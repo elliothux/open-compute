@@ -19,7 +19,7 @@ def job(source, name):
 class ImageWorkflowTests(unittest.TestCase):
     def test_each_build_consumer_waits_for_current_run_images(self):
         for workflow, names in [('ci.yml', ('checks', 'product-gates')),
-                                ('release.yml', ('coverage', 'package', 'ai-search-qualification',
+                                ('release.yml', ('coverage-shards', 'package-other', 'ai-search-qualification',
                                                  's3-provider-qualification'))]:
             source = (ROOT / '.github/workflows' / workflow).read_text()
             for name in names:
@@ -27,7 +27,7 @@ class ImageWorkflowTests(unittest.TestCase):
                     body = job(source, name)
                     self.assertRegex(body, r'needs: [^\n]*fixture-images')
                     self.assertEqual(body.count(PREPARE), 1)
-                    build = body.index('bun run build' if name != 'package'
+                    build = body.index('bun run build' if name != 'package-other'
                                        else './scripts/package-release.sh')
                     self.assertLess(body.index('uses: ./.github/actions/setup-open-compute'),
                                     body.index(PREPARE))
@@ -84,10 +84,14 @@ class ImageWorkflowTests(unittest.TestCase):
 
     def test_release_requires_full_linux_workspace_and_coverage(self):
         source = (ROOT / '.github/workflows/release.yml').read_text()
-        coverage = job(source, 'coverage')
-        self.assertIn('./test/coverage.sh --jobs 2', coverage)
+        coverage = job(source, 'coverage-shards')
+        command = './test/coverage.sh --shard ${{ matrix.shard }}/3 --jobs 2'
+        self.assertIn(command, coverage)
+        self.assertIn('shard: [1, 2, 3]', coverage)
+        self.assertIn('needs: [failfast, fixture-images, package-linux-x64]', coverage)
+        self.assertIn('./test/coverage.sh merge', job(source, 'coverage'))
         self.assertNotIn('\n  integration:', source)
-        self.assertEqual(source.count('./test/coverage.sh --jobs 2'), 1)
+        self.assertEqual(source.count(command), 1)
         self.assertIn('OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO=1', coverage)
         self.assertIn('runs-on: ubuntu-24.04', coverage)
         self.assertNotIn('intel', source.lower())
@@ -97,14 +101,17 @@ class ImageWorkflowTests(unittest.TestCase):
             self.assertLess(verify, body.index('test/containers-fixture/with-ci-linux-engine.sh'))
             self.assertIn('--binary "$RUNNER_TEMP/release-broker/ocd-${{ needs.failfast.outputs.tag }}-linux-x64"', body)
             self.assertIn('.temp/containers-ci-engine/', body)
-        matrix = re.search(r"^        include: (.+)$", job(source, 'package'), re.MULTILINE)
+        matrix = re.search(r"^        include: (.+)$", job(source, 'package-other'), re.MULTILINE)
         self.assertIsNotNone(matrix)
         alternatives = re.findall(r"'(\[.*?\])'", matrix.group(1))
         self.assertEqual(json.loads(alternatives[-1]), [
             {"target": "darwin-arm64", "os": "macos-15"},
             {"target": "linux-arm64", "os": "ubuntu-24.04-arm"},
-            {"target": "linux-x64", "os": "ubuntu-24.04"},
         ])
+        linux = job(source, 'package-linux-x64')
+        self.assertIn('target: linux-x64', linux)
+        self.assertIn('steps: *package-steps', linux)
+        self.assertIn('needs: [failfast, package-linux-x64, package-other]', job(source, 'package'))
 
 if __name__ == '__main__':
     unittest.main()
