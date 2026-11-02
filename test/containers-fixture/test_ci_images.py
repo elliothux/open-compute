@@ -59,8 +59,8 @@ class ImageWorkflowTests(unittest.TestCase):
         self.assertIn('X64) architecture=amd64', consumer)
         self.assertIn('ARM64) architecture=arm64', consumer)
         self.assertIn('name: p23-images-${{ steps.platform.outputs.architecture }}', consumer)
-        self.assertNotIn('run-id:', consumer)
-        self.assertNotIn('github-token:', consumer)
+        # Only coverage reuses a candidate fixture run, after package-linux-x64 verified it.
+        self.assertIn('run-id: ${{ inputs.run-id || github.run_id }}', consumer)
         self.assertLess(consumer.index('test/containers-fixture/consume-images.py'),
                         consumer.index('echo "OPEN_COMPUTE_TEST_CONTAINERS_INPUT='))
         self.assertNotIn('"containers":', consumer)
@@ -99,7 +99,7 @@ class ImageWorkflowTests(unittest.TestCase):
             self.assertEqual(body.count('test/containers-fixture/with-ci-linux-engine.sh'), 1)
             verify = body.index('bun scripts/verify-release-package.ts "$RUNNER_TEMP/release-broker"')
             self.assertLess(verify, body.index('test/containers-fixture/with-ci-linux-engine.sh'))
-            self.assertIn('--binary "$RUNNER_TEMP/release-broker/ocd-${{ needs.failfast.outputs.tag }}-linux-x64"', body)
+            self.assertIn('--binary "$RUNNER_TEMP/release-broker/ocd-${{ needs.package-linux-x64.outputs.tag }}-linux-x64"', body)
             self.assertIn('.temp/containers-ci-engine/', body)
         matrix = re.search(r"^        include: (.+)$", job(source, 'package-other'), re.MULTILINE)
         self.assertIsNotNone(matrix)

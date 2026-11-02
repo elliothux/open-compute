@@ -68,6 +68,7 @@ if (args.length === 1 && args[0] === "--list") {
   const results: { id: string; status: "passed" | "failed"; error?: string }[] =
     [];
   for (const id of requested) {
+    const started = performance.now();
     try {
       await checks[id as CaseId]();
       results.push({ id, status: "passed" });
@@ -79,6 +80,9 @@ if (args.length === 1 && args[0] === "--list") {
           error instanceof Error ? error.message : "conformance check failed",
       });
     }
+    // A killed run still shows which case consumed the Gate timeout.
+    const seconds = ((performance.now() - started) / 1000).toFixed(2);
+    process.stderr.write(`${id} ${results.at(-1)!.status} ${seconds}s\n`);
   }
   const status = results.every((result) => result.status === "passed")
     ? "passed"

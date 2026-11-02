@@ -1,6 +1,12 @@
 name: Prepare Container fixture images
 description: Verify this run's native image artifacts and expose image-only build inputs
 
+inputs:
+  run-id:
+    description: Fixture producer run whose provenance the caller already verified; defaults to this run
+    required: false
+    default: ""
+
 outputs:
   directory:
     description: Verified OCI graphs and Docker bootstrap archives
@@ -30,6 +36,8 @@ runs:
       with:
         name: p23-images-${{ steps.platform.outputs.architecture }}
         path: ${{ steps.platform.outputs.directory }}
+        run-id: ${{ inputs.run-id || github.run_id }}
+        github-token: ${{ github.token }}
     - name: Verify current sources, OCI graphs and bootstrap archives
       id: verify
       shell: bash

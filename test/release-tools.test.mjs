@@ -608,9 +608,13 @@ test("Linux qualification reuses same-run packages without a dependency cycle or
     );
     assert.match(
       job,
-      /--binary "\$RUNNER_TEMP\/release-broker\/ocd-\$\{\{ needs\.failfast\.outputs\.tag \}\}-linux-x64"/,
+      /--binary "\$RUNNER_TEMP\/release-broker\/ocd-\$\{\{ needs\.package-linux-x64\.outputs\.tag \}\}-linux-x64"/,
     );
-    assert.doesNotMatch(job, /cargo build|target\/debug\/ocd|run-id:/);
+    assert.doesNotMatch(job, /cargo build|target\/debug\/ocd/);
+    // Only the verified fixture images may come from another run; the Broker is this run's package.
+    assert.deepEqual(job.match(/run-id: .*/g), [
+      "run-id: ${{ inputs.fixture-run-id }}",
+    ]);
   }
   const packageJob = workflow
     .split("\n  package-other:")[1]

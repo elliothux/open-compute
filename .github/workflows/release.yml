@@ -372,6 +372,8 @@ jobs:
 
   coverage-shards:
     needs: [failfast, fixture-images, package-linux-x64]
+    # A candidate dispatch reuses the fixture run that package-linux-x64 already verified.
+    if: ${{ always() && !cancelled() && needs.package-linux-x64.result == 'success' && (github.event_name == 'workflow_dispatch' || (needs.failfast.result == 'success' && needs.fixture-images.result == 'success')) }}
     strategy:
       fail-fast: false
       matrix:
@@ -385,6 +387,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           lfs: true
+          ref: ${{ inputs.candidate-revision || github.sha }}
       - uses: ./.github/actions/setup-open-compute
         with:
           llvm-cov: "true"
@@ -392,6 +395,8 @@ jobs:
           browser-fixture: "true"
       - uses: ./.github/actions/prepare-container-fixture-images
         id: container-images
+        with:
+          run-id: ${{ inputs.fixture-run-id }}
       - name: Build untracked runtime and toolchain assets from this checkout
         run: bun run build
       - uses: actions/download-artifact@v8
@@ -407,7 +412,7 @@ jobs:
         run: |
           bash test/containers-fixture/with-ci-linux-engine.sh \
             --images '${{ steps.container-images.outputs.directory }}' \
-            --binary "$RUNNER_TEMP/release-broker/ocd-${{ needs.failfast.outputs.tag }}-linux-x64" \
+            --binary "$RUNNER_TEMP/release-broker/ocd-${{ needs.package-linux-x64.outputs.tag }}-linux-x64" \
             --root /tmp/oc-ci-coverage \
             --evidence "$PWD/.temp/containers-ci-engine" \
             --command env OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO=1 ./test/coverage.sh --shard ${{ matrix.shard }}/3 --jobs 2
@@ -445,9 +450,12 @@ jobs:
 
   coverage:
     needs: coverage-shards
+    if: ${{ always() && !cancelled() && needs.coverage-shards.result == 'success' }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.candidate-revision || github.sha }}
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.98.0
