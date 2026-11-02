@@ -450,7 +450,8 @@ async fn panels(observer: &BrowserCdp, viewer: &str, target: &str) {
         return {ready:contexts>0,contexts};
     })()"#;
     let mut last = Value::Null;
-    tokio::time::timeout(Duration::from_secs(5), async {
+    // DevTools initializes asynchronously; instrumented CI runners need more than 5 s.
+    tokio::time::timeout(Duration::from_secs(30), async {
         loop {
             let reply = observer
                 .command(
