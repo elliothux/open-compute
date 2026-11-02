@@ -85,7 +85,7 @@ jobs:
           github-token: ${{ github.token }}
       - uses: actions/download-artifact@v8
         with:
-          pattern: "{coverage-gate-evidence,package-gate-*,install-lifecycle-*,stress-qualification}"
+          pattern: "{coverage-gate-evidence,coverage-shard-*,package-gate-*,install-lifecycle-*,stress-qualification}"
           path: .temp/release-evidence
           run-id: ${{ inputs.source_run_id }}
           github-token: ${{ github.token }}

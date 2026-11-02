@@ -12,7 +12,6 @@ use sha2::{Digest, Sha256};
 use std::collections::{HashMap, VecDeque};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek};
-#[cfg(target_os = "macos")]
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;

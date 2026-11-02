@@ -837,6 +837,25 @@ class GateTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'missing registered Gate targets'):
                 gate.resolve_targets([], True)
 
+    def test_coverage_shards_partition_the_real_workspace_without_overlap(self):
+        targets = gate.resolve_targets([], True)
+        shards = [gate.coverage_shard(targets, f'{index}/3') for index in range(1, 4)]
+        assigned = [name for shard in shards for name in shard]
+        self.assertEqual(set(assigned), set(targets))
+        self.assertEqual(len(assigned), len(set(assigned)))
+        for shard in shards:
+            self.assertEqual(gate.SERVICE_LIB_TARGET in shard,
+                             gate.SERVICE_PROCESS_TARGET in shard)
+        self.assertEqual(sum('containers' in shard for shard in shards), 1)
+        for invalid in ('0/3', '4/3', '1/4', '1', 'x/3'):
+            with self.assertRaisesRegex(ValueError, '--shard'):
+                gate.coverage_shard(targets, invalid)
+        with self.assertRaisesRegex(ValueError, 'full workspace target inventory'):
+            gate.coverage_shard({**targets, 'new-cargo-target': next(iter(targets.values()))}, '1/3')
+        with self.assertRaisesRegex(ValueError, 'full workspace target inventory'):
+            gate.coverage_shard({name: target for name, target in targets.items()
+                                 if name != 'containers'}, '1/3')
+
     def test_workspace_rejects_gate_selection_before_build(self):
         with patch.object(gate.sys, 'argv', ['gate.py', '--workspace', 'workers']), \
              patch.object(gate, 'resolve_targets') as resolve:
@@ -1188,6 +1207,31 @@ if '--list' not in sys.argv:
             self.assertEqual(old_profile.read_text(), 'old profile')
             self.assertEqual(len(list((root / '.temp/coverage').iterdir())), 2)
 
+            # A shard collects raw inputs without applying a partial-coverage threshold.
+            result = subprocess.run([str(script), '--shard=1/3'], capture_output=True,
+                                    env=environment, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr.decode())
+            shard = next(path for path in (root / '.temp/coverage').iterdir()
+                         if not (path / 'reports').exists())
+            self.assertEqual((reports / 'summary.json').read_bytes(), successful_report)
+            # Merge needs only LLVM tools, not cargo-llvm-cov or prepared runtimes.
+            environment.pop('OPEN_COMPUTE_TEST_WORKERD')
+            Path(tools['cargo']).write_text(f'#!{sys.executable}\nraise SystemExit(99)\n')
+            environment['FIXTURE_COVERAGE'] = '100'
+            before = set((root / '.temp/coverage').iterdir())
+            result = subprocess.run([str(script), 'merge', str(run), str(shard)],
+                                    capture_output=True, env=environment, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr.decode())
+            merged, = set((root / '.temp/coverage').iterdir()) - before
+            self.assertEqual((merged / 'profraw-list').read_text().splitlines(),
+                             [str(path / 'profiles/current.profraw') for path in (run, shard)])
+            self.assertEqual((merged / 'object-list').read_text().splitlines(),
+                             [str(path / 'objects/current-binary') for path in (run, shard)])
+            for arguments in (['merge'], ['merge', str(cache)]):
+                result = subprocess.run([str(script), *arguments], capture_output=True,
+                                        env=environment, timeout=10)
+                self.assertEqual(result.returncode, 1)
+
     def test_report_source_identity_ignores_designs_and_python_caches_but_includes_runtime_inputs(self):
         names = ['crates/service/src/resources.rs', 'docs/references/runbooks/install.md',
                  'docs/plan.md', 'docs/implemented/report.md',
@@ -1360,6 +1404,33 @@ if '--list' not in sys.argv:
                 with patch.dict(os.environ, {'OPEN_COMPUTE_COVERAGE_RUN_DIR': 'relative'}), \
                      self.assertRaisesRegex(RuntimeError, 'not an owned directory'):
                     gate.build_targets(targets, fourth, True)
+
+    def test_coverage_shard_keeps_only_its_tests_and_shared_child_binaries(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            package = f'path+file://{gate.ROOT}/crates/service#open-compute-service@0.4.0'
+            targets = {name: gate.Target(package, name, 'test', temp, False)
+                       for name in ('one', 'two')}
+            messages = []
+            for name in ('one', 'two', 'child'):
+                binary = root / name
+                binary.write_bytes(name.encode())
+                messages.append({'reason': 'compiler-artifact', 'package_id': package,
+                                 'target': {'name': name, 'kind': ['test' if name != 'child' else 'bin'],
+                                            'test': name != 'child'},
+                                 'profile': {'test': True}, 'executable': str(binary)})
+            result = SimpleNamespace(returncode=0, stdout='\n'.join(map(json.dumps, messages)))
+            with patch.object(gate.subprocess, 'run', return_value=result), \
+                 patch.dict(os.environ, {'CARGO_LLVM_COV': '1'}):
+                for name in targets:
+                    run = root / f'run-{name}'
+                    run.mkdir()
+                    with patch.dict(os.environ, {'OPEN_COMPUTE_COVERAGE_RUN_DIR': str(run)}):
+                        gate.build_targets(targets, run, True, coverage_targets={name})
+                    self.assertEqual({path.read_bytes() for path in (run / 'objects').iterdir()},
+                                     {name.encode(), b'child'})
+            union = {path.read_bytes() for path in root.glob('run-*/objects/*')}
+            self.assertEqual(union, {b'one', b'two', b'child'})
 
     def test_typed_discovery_and_exact_execution_use_strict_json_and_environment(self):
         with tempfile.TemporaryDirectory() as temp, patch.object(gate, 'ROOT', Path(temp)):

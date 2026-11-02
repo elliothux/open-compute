@@ -27,7 +27,9 @@ test("release report requires one workspace coverage pass and all supported nati
   assert.doesNotMatch(workflow, /\n  integration:/);
   assert.equal(workflow.match(/--command .*test\/coverage\.sh/g)?.length, 1);
   assert.deepEqual(gateEvidence, [
-    "coverage-gate-evidence",
+    "coverage-shard-1",
+    "coverage-shard-2",
+    "coverage-shard-3",
     "package-gate-darwin-arm64",
     "package-gate-linux-arm64",
     "package-gate-linux-x64",
@@ -42,7 +44,7 @@ test("release report publishes selected metrics and escaped case names; rejects 
     new URL("../.temp/release-report-tests/run-", import.meta.url).pathname,
   );
   await createReleaseEvidence(directory, identity, digest);
-  const gatePath = join(directory, "coverage-gate-evidence/report.json");
+  const gatePath = join(directory, "coverage-shard-1/report.json");
   const gate = JSON.parse(await readFile(gatePath, "utf8"));
   gate.results[0].targets[0].cases = ['<img src=x onerror="throw 1">'];
   gate.targets.push("open-compute-service.bin.ocd");
@@ -68,10 +70,10 @@ test("release report publishes selected metrics and escaped case names; rejects 
     );
   }
   const report = JSON.parse(rendered.json);
-  assert.equal(report.gates.length, 4);
+  assert.equal(report.gates.length, 6);
   assert.deepEqual(
     report.gates
-      .find((entry) => entry.label === "coverage-gate-evidence")
+      .find((entry) => entry.label === "coverage-shard-1")
       .targets.at(-1).cases,
     [],
   );

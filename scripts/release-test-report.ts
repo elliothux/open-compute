@@ -3,7 +3,9 @@ import { join } from "node:path";
 import type { ReleaseIdentity } from "./assemble-release.ts";
 
 export const gateEvidence = [
-  "coverage-gate-evidence",
+  "coverage-shard-1",
+  "coverage-shard-2",
+  "coverage-shard-3",
   "package-gate-darwin-arm64",
   "package-gate-linux-arm64",
   "package-gate-linux-x64",

@@ -3,9 +3,10 @@
 set -euo pipefail
 
 run_linux_engine() {
-images= binary= root= evidence=
+images= binary= root= evidence= disk_only=0
 while (($#)); do
   case "$1" in
+    --disk-only) disk_only=1; shift ;;
     --images) images=$2; shift 2 ;;
     --binary) binary=$2; shift 2 ;;
     --root) root=$2; shift 2 ;;
@@ -17,7 +18,9 @@ done
 test "$(uname -s)" = Linux
 test "$(id -u)" != 0
 test ! -e .env
-test -n "$images" && test -n "$binary" && (($# > 0))
+if (( ! disk_only )); then
+  test -n "$images" && test -n "$binary" && (($# > 0))
+fi
 python3 - "$root" "$evidence" <<'PY'
 import os
 import json
@@ -98,6 +101,8 @@ shutil.rmtree(path)
 record()
 assert admission['finalFreeBytes'] >= required, 'CI_ENGINE_DISK_ADMISSION_FAILED'
 PY
+# Coverage merge needs the same object-space budget without starting an Engine.
+if (( disk_only )); then return 0; fi
 for tool in docker dockerd sudo systemd-run systemctl timeout mount umount findmnt tee; do
   command -v "$tool" >/dev/null
 done

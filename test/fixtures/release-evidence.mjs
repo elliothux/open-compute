@@ -46,6 +46,7 @@ export async function createReleaseEvidence(
       log: "/private/host/path",
     });
   }
+  await mkdir(join(directory, "coverage-gate-evidence"), { recursive: true });
   await writeJson(join(directory, "coverage-gate-evidence/summary.json"), {
     data: [{ totals: { lines: { count: 100, covered: 95, percent: 95 } } }],
   });

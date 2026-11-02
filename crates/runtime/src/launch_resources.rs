@@ -3,7 +3,6 @@
 use crate::process::{ExecImage, VerifiedLaunchImage};
 use open_compute_core::{ErrorCode, PlatformError};
 use std::fs::File;
-use std::os::unix::fs::PermissionsExt;
 
 impl VerifiedLaunchImage {
     /// Transfer verified sibling resource files together with an opened executable.
@@ -52,6 +51,7 @@ impl ExecImage {
         #[cfg(target_os = "macos")]
         if !resources.is_empty() {
             use std::io::{Read, Seek};
+            use std::os::unix::fs::PermissionsExt;
             let root = self.program.parent().ok_or_else(invalid)?;
             for (name, source) in resources {
                 let mut source = source.try_clone().map_err(|_| invalid())?;

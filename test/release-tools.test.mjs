@@ -392,11 +392,11 @@ test("release qualification and local Docker diagnostic keep their exact boundar
   assert.doesNotMatch(workflow, /^cache-mode:/m);
   assert.match(
     workflow,
-    /  coverage:\n    needs: \[failfast, fixture-images, package\]\n/,
+    /  coverage-shards:\n    needs: \[failfast, fixture-images, package-linux-x64\]\n/,
   );
   assert.match(
     workflow,
-    /name: Enforce 90 percent Rust line coverage\n\s+env:\n\s+CARGO_BUILD_JOBS: "2"\n\s+OPEN_COMPUTE_COVERAGE_HTML: "0"\n\s+run: \|\n\s+bash test\/containers-fixture\/with-ci-linux-engine\.sh[\s\S]*?--command env OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO=1 \.\/test\/coverage\.sh --jobs 2/,
+    /name: Collect Rust coverage shard\n\s+env:\n\s+CARGO_BUILD_JOBS: "2"\n\s+OPEN_COMPUTE_COVERAGE_HTML: "0"\n\s+run: \|\n\s+bash test\/containers-fixture\/with-ci-linux-engine\.sh[\s\S]*?--command env OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO=1 \.\/test\/coverage\.sh --shard \$\{\{ matrix\.shard \}\}\/3 --jobs 2/,
   );
   assert.doesNotMatch(workflow, /\n  integration:/);
   assert.match(
@@ -468,7 +468,7 @@ test("release qualification and local Docker diagnostic keep their exact boundar
   assert.match(coverage, /minimum_lines=90\.00/);
   assert.match(
     workflow,
-    /  coverage:\n[\s\S]*?CARGO_INCREMENTAL: "0"\n\s+CARGO_PROFILE_DEV_DEBUG: line-tables-only\n\s+CARGO_PROFILE_TEST_DEBUG: line-tables-only/,
+    /  coverage-shards:\n[\s\S]*?CARGO_INCREMENTAL: "0"\n\s+CARGO_PROFILE_DEV_DEBUG: line-tables-only\n\s+CARGO_PROFILE_TEST_DEBUG: line-tables-only/,
   );
   assert.match(workflow, /browser-fixture: "true"/);
   assert.doesNotMatch(workflow, /test-p0-2-egress-linux\.sh workers --jobs 2/);
@@ -595,9 +595,9 @@ test("release qualification and local Docker diagnostic keep their exact boundar
 
 test("Linux qualification reuses same-run packages without a dependency cycle or debug Broker build", async () => {
   const workflow = await readFile(releaseWorkflowPath, "utf8");
-  for (const name of ["coverage"]) {
+  for (const name of ["coverage-shards"]) {
     const job = workflow.split(`\n  ${name}:`)[1].split(/\n  [a-z][a-z-]*:/)[0];
-    assert.match(job, /needs: \[failfast, fixture-images, package\]/);
+    assert.match(job, /needs: \[failfast, fixture-images, package-linux-x64\]/);
     assert.match(
       job,
       /actions\/download-artifact@v8\n\s+with:\n\s+name: release-linux-x64/,
@@ -613,8 +613,8 @@ test("Linux qualification reuses same-run packages without a dependency cycle or
     assert.doesNotMatch(job, /cargo build|target\/debug\/ocd|run-id:/);
   }
   const packageJob = workflow
-    .split("\n  package:")[1]
-    .split("\n  install-lifecycle:")[0];
+    .split("\n  package-other:")[1]
+    .split("\n  package-linux-x64:")[0];
   assert.match(packageJob, /needs: \[failfast, fixture-images\]/);
   assert.doesNotMatch(packageJob, /needs:.*(?:coverage|integration)/);
 });
@@ -1257,22 +1257,37 @@ test("manual native qualification preserves immutable inputs and cannot publish"
     actions: "read",
   });
   assert.deepEqual(workflow.permissions, { contents: "read", actions: "read" });
-  for (const name of ["package", "install-lifecycle"]) {
-    const matrices = [
-      ...workflow.jobs[name].strategy.matrix.include.matchAll(/'([\[{].*?)'/g),
-    ].map((match) => JSON.parse(match[1]));
-    assert.equal(matrices.length, 3);
-    assert.deepEqual(
-      matrices[0].map((item) => item.target),
+  const packageMatrices = [
+    ...workflow.jobs["package-other"].strategy.matrix.include.matchAll(
+      /'([\[{].*?)'/g,
+    ),
+  ].map((match) => JSON.parse(match[1]));
+  assert.deepEqual(
+    packageMatrices.map((matrix) => matrix.map((item) => item.target)),
+    [["darwin-arm64"], ["darwin-arm64", "linux-arm64"]],
+  );
+  assert.deepEqual(workflow.jobs["package-linux-x64"].strategy.matrix.include, [
+    { target: "linux-x64", os: "ubuntu-24.04" },
+  ]);
+  const installMatrices = [
+    ...workflow.jobs["install-lifecycle"].strategy.matrix.include.matchAll(
+      /'([\[{].*?)'/g,
+    ),
+  ].map((match) => JSON.parse(match[1]));
+  assert.deepEqual(
+    installMatrices.map((matrix) => matrix.map((item) => item.target)),
+    [
       ["darwin-arm64"],
-    );
-    assert.deepEqual(
-      matrices[1].map((item) => item.target),
-      name === "package" ? ["linux-x64"] : ["linux-x64", "linux-x64"],
-    );
-    assert.equal(matrices[2].length, name === "package" ? 3 : 5);
-  }
-  for (const name of ["package", "install-lifecycle", "stress"]) {
+      ["linux-x64", "linux-x64"],
+      ["linux-x64", "linux-arm64", "linux-x64", "linux-arm64", "darwin-arm64"],
+    ],
+  );
+  for (const name of [
+    "package-other",
+    "package-linux-x64",
+    "install-lifecycle",
+    "stress",
+  ]) {
     const job = workflow.jobs[name];
     assert.match(job.if, /always\(\) && !cancelled\(\)/);
     assert.equal(
@@ -1280,7 +1295,7 @@ test("manual native qualification preserves immutable inputs and cannot publish"
       "${{ inputs.candidate-revision || github.sha }}",
     );
   }
-  const step = workflow.jobs.package.steps.find(
+  const step = workflow.jobs["package-other"].steps.find(
     (step) => step.id === "candidate",
   );
   const check = new (Object.getPrototypeOf(async function () {}).constructor)(
@@ -1475,7 +1490,7 @@ test("native ARM fixture provenance binds the exact source, tree and workflow", 
     ).run,
   );
   const consumer = extract(
-    release.jobs.package.steps.find(
+    release.jobs["package-other"].steps.find(
       (step) =>
         step.name ===
         "Verify reused native fixture graphs against candidate sources",
@@ -1575,4 +1590,39 @@ test("native ARM fixture provenance binds the exact source, tree and workflow", 
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("release coverage partitions wait only for x64 and publish waits for their merged result", async () => {
+  const { jobs } = await parseWorkflow(releaseWorkflowPath);
+  const shards = jobs["coverage-shards"];
+  assert.deepEqual(shards.strategy.matrix.shard, [1, 2, 3]);
+  assert.deepEqual(shards.needs, [
+    "failfast",
+    "fixture-images",
+    "package-linux-x64",
+  ]);
+  assert.equal(jobs.coverage.needs, "coverage-shards");
+  assert.deepEqual(
+    jobs["package-linux-x64"].steps,
+    jobs["package-other"].steps,
+  );
+  assert.deepEqual(jobs.package.needs, [
+    "failfast",
+    "package-linux-x64",
+    "package-other",
+  ]);
+  for (const name of ["install-lifecycle", "stress", "assemble"])
+    assert.ok(jobs[name].needs.includes("package"));
+  assert.ok(jobs.publish.needs.includes("coverage"));
+  assert.match(
+    jobs.coverage.steps.find((step) => step.run?.includes("coverage.sh merge"))
+      .run,
+    /coverage-inputs\/\*\/run-\*/,
+  );
+  assert.ok(
+    jobs["package-other"].if.includes("inputs.target == 'darwin-arm64'"),
+  );
+  assert.ok(
+    jobs["package-linux-x64"].if.includes("inputs.target == 'linux-x64'"),
+  );
 });

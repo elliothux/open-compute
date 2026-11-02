@@ -121,8 +121,9 @@ workspace/final binary。当前没有应用 benchmark，且仓库 cache 已接�
   Rust、runtime、workerd、`ci.yml`、共享 setup 或未知路径仍执行完整静态资格。汇总 job `ci` 保留不变，
   避免分支保护因跳过具体 job 失效。
 - tag qualification：`failfast` 先验证 release environment、source/release identity、notes、SDK report
-  contract、npm credential 和目标版本。三个 package job 成功后，Linux coverage 在受控 egress fixture 中执行唯一完整 workspace Gate，包含 `workers`。
-- 三个正式平台 package：身份验证后即并行构建。Linux coverage 校验并复用同次运行的 Linux x64 发行包作为 Broker，不再重复构建 debug Broker。publish 等待所有路径成功。macOS Intel 不再进入 package 矩阵。
+  contract、npm credential 和目标版本。Linux x64 package 成功后，三个 coverage shard 在受控 egress fixture 中各执行一次 Gate 子集；三者合起来覆盖完整 workspace，包含 `workers`。
+- 三个正式平台 package：身份验证后即并行构建。三个 coverage shard 只等待 `package-linux-x64`，每片校验并复用同次运行的 Linux x64 包作为 Broker。`package` 等待全部平台，安装、stress、assemble 和 publish 仍等待全部包。
+- `test/gate.py` 定义唯一分区，拒绝遗漏、重复和未分配的新 workspace 目标。各片保留本片测试 object 与共享子进程 binary；merge 复用 Linux wrapper 的磁盘检查与空闲 SDK 清理，不启动 Engine，再合并所有原始 profile 和精确 object，检查 90.00% 行覆盖率。三个冷插桩构建会增加总 runner 时间。
 - package 与普通 production hygiene 使用同一 executable verifier，生成 mode 0600 临时配置再查询
   capabilities，同时核对 release identity、版本、licenses 和嵌入 docs；不初始化平台数据目录。
 - `main` 不保护；`release` 要求 PR、最新 required `ci` 和讨论解决；tag 必须来自通过 CI 的 `release`。

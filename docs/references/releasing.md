@@ -87,10 +87,10 @@ checkout、main CI 证据、release notes 章节和占位符、Workerd 章节的
 parser，producer 在写报告前即调用 consumer parser；schema 漂移不再等到三平台产物完成后才发现。
 `failfast` 不拉取 LFS、不构建 Rust/workerd、不跑 coverage 或完整 Gate。
 
-三个正式平台在校验后并行打包。
-打包资格通过后，Linux coverage 和最终 workspace Gate 并行执行。
-两个 job 都复用同次运行的 Linux x64 发行包作为 Broker。
-Linux 最终 Gate 在受控 egress fixture 中执行，包含 `workers`；工作流不再另跑一轮 `workers`。
+三个正式平台在校验后并行打包。`package-linux-x64` 构建 Linux x64，`package-other` 用同一步骤构建 Darwin ARM64 和 Linux ARM64。
+`package` 等待三个平台成功；安装、stress、assemble 和 publish 仍等待全部包。
+三个 coverage shard 只等待 Linux x64 包，每片先验证包，再将包作为 Container Broker，在 Linux engine 和受控 egress 中执行 workspace 子集。
+`coverage` 合并三片的原始 profile 和各片的精确 object 集合，再检查 90.00% 行覆盖率；release report 要求三片各有一份成功的 Gate 报告。
 静态资格直接复用 release source commit 已通过的 main `ci`，不在 tag workflow 重跑。
 三个原生 runner 使用正式 workerd lock 打包自己的 `ocd`，并以 `OPEN_COMPUTE_TEST_OCD` 跑单文件隔离、
 首启、重启和损坏拒绝测试。Linux ARM64 package 还对 production binary 执行精确的 embedded Dashboard
@@ -102,7 +102,7 @@ E2E 依赖专用多实例与可选产品 fixture，不在干净的 production pa
 不改变 binary、receipt、配置或持久数据。0.2.3 的 sudo setup 会拒绝 installer 交给服务用户的临时目录；
 该已复现的历史问题不能通过修改旧二进制掩盖，候选版本的原始 installer 首装仍必须无 workaround 通过。
 
-`publish` 明确依赖 main 静态资格、coverage、Linux 最终 Gate、Linux egress 和三个正式平台 assemble；
+`publish` 等待 source 检查、合并后的 coverage、gateway/provider 测试、SDK、安装、stress 和 assemble；
 任何一项未通过均不得公开发布。构建保留编译耗时和必要失败证据；当前 Cargo 缓存策略见 [CI 构建性能](ci-build-performance.md#缓存与证据)。
 
 npm 发布以 `npm publish` 成功退出为完成信号，成功后不轮询 registry，也不等待 eventual-consistency read-back。
@@ -203,10 +203,9 @@ git tag -a vX.Y.Z -m "open-compute vX.Y.Z"
 git push origin vX.Y.Z
 ```
 
-Gate job 显式构建资产并准备锁定依赖。三个 package job 从源码并行构建。
-Linux coverage 和最终 Gate 等待 package 成功，再复用同次运行的 Linux x64 发行包作为 Broker。
+每个 coverage shard 显式构建资产并准备锁定依赖，只等待 Linux x64 package 成功，再复用同次运行的包作为 Broker。
 入口先核对包报告的版本、revision、target、pin、长度和摘要，再查询二进制的嵌入身份；1 GiB 文件上限保持不变。
-这两个 job 不再单独构建 debug Broker。publish 仍等待完整成功证据。缓存与任务依赖见 [CI 构建性能](ci-build-performance.md#当前执行分工)。
+merge 等待所有 shard；publish 等待三个正式平台包与完整成功证据。任务依赖见 [CI 构建性能](ci-build-performance.md#当前执行分工)。
 
 push tag 是唯一发布触发器。随后在 GitHub Actions 的 `release` workflow 中确认所有 qualification、
 三个正式目标 package 和 `publish` job 成功，并在 GitHub Release 页面核对七个 assets。仓库已配置以下设置（2026-09-06 按用户要求迁移）：

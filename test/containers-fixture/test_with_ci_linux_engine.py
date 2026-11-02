@@ -158,6 +158,16 @@ class LinuxEngine(unittest.TestCase):
     def calls(self):
         return [json.loads(line) for line in (self.state / 'calls.jsonl').read_text().splitlines()]
 
+    def test_disk_only_admits_merge_without_inspecting_or_changing_the_engine(self):
+        done = subprocess.run(['bash', str(HERE / 'with-ci-linux-engine.sh'), '--disk-only',
+                               '--root', str(self.root), '--evidence', str(self.evidence)],
+                              cwd=ROOT, env=self.env, capture_output=True, text=True)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertTrue((self.evidence / 'disk-admission.json').is_file())
+        self.assertFalse(self.root.exists())
+        self.assertFalse(any(call[0] in ('docker', 'sudo', 'systemctl', 'systemd-run')
+                             for call in self.calls()))
+
     def test_low_disk_records_admission_before_refusing_without_engine_mutation(self):
         self.env.update(LOW_DISK='1', RUNNER_ENVIRONMENT='self-hosted')
         done = self.execute()

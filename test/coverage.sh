@@ -10,6 +10,25 @@ latest_report_dir="$report_dir"
 # Production modules must never be placed behind one of these filename rules.
 ignore_filename_regex='/rustlib/src/rust/|^/rustc/|/\.cargo/(registry|git)/|/\.rustup/toolchains/|/third_party/|/tests?/|/src/tests\.rs$|/src/.*_tests\.rs$|/src/mock_s3\.rs$|/src/bin/(s3_fixture|s3_provider_qualification|supervisor_fixture|install_upgrade_fixture)\.rs$|/src/bin/host_extension_test_provider/|/crates/search/examples/exact_search_benchmark\.rs$'
 minimum_lines=90.00
+mode=run
+sharded=0
+for option do
+  case "$option" in --shard|--shard=*) sharded=1 ;; esac
+done
+if [ "${1:-}" = --help ]; then
+  echo 'Usage: test/coverage.sh [--shard i/3] [Gate options]'
+  echo '       test/coverage.sh merge RUN_DIR...'
+  echo 'Shards retain raw profiles and exact objects; merge enforces 90% with the same exclusions.'
+  exit 0
+fi
+if [ "${1:-}" = merge ]; then
+  mode=merge
+  shift
+  if [ "$#" -eq 0 ]; then
+    echo 'merge requires at least one coverage run directory' >&2
+    exit 1
+  fi
+fi
 workerd=${OPEN_COMPUTE_TEST_WORKERD:-}
 coverage_html=${OPEN_COMPUTE_COVERAGE_HTML:-1}
 
@@ -22,21 +41,6 @@ if [ "${OPEN_COMPUTE_GATE_ROUNDS:-1}" != 1 ]; then
   echo "coverage runs exactly once; diagnostic timing rounds require uninstrumented executables" >&2
   exit 1
 fi
-
-if ! cargo llvm-cov --version >/dev/null 2>&1; then
-  echo "cargo-llvm-cov is required; install it with 'brew install cargo-llvm-cov' or 'cargo install cargo-llvm-cov --locked'" >&2
-  exit 1
-fi
-
-if [ -z "$workerd" ] || [ ! -f "$workerd" ]; then
-  echo "OPEN_COMPUTE_TEST_WORKERD is missing; coverage requires the real P0 Gates" >&2
-  exit 1
-fi
-case "$workerd" in
-  /*) ;;
-  *) echo "OPEN_COMPUTE_TEST_WORKERD must be absolute" >&2; exit 1 ;;
-esac
-export OPEN_COMPUTE_TEST_WORKERD="$workerd"
 
 cd "$root"
 # Cargo dependency locations follow the configured home, including Docker mounts.
@@ -51,42 +55,80 @@ print('(' + '|'.join(re.escape(path) for path in locations) + ')')
 PYTHON
 )
 ignore_filename_regex="$ignore_filename_regex|^$cargo_home_regex/(registry|git)/"
-# Gate compiles with --offline; fetch the locked crate graph while network is allowed.
-cargo fetch --locked
-# Keep the instrumented target dir so Cargo can reuse compiled artifacts.
-# Do not `cargo llvm-cov clean --workspace`; that cargo-cleans the target.
-# Profile names include process/module identity, so parallel processes cannot collide.
-export CARGO_TARGET_DIR="$root/target/llvm-cov-target"
-mkdir -p "$CARGO_TARGET_DIR" "$root/.temp/coverage"
+if [ "$mode" = run ]; then
+  if ! cargo llvm-cov --version >/dev/null 2>&1; then
+    echo "cargo-llvm-cov is required; install it with 'brew install cargo-llvm-cov' or 'cargo install cargo-llvm-cov --locked'" >&2
+    exit 1
+  fi
+
+  if [ -z "$workerd" ] || [ ! -f "$workerd" ]; then
+    echo "OPEN_COMPUTE_TEST_WORKERD is missing; coverage requires the real P0 Gates" >&2
+    exit 1
+  fi
+  case "$workerd" in
+    /*) ;;
+    *) echo "OPEN_COMPUTE_TEST_WORKERD must be absolute" >&2; exit 1 ;;
+  esac
+  export OPEN_COMPUTE_TEST_WORKERD="$workerd"
+
+  # Gate compiles with --offline; fetch the locked crate graph while network is allowed.
+  cargo fetch --locked
+  # Keep the instrumented target dir so Cargo can reuse compiled artifacts.
+  # Do not `cargo llvm-cov clean --workspace`; that cargo-cleans the target.
+  # Profile names include process/module identity, so parallel processes cannot collide.
+  export CARGO_TARGET_DIR="$root/target/llvm-cov-target"
+  mkdir -p "$CARGO_TARGET_DIR" "$root/.temp/coverage"
+fi
 # Keep profiles, merged data and exact objects immutable in a fresh run directory.
-# Earlier failed runs and their objects remain available for diagnosis.
+mkdir -p "$root/.temp/coverage"
 OPEN_COMPUTE_COVERAGE_RUN_DIR=$(mktemp -d "$root/.temp/coverage/run-XXXXXXXX")
 export OPEN_COMPUTE_COVERAGE_RUN_DIR
-mkdir -p "$OPEN_COMPUTE_COVERAGE_RUN_DIR/profiles"
 report_dir="$OPEN_COMPUTE_COVERAGE_RUN_DIR/reports"
-# Use cargo-llvm-cov's external-runner contract in its own existing build cache.
-./test/gate.py --workspace --list "$@" >/dev/null
-coverage_env=$(cargo llvm-cov show-env --sh)
-eval "$coverage_env"
-# Merge child-process profiles into LLVM's bounded pool instead of creating one
-# full-size profile per PID; the latter exhausts hosted-runner disks.
-export LLVM_PROFILE_FILE="$OPEN_COMPUTE_COVERAGE_RUN_DIR/profiles/open-compute-%12m.profraw"
-# show-env exports CARGO_LLVM_COV_SHOW_ENV=1 for printing; leave it set and the
-# RUSTC_WRAPPER re-enters show-env. Prefer direct rustc flags over the wrapper:
-# under macOS maxproc pressure the wrapper fan-out fails with EAGAIN on rustc -vV.
-unset CARGO_LLVM_COV_SHOW_ENV
-if [ -n "${__CARGO_LLVM_COV_RUSTC_WRAPPER_RUSTFLAGS:-}" ]; then
-  # show-env uses ASCII unit separator (0x1f) between rustc flag tokens.
-  cov_flags=$(printf '%s' "$__CARGO_LLVM_COV_RUSTC_WRAPPER_RUSTFLAGS" | tr '\037' ' ')
-  export RUSTFLAGS="${cov_flags}${RUSTFLAGS:+ $RUSTFLAGS}"
+profile_list="$OPEN_COMPUTE_COVERAGE_RUN_DIR/profraw-list"
+object_list="$OPEN_COMPUTE_COVERAGE_RUN_DIR/object-list"
+if [ "$mode" = run ]; then
+  mkdir -p "$OPEN_COMPUTE_COVERAGE_RUN_DIR/profiles"
+  # Use cargo-llvm-cov's external-runner contract in its own existing build cache.
+  ./test/gate.py --workspace --list "$@" >/dev/null
+  coverage_env=$(cargo llvm-cov show-env --sh)
+  eval "$coverage_env"
+  # Merge child-process profiles into LLVM's bounded pool instead of creating one
+  # full-size profile per PID; the latter exhausts hosted-runner disks.
+  export LLVM_PROFILE_FILE="$OPEN_COMPUTE_COVERAGE_RUN_DIR/profiles/open-compute-%12m.profraw"
+  # show-env exports CARGO_LLVM_COV_SHOW_ENV=1 for printing; leave it set and the
+  # RUSTC_WRAPPER re-enters show-env. Prefer direct rustc flags over the wrapper:
+  # under macOS maxproc pressure the wrapper fan-out fails with EAGAIN on rustc -vV.
+  unset CARGO_LLVM_COV_SHOW_ENV
+  if [ -n "${__CARGO_LLVM_COV_RUSTC_WRAPPER_RUSTFLAGS:-}" ]; then
+    # show-env uses ASCII unit separator (0x1f) between rustc flag tokens.
+    cov_flags=$(printf '%s' "$__CARGO_LLVM_COV_RUSTC_WRAPPER_RUSTFLAGS" | tr '\037' ' ')
+    export RUSTFLAGS="${cov_flags}${RUSTFLAGS:+ $RUSTFLAGS}"
+  fi
+  unset RUSTC_WRAPPER
+  export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-1}"
+  if [ "${OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO:-}" = 1 ]; then
+    ./test/test-p0-2-egress-linux.sh --workspace "$@"
+  else
+    ./test/gate.py --workspace "$@"
+  fi
+
+  if [ "$sharded" = 1 ]; then
+    echo "retained coverage shard inputs: $OPEN_COMPUTE_COVERAGE_RUN_DIR"
+    exit 0
+  fi
+  set -- "$OPEN_COMPUTE_COVERAGE_RUN_DIR"
 fi
-unset RUSTC_WRAPPER
-export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-1}"
-if [ "${OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO:-}" = 1 ]; then
-  ./test/test-p0-2-egress-linux.sh --workspace "$@"
-else
-  ./test/gate.py --workspace "$@"
-fi
+# Merge only explicitly supplied runs, never profiles or executables from a cache.
+: > "$profile_list"
+: > "$object_list"
+for input do
+  if [ ! -d "$input/profiles" ] || [ ! -d "$input/objects" ]; then
+    echo "coverage run requires profiles and exact objects: $input" >&2
+    exit 1
+  fi
+  find "$input/profiles" -type f -name '*.profraw' -print >> "$profile_list"
+  find "$input/objects" -type f -print >> "$object_list"
+done
 
 mkdir -p "$report_dir"
 # External-runner caches retain prior hashed executables. cargo-llvm-cov's
@@ -103,33 +145,23 @@ if [ ! -x "$llvm_cov" ] || [ ! -x "$llvm_profdata" ]; then
   exit 1
 fi
 
-profile_list="$OPEN_COMPUTE_COVERAGE_RUN_DIR/profraw-list"
 profdata="$OPEN_COMPUTE_COVERAGE_RUN_DIR/merged.profdata"
-find "$OPEN_COMPUTE_COVERAGE_RUN_DIR/profiles" -type f -name '*.profraw' -print > "$profile_list"
 if [ ! -s "$profile_list" ]; then
   echo "coverage Gate produced no profile data" >&2
   exit 1
 fi
 "$llvm_profdata" merge -sparse -f "$profile_list" -o "$profdata"
 
-object_dir="$OPEN_COMPUTE_COVERAGE_RUN_DIR/objects"
-set -- "$object_dir"/*
-if [ "$1" = "$object_dir/*" ] || [ ! -f "$1" ]; then
-  echo "coverage Gate produced no current object inventory" >&2
-  exit 1
-fi
-first_object=$1
-shift
-set -- "$first_object" "$@"
-object_args=$#
-set -- "$first_object"
-for object in "$object_dir"/*; do
-  if [ "$object" != "$first_object" ]; then
+set --
+while IFS= read -r object; do
+  if [ "$#" -eq 0 ]; then
+    set -- "$object"
+  else
     set -- "$@" --object "$object"
   fi
-done
-if [ "$object_args" -ne "$((($# + 1) / 2))" ]; then
-  echo "coverage object inventory changed while generating reports" >&2
+done < "$object_list"
+if [ "$#" -eq 0 ]; then
+  echo "coverage Gate produced no current object inventory" >&2
   exit 1
 fi
 

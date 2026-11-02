@@ -167,6 +167,11 @@ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s test -p 'test_gate.py'
 
 - `./test/coverage.sh` 要求 Rust 行覆盖率不低于 90.00%，报告在 `target/llvm-cov/{html/index.html,lcov.info,summary.json}`。
   缺少 cargo-llvm-cov 时运行 `brew install cargo-llvm-cov` 或 `cargo install cargo-llvm-cov --locked`。
+- Release 将 coverage 分为三片：`./test/coverage.sh --shard 1/3 --jobs 2`，其余片分别使用 `2/3`、`3/3`。
+  `test/gate.py` 定义唯一分区；新 Cargo 目标未分配时，分区检查失败。
+  每片在 `.temp/coverage/run-*` 保留原始 profile、本片测试的精确 object 和共享子进程 binary。
+  用 `./test/coverage.sh merge <run-1> <run-2> <run-3>` 合并三片，合并后才检查 90.00% 门槛。
+  merge 只需要相同 Rust toolchain 的 LLVM 工具，不构建，也不需要 runtime 输入。
 - coverage 排除 `tests/**`、`src/tests.rs`、`src/**/*_tests.rs`、`src/mock_s3.rs` 和 supervisor fixture。不要把生产代码移进排除路径。
 - `./test/check-production.py` 构建不含 `test-support` 的二进制并扫描测试标记。
 

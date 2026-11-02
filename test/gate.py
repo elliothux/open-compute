@@ -152,6 +152,93 @@ GROUPS['products'] = ['contract', 'recorded', *GROUPS['core'], *GROUPS['platform
                       *GROUPS['scheduling'], *PRODUCT_SCENARIOS]
 
 
+# Balanced from release 41151476486, with current SQLite/Python timing estimates.
+# Keep the service-library case partitions together for discovery validation.
+COVERAGE_SHARDS = (
+    (
+        'bindings',
+        'cache-images',
+        'cf-resources',
+        'isolation',
+        'open-compute-document-parser.test.ocr',
+        'open-compute-images.lib.open_compute_images',
+        'open-compute-service.lib.open_compute_service',
+        'open-compute-service.test.msrv_audit',
+        'open-compute-storage.lib.open_compute_storage',
+        'open-compute-vendor-schema.bin.open-compute-vendor-schema',
+        'open-compute-workers.lib.open_compute_workers',
+        'queue-workflow-recovery',
+        'queues',
+        'search',
+        'service-process-lifecycle',
+        'services-events',
+        'services-product',
+        'services-recovery',
+    ),
+    (
+        'capabilities',
+        'cf-cli',
+        'cloudflare-sdk',
+        'containers',
+        'core-products',
+        'crash-recovery',
+        'd1',
+        'dashboard',
+        'durable-objects',
+        'open-compute-artifacts.lib.open_compute_artifacts',
+        'open-compute-document-parser.test.corpus',
+        'open-compute-p1-fuzz.bin.p1-fuzz',
+        'open-compute-runtime.bin.open-compute-supervisor-fixture',
+        'open-compute-service.bin.host-extension-test-provider',
+        'open-compute-service.bin.ocd',
+        'open-compute-service.test.cli',
+        'open-compute-service.test.p1_reliability',
+        'open-compute-service.test.p5_snapshot_restore',
+        'python-frameworks',
+        'python-main',
+        'python-workflows',
+        'snapshots',
+        'workflow-product',
+        'workflow-recovery',
+        'workflow-runtime',
+    ),
+    (
+        'alarms',
+        'assets',
+        'browser',
+        'contract',
+        'daemon',
+        'kv',
+        'open-compute-core.lib.open_compute_core',
+        'open-compute-document-parser.lib.open_compute_document_parser',
+        'open-compute-runtime.lib.open_compute_runtime',
+        'open-compute-search.lib.open_compute_search',
+        'open-compute-service.test.ai_provider_contract',
+        'python-durable-objects',
+        'python-queues',
+        'python-runtime',
+        'python-services',
+        'r2',
+        'recorded',
+        'runtime',
+        'scheduler',
+        'services-rpc',
+        'single-binary',
+        'workers',
+    ),
+)
+
+
+def coverage_shard(targets, value):
+    """Fail closed when Cargo adds a target until its shard is assigned here."""
+    assigned = [name for shard in COVERAGE_SHARDS for name in shard]
+    if len(assigned) != len(set(assigned)) or set(assigned) != targets.keys():
+        raise ValueError("coverage shard partition must equal the full workspace target inventory")
+    if not re.fullmatch(r"[1-3]/3", value):
+        raise ValueError("--shard must be i/3 with i between 1 and 3")
+    members = set(COVERAGE_SHARDS[int(value[0]) - 1])
+    return {name: target for name, target in targets.items() if name in members}
+
 
 def prevent_macos_sleep():
     """Keep a local real-process Gate out of macOS suspend/resume."""
@@ -597,7 +684,7 @@ def verify_selected_inputs(targets, *, probe_version=True):
     }
 
 
-def build_targets(targets, directory, workspace):
+def build_targets(targets, directory, workspace, *, coverage_targets=None):
     cargo_targets = {name: target for name, target in targets.items()
                      if not isinstance(target, TypedTarget)}
     artifacts = {name: target.executable for name, target in targets.items()
@@ -674,6 +761,11 @@ def build_targets(targets, directory, workspace):
             raise RuntimeError(f'refusing to overwrite coverage objects: {object_dir}')
         object_dir.mkdir(mode=0o700)
         executables = sorted(set(coverage_executables))
+        if coverage_targets is not None:
+            # Retain this shard's tests and shared child binaries, so merge does not need four full workspaces.
+            all_tests = {Path(artifacts[name]) for name in cargo_targets}
+            selected_tests = {Path(artifacts[name]) for name in cargo_targets if name in coverage_targets}
+            executables = [path for path in executables if path not in all_tests or path in selected_tests]
         print(f'Preserving {len(executables)} coverage objects: '
               f'{sum(path.stat().st_size for path in executables)} bytes', flush=True)
         for index, executable in enumerate(executables):
@@ -978,6 +1070,7 @@ def main():
     parser.add_argument('targets', nargs='*', help='Gate targets/groups; use --list to inspect the plan')
     parser.add_argument('--workspace', action='store_true',
                         help='all Cargo test executables; diagnostic rounds repeat only product timing cases')
+    parser.add_argument('--shard', help='workspace coverage partition i/3 (all targets must be assigned)')
     parser.add_argument('--jobs', type=int, default=DEFAULT_JOBS,
                         help='audited independent processes (default: min(4, CPU count))')
     parser.add_argument('--list', action='store_true', help='validate and print the exact plan without building or running')
@@ -986,6 +1079,8 @@ def main():
     parser.add_argument('--refresh', action='store_true',
                         help='refresh portable recordings after successful live cf-diff')
     args = parser.parse_args()
+    if args.shard and not args.workspace:
+        raise ValueError('--shard requires --workspace')
     rounds = rounds_from_env()
     validate_registry(TARGETS)
     validate_contract_case_mapping()
@@ -1003,7 +1098,8 @@ def main():
     selected = selection(args.targets)
     if args.refresh and (args.workspace or selected != ['cf-diff']):
         raise ValueError('--refresh requires only cf-diff')
-    targets = resolve_targets(selected, args.workspace)
+    build_inventory = resolve_targets(selected, args.workspace)
+    targets = coverage_shard(build_inventory, args.shard) if args.shard else build_inventory
     if args.refresh:
         target = targets['cf-diff']
         targets['cf-diff'] = target._replace(argv=(*target.argv, '--refresh'))
@@ -1041,7 +1137,9 @@ def main():
     try:
         ci_progress('workspace', 'compile', 'START')
         try:
-            artifacts, report['build'] = build_targets(targets, directory, args.workspace)
+            artifacts, report['build'] = build_targets(
+                build_inventory, directory, args.workspace,
+                **({'coverage_targets': targets} if args.shard else {}))
         except BaseException:
             ci_progress('workspace', 'compile', 'FAIL', round(time.monotonic() - start, 2))
             raise

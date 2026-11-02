@@ -370,8 +370,12 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
-  coverage:
-    needs: [failfast, fixture-images, package]
+  coverage-shards:
+    needs: [failfast, fixture-images, package-linux-x64]
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     runs-on: ubuntu-24.04
     env:
       CARGO_INCREMENTAL: "0"
@@ -396,7 +400,7 @@ jobs:
           path: ${{ runner.temp }}/release-broker
       - name: Verify the native packaged Broker against this checkout
         run: bun scripts/verify-release-package.ts "$RUNNER_TEMP/release-broker"
-      - name: Enforce 90 percent Rust line coverage
+      - name: Collect Rust coverage shard
         env:
           CARGO_BUILD_JOBS: "2"
           OPEN_COMPUTE_COVERAGE_HTML: "0"
@@ -406,7 +410,7 @@ jobs:
             --binary "$RUNNER_TEMP/release-broker/ocd-${{ needs.failfast.outputs.tag }}-linux-x64" \
             --root /tmp/oc-ci-coverage \
             --evidence "$PWD/.temp/containers-ci-engine" \
-            --command env OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO=1 ./test/coverage.sh --jobs 2
+            --command env OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO=1 ./test/coverage.sh --shard ${{ matrix.shard }}/3 --jobs 2
       - name: Release the CI browser AppArmor profile
         if: always()
         run: |
@@ -417,7 +421,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: coverage-gate-evidence
+          name: coverage-shard-${{ matrix.shard }}
           include-hidden-files: true
           path: |
             .temp/browser-preparation/run-*/result.json
@@ -427,23 +431,71 @@ jobs:
             .temp/single-binary-run/failed/**/*.log
             .temp/p22-product/*/ocd.stderr.log
             .temp/containers-ci-engine/
-            target/llvm-cov/summary.json
-            target/llvm-cov/lcov.info
             !**/node_modules
             !**/node_modules/**
+      - name: Archive exact coverage inputs
+        run: tar -czf "$RUNNER_TEMP/coverage-raw-${{ matrix.shard }}.tar.gz" -C .temp/coverage .
+      - uses: actions/upload-artifact@v7
+        with:
+          name: coverage-raw-${{ matrix.shard }}
+          path: ${{ runner.temp }}/coverage-raw-${{ matrix.shard }}.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
 
-  package:
-    # Build once; Linux qualification reuses this native packaged Broker.
+  coverage:
+    needs: coverage-shards
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.0
+          components: llvm-tools-preview
+      - name: Reserve disk for exact coverage objects
+        run: |
+          bash test/containers-fixture/with-ci-linux-engine.sh --disk-only \
+            --root /tmp/oc-ci-coverage-merge \
+            --evidence "$PWD/.temp/coverage-merge-disk"
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: coverage-raw-*
+          path: .temp/coverage-downloads
+          merge-multiple: true
+      - name: Merge all shards and enforce 90 percent Rust line coverage
+        env:
+          OPEN_COMPUTE_COVERAGE_HTML: "0"
+        run: |
+          set -euo pipefail
+          for shard in 1 2 3; do
+            mkdir -p ".temp/coverage-inputs/$shard"
+            tar -xzf ".temp/coverage-downloads/coverage-raw-$shard.tar.gz" -C ".temp/coverage-inputs/$shard"
+            rm ".temp/coverage-downloads/coverage-raw-$shard.tar.gz"
+          done
+          ./test/coverage.sh merge .temp/coverage-inputs/*/run-*
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: coverage-gate-evidence
+          include-hidden-files: true
+          path: |
+            .temp/coverage/run-*/reports/summary.json
+            .temp/coverage/run-*/reports/lcov.info
+          if-no-files-found: error
+
+  package-other:
+    name: package (${{ matrix.target }}, ${{ matrix.os }})
+    # Both package producers share these steps; only x64 unblocks coverage.
     needs: [failfast, fixture-images]
-    if: ${{ always() && !cancelled() && (github.event_name == 'workflow_dispatch' || (needs.failfast.result == 'success' && needs.fixture-images.result == 'success')) }}
+    if: ${{ always() && !cancelled() && ((github.event_name == 'workflow_dispatch' && inputs.target == 'darwin-arm64') || (needs.failfast.result == 'success' && needs.fixture-images.result == 'success')) }}
     outputs:
       tag: ${{ needs.failfast.outputs.tag || steps.candidate.outputs.tag }}
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(github.event_name == 'workflow_dispatch' && (inputs.target == 'darwin-arm64' && '[{"target":"darwin-arm64","os":"macos-15"}]' || '[{"target":"linux-x64","os":"ubuntu-24.04"}]') || '[{"target":"darwin-arm64","os":"macos-15"},{"target":"linux-arm64","os":"ubuntu-24.04-arm"},{"target":"linux-x64","os":"ubuntu-24.04"}]') }}
+        include: ${{ fromJSON(github.event_name == 'workflow_dispatch' && '[{"target":"darwin-arm64","os":"macos-15"}]' || '[{"target":"darwin-arm64","os":"macos-15"},{"target":"linux-arm64","os":"ubuntu-24.04-arm"}]') }}
     runs-on: ${{ matrix.os }}
-    steps:
+    steps: &package-steps
       - uses: actions/checkout@v7
         with:
           lfs: true
@@ -663,6 +715,29 @@ jobs:
             apps/dashboard/test-results/
             !**/node_modules
             !**/node_modules/**
+
+  package-linux-x64:
+    name: package (linux-x64, ubuntu-24.04)
+    needs: [failfast, fixture-images]
+    if: ${{ always() && !cancelled() && ((github.event_name == 'workflow_dispatch' && inputs.target == 'linux-x64') || (needs.failfast.result == 'success' && needs.fixture-images.result == 'success')) }}
+    outputs:
+      tag: ${{ needs.failfast.outputs.tag || steps.candidate.outputs.tag }}
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        include:
+          - target: linux-x64
+            os: ubuntu-24.04
+    steps: *package-steps
+
+  package:
+    needs: [failfast, package-linux-x64, package-other]
+    if: ${{ always() && !cancelled() && ((github.event_name == 'push' && needs.package-linux-x64.result == 'success' && needs.package-other.result == 'success') || (github.event_name == 'workflow_dispatch' && ((inputs.target == 'linux-x64' && needs.package-linux-x64.result == 'success') || (inputs.target == 'darwin-arm64' && needs.package-other.result == 'success')))) }}
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ needs.failfast.outputs.tag || needs.package-linux-x64.outputs.tag || needs.package-other.outputs.tag }}
+    steps:
+      - run: "true"
 
   install-lifecycle:
     needs: [failfast, package]
@@ -888,7 +963,7 @@ jobs:
           path: .temp/sdk-package
       - uses: actions/download-artifact@v8
         with:
-          pattern: "{coverage-gate-evidence,package-gate-*,install-lifecycle-*,stress-qualification}"
+          pattern: "{coverage-gate-evidence,coverage-shard-*,package-gate-*,install-lifecycle-*,stress-qualification}"
           path: .temp/release-evidence
       - name: Assemble the immutable release manifest
         env:
