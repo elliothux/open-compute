@@ -13,6 +13,9 @@
 
 SDK 消费者读取 `packages/sdk/dist/`。SDK 生成面变化时先运行 `bun run --filter @open-compute/sdk build`。
 
+Dashboard builds stage assets in `.temp/dashboard-build/` and copy changed bytes or paths into `apps/dashboard/dist/`.
+Identical builds preserve file and directory mtimes, so Cargo keeps the embedded Rust assets fresh.
+
 `sourceIdentity()` 只计算 tracked 文件；排除规则、`.agents/**`、`.claude/**`、非嵌入文档、`__pycache__` 和 baseline，保留嵌入的 runbooks。输入变化后更新摘要：
 
 ```sh
