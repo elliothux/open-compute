@@ -177,6 +177,9 @@ export function conformanceSelfTests(): void {
         "--test",
         // Fail a stuck test by name well inside the Gate's 120 s target budget.
         "--test-timeout=30000",
+        // Stream progress so a Gate timeout shows the last started file and test.
+        "--test-reporter=spec",
+        "--test-reporter-destination=stderr",
         join(ROOT, "test/conformance/adapters.test.mjs"),
         join(ROOT, "test/conformance/case-evidence.test.mjs"),
         join(ROOT, "test/conformance/inventory.test.mjs"),
@@ -187,6 +190,7 @@ export function conformanceSelfTests(): void {
         cwd: ROOT,
         encoding: "utf8",
         env: typesAstEnv(),
+        stdio: ["ignore", "pipe", "inherit"],
         timeout: 120_000,
         maxBuffer: 4 * 1024 * 1024,
       },
