@@ -175,22 +175,17 @@ export function conformanceSelfTests(): void {
       "node",
       [
         "--test",
-        // Fail a stuck test by name well inside the Gate's 120 s target budget.
-        "--test-timeout=30000",
-        // Stream progress so a Gate timeout shows the last started file and test.
-        "--test-reporter=spec",
-        "--test-reporter-destination=stderr",
+        // p6-contract.test.mjs builds the Rust vendor schemas with Cargo, which
+        // does not fit this 120 s target; CI's test:js:ci runs it after Cargo.
         join(ROOT, "test/conformance/adapters.test.mjs"),
         join(ROOT, "test/conformance/case-evidence.test.mjs"),
         join(ROOT, "test/conformance/inventory.test.mjs"),
-        join(ROOT, "test/conformance/p6-contract.test.mjs"),
         join(ROOT, "test/conformance/p23-cf-wire.test.mjs"),
       ],
       {
         cwd: ROOT,
         encoding: "utf8",
         env: typesAstEnv(),
-        stdio: ["ignore", "pipe", "inherit"],
         timeout: 120_000,
         maxBuffer: 4 * 1024 * 1024,
       },
