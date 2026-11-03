@@ -6,6 +6,7 @@ export const gateEvidence = [
   "coverage-shard-1",
   "coverage-shard-2",
   "coverage-shard-3",
+  "coverage-shard-4",
   "package-gate-darwin-arm64",
   "package-gate-linux-arm64",
   "package-gate-linux-x64",

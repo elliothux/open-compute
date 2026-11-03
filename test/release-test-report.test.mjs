@@ -30,6 +30,7 @@ test("release report requires one workspace coverage pass and all supported nati
     "coverage-shard-1",
     "coverage-shard-2",
     "coverage-shard-3",
+    "coverage-shard-4",
     "package-gate-darwin-arm64",
     "package-gate-linux-arm64",
     "package-gate-linux-x64",
@@ -70,7 +71,7 @@ test("release report publishes selected metrics and escaped case names; rejects 
     );
   }
   const report = JSON.parse(rendered.json);
-  assert.equal(report.gates.length, 6);
+  assert.equal(report.gates.length, 7);
   assert.deepEqual(
     report.gates
       .find((entry) => entry.label === "coverage-shard-1")
@@ -79,6 +80,14 @@ test("release report publishes selected metrics and escaped case names; rejects 
   );
   assert.equal(report.installs.length, 10);
   assert.equal(report.stress.runs.length, 5);
+  const fourthPath = join(directory, "coverage-shard-4/report.json");
+  const fourth = JSON.parse(await readFile(fourthPath, "utf8"));
+  await rm(fourthPath);
+  await assert.rejects(
+    releaseTestReport(directory, identity, digest),
+    /single Gate report/,
+  );
+  await writeJson(fourthPath, fourth);
   const oldRevision = gate.revision;
   gate.revision = "f".repeat(40);
   await writeJson(gatePath, gate);

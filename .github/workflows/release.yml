@@ -376,7 +376,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
+        shard: [1, 2, 3, 4]
     runs-on: ubuntu-24.04
     env:
       CARGO_INCREMENTAL: "0"
@@ -457,7 +457,7 @@ jobs:
           OPEN_COMPUTE_COVERAGE_HTML: "0"
           OPEN_COMPUTE_COVERAGE_IMAGES: ${{ steps.container-images.outputs.directory }}
           OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO: "1"
-        run: ./test/coverage.sh --shard ${{ matrix.shard }}/3 --jobs 2
+        run: ./test/coverage.sh --shard ${{ matrix.shard }}/4 --jobs 2
       - name: Release the CI browser AppArmor profile
         if: always()
         run: |
@@ -520,7 +520,7 @@ jobs:
           OPEN_COMPUTE_COVERAGE_HTML: "0"
         run: |
           set -euo pipefail
-          for shard in 1 2 3; do
+          for shard in 1 2 3 4; do
             mkdir -p ".temp/coverage-inputs/$shard"
             tar --use-compress-program=zstd -xf ".temp/coverage-downloads/coverage-raw-$shard.tar.zst" -C ".temp/coverage-inputs/$shard"
             rm ".temp/coverage-downloads/coverage-raw-$shard.tar.zst"
@@ -543,7 +543,7 @@ jobs:
     if: ${{ always() && !cancelled() && ((github.event_name == 'workflow_dispatch' && inputs.target == 'darwin-arm64') || (needs.failfast.result == 'success' && needs.fixture-images.result == 'success')) }}
     outputs:
       tag: ${{ needs.failfast.outputs.tag || steps.candidate.outputs.tag }}
-    strategy:
+    strategy: &package-other-strategy
       fail-fast: false
       matrix:
         include: ${{ fromJSON(github.event_name == 'workflow_dispatch' && '[{"target":"darwin-arm64","os":"macos-15"}]' || '[{"target":"darwin-arm64","os":"macos-15"},{"target":"linux-arm64","os":"ubuntu-24.04-arm"}]') }}
@@ -597,8 +597,6 @@ jobs:
           echo "OPEN_COMPUTE_TEST_CONTAINERS_INPUT=$input" >> "$GITHUB_ENV"
       - uses: ./.github/actions/prepare-container-fixture-images
         if: github.event_name == 'push'
-      - name: Fetch locked crates for offline packaged-binary tests
-        run: cargo fetch --locked
       - name: Package and verify the native single executable
         shell: bash
         env:
@@ -621,20 +619,130 @@ jobs:
                 throw new Error("packaged release identity does not match the matrix");
               }
             '
-          # Test-only transport driver; never included in the release artifact.
+      - name: Retain compiler timings
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: build-timings-${{ matrix.target }}
+          path: .temp/release-target/cargo-timings/
+          if-no-files-found: ignore
+      - name: Retain failed native builds for diagnosis and subsequent verification
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: unverified-native-build-${{ matrix.target }}
+          path: |
+            .temp/release-target/**/release/ocd
+            ${{ runner.temp }}/release-report-${{ matrix.target }}.json
+          if-no-files-found: ignore
+          compression-level: 0
+          retention-days: 14
+      - name: Show compiler cache statistics
+        if: always() && env.RUSTC_WRAPPER == 'sccache'
+        run: sccache --show-stats
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-${{ matrix.target }}
+          path: |
+            ${{ runner.temp }}/ocd-${{ needs.failfast.outputs.tag || steps.candidate.outputs.tag }}-${{ matrix.target }}
+            ${{ runner.temp }}/release-report-${{ matrix.target }}.json
+            ${{ runner.temp }}/candidate-provenance.json
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
+  package-linux-x64:
+    name: package (linux-x64, ubuntu-24.04)
+    needs: [failfast, fixture-images]
+    if: ${{ always() && !cancelled() && ((github.event_name == 'workflow_dispatch' && inputs.target == 'linux-x64') || (needs.failfast.result == 'success' && needs.fixture-images.result == 'success')) }}
+    outputs:
+      tag: ${{ needs.failfast.outputs.tag || steps.candidate.outputs.tag }}
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        include:
+          - target: linux-x64
+            os: ubuntu-24.04
+    steps: *package-steps
+
+  upgrade-driver:
+    name: upgrade-driver (${{ matrix.target }}, ${{ matrix.os }})
+    needs: failfast
+    if: ${{ always() && !cancelled() && (github.event_name == 'workflow_dispatch' || needs.failfast.result == 'success') }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(github.event_name == 'workflow_dispatch' && (inputs.target == 'darwin-arm64' && '[{"target":"darwin-arm64","os":"macos-15"}]' || '[{"target":"linux-x64","os":"ubuntu-24.04"}]') || '[{"target":"darwin-arm64","os":"macos-15"},{"target":"linux-arm64","os":"ubuntu-24.04-arm"},{"target":"linux-x64","os":"ubuntu-24.04"}]') }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          lfs: true
+          ref: ${{ inputs.candidate-revision || github.sha }}
+      - uses: ./.github/actions/setup-open-compute
+        with:
+          sccache: "true"
+      - name: Build current runtime and application assets
+        run: bun run build
+      - name: Build the test-only upgrade transport driver
+        shell: bash
+        run: |
+          set -euo pipefail
+          export CARGO_TARGET_DIR="$GITHUB_WORKSPACE/.temp/release-target"
           host_target="$(rustc -vV | sed -n 's/^host: //p')"
-          cargo build --locked --offline --release --target "$host_target" -p open-compute-service \
+          cargo build --locked --release --target "$host_target" -p open-compute-service \
             --features test-support --bin install-upgrade-fixture
           cp "$CARGO_TARGET_DIR/$host_target/release/install-upgrade-fixture" "$RUNNER_TEMP/install-upgrade-fixture"
-          unset CARGO_TARGET_DIR
-          OPEN_COMPUTE_TEST_OCD="$destination" \
+      - uses: actions/upload-artifact@v7
+        with:
+          name: upgrade-driver-${{ matrix.target }}
+          path: ${{ runner.temp }}/install-upgrade-fixture
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+      - name: Show compiler cache statistics
+        if: always() && env.RUSTC_WRAPPER == 'sccache'
+        run: sccache --show-stats
+
+  package-gate-other:
+    name: package-gate (${{ matrix.target }}, ${{ matrix.os }})
+    needs: package-other
+    if: ${{ always() && !cancelled() && needs.package-other.result == 'success' }}
+    strategy: *package-other-strategy
+    runs-on: ${{ matrix.os }}
+    steps: &package-gate-steps
+      - uses: actions/checkout@v7
+        with:
+          lfs: true
+          ref: ${{ inputs.candidate-revision || github.sha }}
+      - uses: ./.github/actions/setup-open-compute
+        with:
+          sccache: "true"
+      - name: Build current runtime and application assets
+        run: bun run build
+      - name: Fetch locked crates for offline packaged-binary tests
+        run: cargo fetch --locked
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-${{ matrix.target }}
+          path: ${{ runner.temp }}/candidate
+      - name: Verify the native single executable
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ needs.package-linux-x64.outputs.tag || needs.package-other.outputs.tag }}
+          RELEASE_TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          candidate="$RUNNER_TEMP/candidate/ocd-$RELEASE_TAG-$RELEASE_TARGET"
+          chmod +x "$candidate"
+          OPEN_COMPUTE_TEST_OCD="$candidate" \
           OPEN_COMPUTE_PACKAGE_GATE_USER_ROOT=1 \
             ./test/gate.py single-binary --jobs 1
       - name: Exercise the packaged Dashboard against the candidate executable
         if: matrix.target == 'linux-arm64'
         shell: bash
         env:
-          RELEASE_TAG: ${{ needs.failfast.outputs.tag || steps.candidate.outputs.tag }}
+          RELEASE_TAG: ${{ needs.package-linux-x64.outputs.tag || needs.package-other.outputs.tag }}
           OPEN_COMPUTE_ADMIN_TOKEN: dev-admin-token
           OPEN_COMPUTE_DEPLOYER_TOKEN: dev-deployer-token
           OPEN_COMPUTE_READ_ONLY_TOKEN: dev-read-only-token
@@ -646,7 +754,7 @@ jobs:
           set -euo pipefail
           server_evidence="$GITHUB_WORKSPACE/.temp/dashboard-server"
           mkdir -p "$server_evidence"
-          candidate="$RUNNER_TEMP/ocd-$RELEASE_TAG-linux-arm64"
+          candidate="$RUNNER_TEMP/candidate/ocd-$RELEASE_TAG-linux-arm64"
           uid_home="$(getent passwd "$(id -u)" | cut -d: -f6)"
           [ -n "$uid_home" ]
           OPEN_COMPUTE_OCD_BIN="$candidate" \
@@ -670,44 +778,6 @@ jobs:
             dashboard.spec.ts lifecycle.spec.ts \
             --grep 'sign in survives page reload within the same tab|Worker create, detail, and deletion use the browser SDK'
       - uses: actions/upload-artifact@v7
-        with:
-          name: release-${{ matrix.target }}
-          path: |
-            ${{ runner.temp }}/ocd-${{ needs.failfast.outputs.tag || steps.candidate.outputs.tag }}-${{ matrix.target }}
-            ${{ runner.temp }}/release-report-${{ matrix.target }}.json
-            ${{ runner.temp }}/candidate-provenance.json
-          if-no-files-found: error
-          retention-days: 14
-          compression-level: 0
-      - uses: actions/upload-artifact@v7
-        with:
-          name: upgrade-driver-${{ matrix.target }}
-          path: ${{ runner.temp }}/install-upgrade-fixture
-          if-no-files-found: error
-          retention-days: 14
-          compression-level: 0
-      - name: Retain compiler timings
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: build-timings-${{ matrix.target }}
-          path: .temp/release-target/cargo-timings/
-          if-no-files-found: ignore
-      - name: Retain failed native builds for diagnosis and subsequent verification
-        if: failure()
-        uses: actions/upload-artifact@v7
-        with:
-          name: unverified-native-build-${{ matrix.target }}
-          path: |
-            .temp/release-target/**/release/ocd
-            ${{ runner.temp }}/release-report-${{ matrix.target }}.json
-            .temp/dashboard-e2e
-            .temp/dashboard-server
-            apps/dashboard/test-results
-          if-no-files-found: ignore
-          compression-level: 0
-          retention-days: 14
-      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: package-gate-${{ matrix.target }}
@@ -724,19 +794,17 @@ jobs:
         if: always() && env.RUSTC_WRAPPER == 'sccache'
         run: sccache --show-stats
 
-  package-linux-x64:
-    name: package (linux-x64, ubuntu-24.04)
-    needs: [failfast, fixture-images]
-    if: ${{ always() && !cancelled() && ((github.event_name == 'workflow_dispatch' && inputs.target == 'linux-x64') || (needs.failfast.result == 'success' && needs.fixture-images.result == 'success')) }}
-    outputs:
-      tag: ${{ needs.failfast.outputs.tag || steps.candidate.outputs.tag }}
+  package-gate-linux-x64:
+    name: package-gate (linux-x64, ubuntu-24.04)
+    needs: package-linux-x64
+    if: ${{ always() && !cancelled() && needs.package-linux-x64.result == 'success' }}
     runs-on: ubuntu-24.04
     strategy:
       matrix:
         include:
           - target: linux-x64
             os: ubuntu-24.04
-    steps: *package-steps
+    steps: *package-gate-steps
 
   package:
     needs: [failfast, package-linux-x64, package-other]
@@ -748,8 +816,8 @@ jobs:
       - run: "true"
 
   install-lifecycle:
-    needs: [failfast, package]
-    if: ${{ always() && !cancelled() && needs.package.result == 'success' && (github.event_name == 'workflow_dispatch' || needs.failfast.result == 'success') }}
+    needs: [failfast, package, upgrade-driver]
+    if: ${{ always() && !cancelled() && needs.package.result == 'success' && needs.upgrade-driver.result == 'success' && (github.event_name == 'workflow_dispatch' || needs.failfast.result == 'success') }}
     name: install-lifecycle (${{ matrix.name }})
     strategy:
       fail-fast: false
@@ -946,6 +1014,8 @@ jobs:
       [
         failfast,
         package,
+        package-gate-other,
+        package-gate-linux-x64,
         sdk-package,
         coverage,
         gateway-caddy-module,

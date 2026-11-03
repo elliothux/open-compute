@@ -85,9 +85,9 @@ class ImageWorkflowTests(unittest.TestCase):
     def test_release_requires_full_linux_workspace_and_coverage(self):
         source = (ROOT / '.github/workflows/release.yml').read_text()
         coverage = job(source, 'coverage-shards')
-        command = './test/coverage.sh --shard ${{ matrix.shard }}/3 --jobs 2'
+        command = './test/coverage.sh --shard ${{ matrix.shard }}/4 --jobs 2'
         self.assertIn(command, coverage)
-        self.assertIn('shard: [1, 2, 3]', coverage)
+        self.assertIn('shard: [1, 2, 3, 4]', coverage)
         self.assertIn('needs: [failfast, fixture-images]', coverage)
         self.assertIn('./test/coverage.sh merge', job(source, 'coverage'))
         self.assertNotIn('\n  integration:', source)

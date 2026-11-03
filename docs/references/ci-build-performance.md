@@ -2,7 +2,7 @@
 
 2026-09-26 的 GitHub Actions run 复盘；以下数字是墙钟，不是 runner 分钟。历史 run 的数字和缓存记录保留。
 
-Rust 工具直接调用 `cargo`。CI 缓存 Cargo registry/git 下载；package、coverage shard、普通 CI checks 和 product-gates 通过 sccache 使用 GitHub Actions 编译缓存，并关闭 incremental。
+Rust 工具直接调用 `cargo`。CI 缓存 Cargo registry/git 下载；package、package Gate、upgrade-driver、coverage shard、普通 CI checks 和 product-gates 通过 sccache 使用 GitHub Actions 编译缓存，并关闭 incremental。
 下文的历史 run 数字与研究取舍不代表当前缓存配置。
 
 ## 当前关键路径
@@ -129,9 +129,10 @@ workspace/final binary。当前没有应用 benchmark，且仓库 cache 已接�
   Rust、runtime、workerd、`ci.yml`、共享 setup 或未知路径仍执行完整静态资格。汇总 job `ci` 保留不变，
   避免分支保护因跳过具体 job 失效。
 - tag qualification：`failfast` 先验证 release environment、source/release identity、notes、SDK report
-  contract、npm credential 和目标版本。三个 coverage shard 与 package 并行， 在受控 egress fixture 中各执行一次 Gate 子集；三者合起来覆盖完整 workspace，包含 `workers`。
-- 三个正式平台 package：身份验证后即并行构建。三个 coverage shard 只等待 `failfast` 与 fixture images；候选 dispatch 在下载前复用 package 的同一来源校验步骤。含 `containers` 的第二片在 coverage flags 与 target 目录内先执行完整 workspace `cargo test --no-run`，得到本提交的 test-support Broker。Gate 再次调用同一 Cargo 构建只做 fresh 检查，保留精确对象且避免 feature graph 不同导致二次编译；其余两片不启动 Engine。`package` 等待全部平台，安装、stress、assemble 和 publish 仍等待全部包。
-- `test/gate.py` 定义唯一分区，拒绝遗漏、重复和未分配的新 workspace 目标。各片保留本片测试 object 与共享子进程 binary；merge 复用 Linux wrapper 的磁盘检查与空闲 SDK 清理，不启动 Engine，再合并所有原始 profile 和精确 object，检查 90.00% 行覆盖率。三个冷插桩构建会增加总 runner 时间。
+  contract、npm credential 和目标版本。四个 coverage shard 与 package 并行， 在受控 egress fixture 中各执行一次 Gate 子集；四者合起来覆盖完整 workspace，包含 `workers`。
+- 三个正式平台 package：身份验证后即并行构建。四个 coverage shard 只等待 `failfast` 与 fixture images；候选 dispatch 在下载前复用 package 的同一来源校验步骤。含 `containers` 的第二片在 coverage flags 与 target 目录内先执行完整 workspace `cargo test --no-run`，得到本提交的 test-support Broker。Gate 再次调用同一 Cargo 构建只做 fresh 检查，保留精确对象且避免 feature graph 不同导致二次编译；其余三片不启动 Engine。`package` 等待全部平台包上传。`upgrade-driver` 在 `failfast` 后独立构建；安装等待 `package` 与驱动，stress 等待 `package`。两个 package Gate 任务各等待对应 package producer，再下载包执行测试；assemble 等待全部 Gate 与原有检查，publish 等待 assemble。
+- 按 2026-11-02 候选 41490630149 的目标耗时、`--jobs 2` 与独占屏障估算，四片测试分别为 34.9、21.4、21.3、21.1 分钟。第一片 service library 本身为 31.6 分钟，另有同片的 3.3 分钟 process 分区；编译与 merge 仍可能使 coverage 超过 55 分钟。
+- `test/gate.py` 定义唯一分区，拒绝遗漏、重复和未分配的新 workspace 目标。各片保留本片测试 object 与共享子进程 binary；merge 复用 Linux wrapper 的磁盘检查与空闲 SDK 清理，不启动 Engine，再合并所有原始 profile 和精确 object，检查 90.00% 行覆盖率。四个冷插桩构建会增加总 runner 时间。
 - package 与普通 production hygiene 使用同一 executable verifier，生成 mode 0600 临时配置再查询
   capabilities，同时核对 release identity、版本、licenses 和嵌入 docs；不初始化平台数据目录。
 - `main` 不保护；`release` 要求 PR、最新 required `ci` 和讨论解决；tag 必须来自通过 CI 的 `release`。
@@ -143,7 +144,7 @@ workspace/final binary。当前没有应用 benchmark，且仓库 cache 已接�
 - 共享 setup 的 `sccache: "true"` 仅供 CI 显式启用，固定 action `v0.0.11` 与 sccache `v0.16.0`，使用 GitHub Actions cache backend、`RUSTC_WRAPPER=sccache`、`CARGO_INCREMENTAL=0`；每个启用 job 结束输出统计。
 - Linux CI coverage 在应用 llvm-cov flags 后直接调用 sccache，不恢复 llvm-cov wrapper。Broker 的环境白名单保留 coverage 与 sccache 配置；setup 先启动不自动闲置退出的 cache server，cache 凭据不进入 Gate 子进程。
 - provider/gateway、fixture images、coverage merge 与其他无显式启用的 job 保持原设置；生产启动和本地构建不依赖 sccache。
-- 原始 coverage 输入用 `zstd -T0` 归档，artifact 上传 compression-level 为 0；merge 解压全部三片后仍使用原始 profiles 与精确 objects。
+- 原始 coverage 输入用 `zstd -T0` 归档，artifact 上传 compression-level 为 0；merge 解压全部四片后仍使用原始 profiles 与精确 objects。
 - 正式 package profile 使用 `.temp/release-target/`，普通开发使用 `target/`；不互相覆盖，不把开发产物或缓存当发行物。
 - 保留 Cargo timings，结合 fresh units 与墙钟判断收益；最终链接等不可缓存部分仍可能占主要耗时。下一次必需 package run 提供测量，不为性能分析单独重复构建。
 - pin、source、生成资产和 artifact SHA 仍需校验。不得伪造 mtime、复用不同 revision 的二进制或把 cache hit 当成验证通过。诊断产物按[证据生命周期](testing.md#日志与保留证据)保留。
@@ -188,21 +189,21 @@ SKU，单独增加 SKU 预算不能覆盖它。要允许 cache 写入，Actions 
 
 该表保留当时的决定与依据；现行缓存策略以上节和 setup action 为准。
 
-| 候选                            | 当前决定与依据                                                                                                      |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| full CI 并行职责                | 三个 runner 把 89 秒 Clippy 与 80 秒 production link/scan 移出 core 关键路径；不再细拆，控制总 runner 成本          |
-| package 与 qualification 依赖   | 三包与 coverage 并行；第二片使用本提交的插桩 Broker，publish 保留所有依赖                                           |
-| coverage 构建并行               | 3 CPU macOS runner 上由 1 提到保守的 2；不改变 Gate/test 并发，以下一次完整 coverage 验证实际收益与资源稳定性       |
-| CI coverage HTML                | 正式 workflow 不上传或消费 HTML，跳过约 74 秒；本地默认继续生成                                                     |
-| Cargo target cache              | 保留按 profile/平台区分的依赖缓存；不盲目上传整个几十 GiB workspace target 导致缓存驱逐                             |
-| sccache                         | package、coverage、checks、product-gates 启用 GHA backend，关闭 incremental 并收集命中数据                          |
-| S3 SDK 默认 feature             | 生产注入自有 verified HTTP client；只保留 `rt-tokio`，删除未使用的默认 TLS client 与 SigV4a 依赖                    |
-| 容器 / cargo-chef               | 当前三个正式平台原生 runner 不增加一套容器构建；Linux 容器不能证明 macOS 原生行为，镜像不能直接复用所有架构的机器码 |
-| Fat LTO → ThinLTO               | timing 证实最终 binary 单元占 524.74 秒；改 ThinLTO，保留单 codegen unit，暂不叠加未测的运行时权衡                  |
-| 增加 codegen units              | 暖跑剩余 245.58 秒为最终 ThinLTO/link；没有应用 benchmark 前不拿未知运行时退化换几十秒构建时间                      |
-| 缓存完整 workspace/final binary | 当前 target/compiler cache 已证明 9 分钟暖跑；不增加 source-keyed 全量 target 缓存挤占 20 GB 配额                   |
-| nightly 编译参数 / 替换 linker  | 不引入 nightly 或未验证 linker；保持正式 Rust 1.98 和原生链接契约                                                   |
-| Gate 调度                       | 保持 `--jobs 2`；service lib 的 787/8 case 分区并行调度，但三分片 P0.5 矩阵继续独占，避免以资源争用换时序失败       |
+| 候选                            | 当前决定与依据                                                                                                           |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| full CI 并行职责                | 三个 runner 把 89 秒 Clippy 与 80 秒 production link/scan 移出 core 关键路径；不再细拆，控制总 runner 成本               |
+| package 与 qualification 依赖   | 三包、驱动与四片 coverage 并行；package Gate 在上传后运行，publish 保留所有依赖                                          |
+| coverage 构建并行               | 3 CPU macOS runner 上由 1 提到保守的 2；不改变 Gate/test 并发，以下一次完整 coverage 验证实际收益与资源稳定性            |
+| CI coverage HTML                | 正式 workflow 不上传或消费 HTML，跳过约 74 秒；本地默认继续生成                                                          |
+| Cargo target cache              | 保留按 profile/平台区分的依赖缓存；不盲目上传整个几十 GiB workspace target 导致缓存驱逐                                  |
+| sccache                         | package、package Gate、upgrade-driver、coverage、checks、product-gates 启用 GHA backend，关闭 incremental 并收集命中数据 |
+| S3 SDK 默认 feature             | 生产注入自有 verified HTTP client；只保留 `rt-tokio`，删除未使用的默认 TLS client 与 SigV4a 依赖                         |
+| 容器 / cargo-chef               | 当前三个正式平台原生 runner 不增加一套容器构建；Linux 容器不能证明 macOS 原生行为，镜像不能直接复用所有架构的机器码      |
+| Fat LTO → ThinLTO               | timing 证实最终 binary 单元占 524.74 秒；改 ThinLTO，保留单 codegen unit，暂不叠加未测的运行时权衡                       |
+| 增加 codegen units              | 暖跑剩余 245.58 秒为最终 ThinLTO/link；没有应用 benchmark 前不拿未知运行时退化换几十秒构建时间                           |
+| 缓存完整 workspace/final binary | 当前 target/compiler cache 已证明 9 分钟暖跑；不增加 source-keyed 全量 target 缓存挤占 20 GB 配额                        |
+| nightly 编译参数 / 替换 linker  | 不引入 nightly 或未验证 linker；保持正式 Rust 1.98 和原生链接契约                                                        |
+| Gate 调度                       | 保持 `--jobs 2`；service lib 的 787/8 case 分区并行调度，但三分片 P0.5 矩阵继续独占，避免以资源争用换时序失败            |
 
 ## 测试与复用边界
 

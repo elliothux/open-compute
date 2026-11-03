@@ -88,10 +88,13 @@ parser，producer 在写报告前即调用 consumer parser；schema 漂移不再
 `failfast` 不拉取 LFS、不构建 Rust/workerd、不跑 coverage 或完整 Gate。
 
 三个正式平台在校验后并行打包。`package-linux-x64` 构建 Linux x64，`package-other` 用同一步骤构建 Darwin ARM64 和 Linux ARM64。
-`package` 等待三个平台成功；安装、stress、assemble 和 publish 仍等待全部包。
-三个 coverage shard 与 package 并行，只依赖 `failfast` 和 `fixture-images`；候选 dispatch 在各片下载前独立验证 fixture run 来源。
-只有含 `containers` 的第二片在 coverage 环境与 target 目录中先执行 Gate 的完整 workspace `cargo test --no-run` 构建，得到本提交的 test-support Broker，再进入 Linux engine；三片都在受控 egress 中执行 workspace 子集。
-`coverage` 合并三片的原始 profile 和各片的精确 object 集合，再检查 90.00% 行覆盖率；release report 要求三片各有一份成功的 Gate 报告。
+打包任务以 `release-<target>` 上传结束。`upgrade-driver` 在 `failfast` 后独立构建三平台测试驱动；候选 dispatch 只构建所选平台。
+`package-gate-linux-x64` 等待 `package-linux-x64`，`package-gate-other` 等待 `package-other`，再下载对应包执行 `single-binary`；Linux ARM64 另执行 Dashboard e2e。
+`install-lifecycle` 等待 `package` 和 `upgrade-driver`，`stress` 只等待 `package`；`assemble` 应等待全部包、package Gate、安装、stress、coverage 和现有 provider/SDK 检查，`publish` 等待 `assemble` 与现有检查。
+`package` 在 tag push 时等待三个平台，候选 dispatch 时只等待所选平台。
+四个 coverage shard 与 package 并行，只依赖 `failfast` 和 `fixture-images`；候选 dispatch 在各片下载前独立验证 fixture run 来源。
+只有含 `containers` 的第二片在 coverage 环境与 target 目录中先执行 Gate 的完整 workspace `cargo test --no-run` 构建，得到本提交的 test-support Broker，再进入 Linux engine；四片都在受控 egress 中执行 workspace 子集。
+`coverage` 合并四片的原始 profile 和各片的精确 object 集合，再检查 90.00% 行覆盖率；release report 要求四片各有一份成功的 Gate 报告。
 静态资格直接复用 release source commit 已通过的 main `ci`，不在 tag workflow 重跑。
 三个原生 runner 使用正式 workerd lock 打包自己的 `ocd`，并以 `OPEN_COMPUTE_TEST_OCD` 跑单文件隔离、
 首启、重启和损坏拒绝测试。Linux ARM64 package 还对 production binary 执行精确的 embedded Dashboard
@@ -210,7 +213,7 @@ git push origin vX.Y.Z
 merge 等待所有 shard；publish 等待三个正式平台包与完整成功证据。任务依赖见 [CI 构建性能](ci-build-performance.md#当前执行分工)。
 
 push tag 是唯一发布触发器。随后在 GitHub Actions 的 `release` workflow 中确认所有 qualification、
-三个正式目标 package 和 `publish` job 成功，并在 GitHub Release 页面核对七个 assets。仓库已配置以下设置（2026-09-06 按用户要求迁移）：
+三个正式目标 package、package Gate 和 `publish` job 成功，并在 GitHub Release 页面核对七个 assets。仓库已配置以下设置（2026-09-06 按用户要求迁移）：
 
 - main 分支不启用分支保护；版本从 main 推进到唯一的 release 分支；release 分支要求 PR、最新 required `ci` 成功和讨论解决，禁止强推/删除；管理员同样受检查约束；
 - `Release tags` ruleset 限制 `v*` tag 创建/更新/删除，仅 repository admin maintainer 可 bypass；

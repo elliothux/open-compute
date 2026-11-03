@@ -396,7 +396,7 @@ test("release qualification and local Docker diagnostic keep their exact boundar
   );
   assert.match(
     workflow,
-    /name: Collect Rust coverage shard[\s\S]*?OPEN_COMPUTE_COVERAGE_IMAGES:[\s\S]*?OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO: "1"[\s\S]*?run: \.\/test\/coverage\.sh --shard \$\{\{ matrix\.shard \}\}\/3 --jobs 2/,
+    /name: Collect Rust coverage shard[\s\S]*?OPEN_COMPUTE_COVERAGE_IMAGES:[\s\S]*?OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO: "1"[\s\S]*?run: \.\/test\/coverage\.sh --shard \$\{\{ matrix\.shard \}\}\/4 --jobs 2/,
   );
   assert.doesNotMatch(workflow, /\n  integration:/);
   assert.match(
@@ -453,12 +453,12 @@ test("release qualification and local Docker diagnostic keep their exact boundar
   );
   assert.match(
     workflow,
-    /unset CARGO_TARGET_DIR[\s\S]*?OPEN_COMPUTE_TEST_OCD="\$destination"[\s\S]*?OPEN_COMPUTE_PACKAGE_GATE_USER_ROOT=1[\s\S]*?\.\/test\/gate\.py single-binary --jobs 1/,
+    /candidate="\$RUNNER_TEMP\/candidate\/ocd-\$RELEASE_TAG-\$RELEASE_TARGET"[\s\S]*?OPEN_COMPUTE_TEST_OCD="\$candidate"[\s\S]*?OPEN_COMPUTE_PACKAGE_GATE_USER_ROOT=1[\s\S]*?\.\/test\/gate\.py single-binary --jobs 1/,
   );
   assert.match(workflow, /path: \.temp\/release-target\/cargo-timings\//);
   assert.match(
     workflow,
-    /name: unverified-native-build-\$\{\{ matrix\.target \}\}[\s\S]*?\.temp\/dashboard-e2e[\s\S]*?\.temp\/dashboard-server[\s\S]*?apps\/dashboard\/test-results/,
+    /name: package-gate-\$\{\{ matrix\.target \}\}[\s\S]*?\.temp\/dashboard-e2e[\s\S]*?\.temp\/dashboard-server[\s\S]*?apps\/dashboard\/test-results/,
   );
   const coverage = await readFile(
     new URL("./coverage.sh", import.meta.url),
@@ -657,7 +657,15 @@ test("Cargo-heavy jobs opt into the pinned compiler cache and report statistics"
     /SCCACHE_GHA_ENABLED=true SCCACHE_IDLE_TIMEOUT=0 sccache --start-server/,
   );
   for (const [file, jobs] of [
-    [releaseWorkflowPath, ["coverage-shards", "package-other"]],
+    [
+      releaseWorkflowPath,
+      [
+        "coverage-shards",
+        "package-other",
+        "upgrade-driver",
+        "package-gate-other",
+      ],
+    ],
     [
       new URL("../.github/workflows/ci.yml", import.meta.url),
       ["checks", "product-gates"],
@@ -690,6 +698,10 @@ test("recovery rebuilds the stress index without accepting failed or unknown res
     "package (macos)",
     "package (arm64)",
     "package (x64)",
+    ...["macos", "arm64", "x64"].flatMap((target) => [
+      `package-gate (${target})`,
+      `upgrade-driver (${target})`,
+    ]),
     ...Array.from({ length: 5 }, (_, index) => `install-lifecycle (${index})`),
   ];
   const jobs = names.map((name, databaseId) => ({
@@ -1270,7 +1282,7 @@ test("installation qualification is a mandatory publication dependency", async (
   );
   assert.match(
     workflow,
-    /  install-lifecycle:\n    needs: \[failfast, package\]/,
+    /  install-lifecycle:\n    needs: \[failfast, package, upgrade-driver\]/,
   );
   for (const name of [
     "ubuntu-24-x64",
@@ -1288,7 +1300,7 @@ test("installation qualification is a mandatory publication dependency", async (
   );
   const recovery = await readFile(recoveryWorkflowPath, "utf8");
   assert.match(recovery, /startswith\("install-lifecycle \("\)/);
-  assert.match(recovery, /length == 15 and all\(\.conclusion == "success"\)/);
+  assert.match(recovery, /length == 21 and all\(\.conclusion == "success"\)/);
   await execFileAsync(
     "python3",
     ["-B", "-m", "unittest", "discover", "-s", "test/install-lifecycle"],
@@ -1343,6 +1355,9 @@ test("manual native qualification preserves immutable inputs and cannot publish"
     "package-linux-x64",
     "install-lifecycle",
     "stress",
+    "upgrade-driver",
+    "package-gate-other",
+    "package-gate-linux-x64",
   ]) {
     const job = workflow.jobs[name];
     assert.match(job.if, /always\(\) && !cancelled\(\)/);
@@ -1665,7 +1680,7 @@ test("native ARM fixture provenance binds the exact source, tree and workflow", 
 test("release coverage partitions start independently and publish waits for their merged result", async () => {
   const { jobs } = await parseWorkflow(releaseWorkflowPath);
   const shards = jobs["coverage-shards"];
-  assert.deepEqual(shards.strategy.matrix.shard, [1, 2, 3]);
+  assert.deepEqual(shards.strategy.matrix.shard, [1, 2, 3, 4]);
   assert.deepEqual(shards.needs, ["failfast", "fixture-images"]);
   assert.equal(jobs.coverage.needs, "coverage-shards");
   assert.deepEqual(
@@ -1691,4 +1706,157 @@ test("release coverage partitions start independently and publish waits for thei
   assert.ok(
     jobs["package-linux-x64"].if.includes("inputs.target == 'linux-x64'"),
   );
+});
+
+test("package uploads unblock qualification while native gates still block assembly", async () => {
+  const { jobs } = await parseWorkflow(releaseWorkflowPath);
+  const packages = jobs["package-other"].steps;
+  assert.equal(packages.at(-1).with.name, "release-${{ matrix.target }}");
+  assert.doesNotMatch(
+    JSON.stringify(packages),
+    /install-upgrade-fixture|gate.py single-binary|run-e2e/,
+  );
+  assert.equal(jobs["upgrade-driver"].needs, "failfast");
+  assert.deepEqual(jobs["install-lifecycle"].needs, [
+    "failfast",
+    "package",
+    "upgrade-driver",
+  ]);
+  assert.match(
+    jobs["install-lifecycle"].if,
+    /needs.upgrade-driver.result == 'success'/,
+  );
+  assert.deepEqual(jobs.stress.needs, ["failfast", "package"]);
+  for (const suffix of ["other", "linux-x64"]) {
+    const name = `package-gate-${suffix}`;
+    const gate = jobs[name];
+    assert.equal(gate.needs, `package-${suffix}`);
+    assert.ok(jobs.assemble.needs.includes(name));
+    assert.deepEqual(gate.strategy, jobs[`package-${suffix}`].strategy);
+    assert.equal(
+      gate.steps.find((step) => step.uses === "actions/download-artifact@v8")
+        .with.name,
+      "release-${{ matrix.target }}",
+    );
+    assert.equal(
+      gate.steps.find(
+        (step) => step.with?.name === "package-gate-${{ matrix.target }}",
+      ).if,
+      "always()",
+    );
+    assert.doesNotMatch(
+      JSON.stringify(gate.steps),
+      /prepare-container-fixture-images|p23-images-/,
+    );
+    assert.ok(
+      gate.steps.some((step) =>
+        step.run?.includes("./test/gate.py single-binary --jobs 1"),
+      ),
+    );
+    assert.equal(
+      gate.steps.find((step) =>
+        step.name?.startsWith("Exercise the packaged Dashboard"),
+      ).if,
+      "matrix.target == 'linux-arm64'",
+    );
+  }
+  for (const name of ["package", "coverage", "install-lifecycle", "stress"])
+    assert.ok(jobs.assemble.needs.includes(name));
+  assert.ok(jobs.publish.needs.includes("assemble"));
+  assert.match(
+    jobs.coverage.steps.find((step) => step.run?.includes("coverage.sh merge"))
+      .run,
+    /for shard in 1 2 3 4; do/,
+  );
+
+  // Evaluate the actual dispatch conditions with failfast and the unused producer skipped.
+  function evaluate(expression, event, target, needs) {
+    const source = expression
+      .replace(/^\$\{\{\s*|\s*\}\}$/g, "")
+      .replace(
+        /\bneeds\.([\w-]+)/g,
+        (_, name) => `needs[${JSON.stringify(name)}]`,
+      );
+    return new Function(
+      "github",
+      "inputs",
+      "needs",
+      "always",
+      "cancelled",
+      "fromJSON",
+      `return (${source});`,
+    )(
+      { event_name: event },
+      { target },
+      needs,
+      () => true,
+      () => false,
+      JSON.parse,
+    );
+  }
+  for (const [event, target, expected] of [
+    ["push", "", ["darwin-arm64", "linux-arm64", "linux-x64"]],
+    ["workflow_dispatch", "linux-x64", ["linux-x64"]],
+    ["workflow_dispatch", "darwin-arm64", ["darwin-arm64"]],
+  ]) {
+    const dispatch = event === "workflow_dispatch";
+    const needs = {
+      failfast: { result: dispatch ? "skipped" : "success" },
+      "fixture-images": { result: dispatch ? "skipped" : "success" },
+      "package-other": {
+        result: dispatch && target === "linux-x64" ? "skipped" : "success",
+      },
+      "package-linux-x64": {
+        result: dispatch && target === "darwin-arm64" ? "skipped" : "success",
+      },
+      package: { result: "success" },
+      "upgrade-driver": { result: "success" },
+    };
+    const activeTargets = [];
+    for (const name of ["package-other", "package-linux-x64"]) {
+      const job = jobs[name];
+      const active = evaluate(job.if, event, target, needs);
+      assert.equal(active, needs[name].result === "success");
+      if (active) {
+        const matrix =
+          typeof job.strategy.matrix.include === "string"
+            ? evaluate(job.strategy.matrix.include, event, target, needs)
+            : job.strategy.matrix.include;
+        activeTargets.push(...matrix.map((item) => item.target));
+      }
+      assert.equal(
+        evaluate(
+          jobs[name.replace("package-", "package-gate-")].if,
+          event,
+          target,
+          needs,
+        ),
+        active,
+      );
+    }
+    assert.deepEqual(activeTargets.sort(), expected);
+    assert.deepEqual(
+      evaluate(
+        jobs["upgrade-driver"].strategy.matrix.include,
+        event,
+        target,
+        needs,
+      )
+        .map((item) => item.target)
+        .sort(),
+      expected,
+    );
+    for (const name of ["package", "upgrade-driver", "install-lifecycle"])
+      assert.equal(evaluate(jobs[name].if, event, target, needs), true);
+    for (const name of ["stress", "coverage-shards"])
+      assert.equal(
+        evaluate(jobs[name].if, event, target, needs),
+        target !== "darwin-arm64",
+      );
+    needs["upgrade-driver"].result = "failure";
+    assert.equal(
+      evaluate(jobs["install-lifecycle"].if, event, target, needs),
+      false,
+    );
+  }
 });

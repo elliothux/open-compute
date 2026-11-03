@@ -52,9 +52,11 @@ jobs:
             [.jobs[] | select(.name == "failfast" or .name == "coverage" or .name == "sdk-package" or .name == "stress"
               or .name == "gateway-caddy-module" or .name == "ai-search-qualification" or .name == "s3-provider-qualification"
               or (.name | startswith("package ("))
+              or (.name | startswith("package-gate ("))
+              or (.name | startswith("upgrade-driver ("))
               or (.name | startswith("install-lifecycle (")))]
             | group_by(.name) | map(max_by(.databaseId))
-            | if length == 15 and all(.conclusion == "success") then "success" else "failed" end')"
+            | if length == 21 and all(.conclusion == "success") then "success" else "failed" end')"
           test "$state" = success
       - name: Check out the immutable release source
         env:

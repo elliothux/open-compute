@@ -839,7 +839,7 @@ class GateTests(unittest.TestCase):
 
     def test_coverage_shards_partition_the_real_workspace_without_overlap(self):
         targets = gate.resolve_targets([], True)
-        shards = [gate.coverage_shard(targets, f'{index}/3') for index in range(1, 4)]
+        shards = [gate.coverage_shard(targets, f'{index}/4') for index in range(1, 5)]
         assigned = [name for shard in shards for name in shard]
         self.assertEqual(set(assigned), set(targets))
         self.assertEqual(len(assigned), len(set(assigned)))
@@ -847,14 +847,14 @@ class GateTests(unittest.TestCase):
             self.assertEqual(gate.SERVICE_LIB_TARGET in shard,
                              gate.SERVICE_PROCESS_TARGET in shard)
         self.assertEqual(sum('containers' in shard for shard in shards), 1)
-        for invalid in ('0/3', '4/3', '1/4', '1', 'x/3'):
+        for invalid in ('0/4', '5/4', '1/3', '1', 'x/4', '01/4'):
             with self.assertRaisesRegex(ValueError, '--shard'):
                 gate.coverage_shard(targets, invalid)
         with self.assertRaisesRegex(ValueError, 'full workspace target inventory'):
-            gate.coverage_shard({**targets, 'new-cargo-target': next(iter(targets.values()))}, '1/3')
+            gate.coverage_shard({**targets, 'new-cargo-target': next(iter(targets.values()))}, '1/4')
         with self.assertRaisesRegex(ValueError, 'full workspace target inventory'):
             gate.coverage_shard({name: target for name, target in targets.items()
-                                 if name != 'containers'}, '1/3')
+                                 if name != 'containers'}, '1/4')
 
     def test_workspace_rejects_gate_selection_before_build(self):
         with patch.object(gate.sys, 'argv', ['gate.py', '--workspace', 'workers']), \
@@ -1208,7 +1208,7 @@ if '--list' not in sys.argv:
             self.assertEqual(len(list((root / '.temp/coverage').iterdir())), 2)
 
             # A shard collects raw inputs without applying a partial-coverage threshold.
-            result = subprocess.run([str(script), '--shard=1/3'], capture_output=True,
+            result = subprocess.run([str(script), '--shard=1/4'], capture_output=True,
                                     env=environment, timeout=10)
             self.assertEqual(result.returncode, 0, result.stderr.decode())
             shard = next(path for path in (root / '.temp/coverage').iterdir()
@@ -1261,7 +1261,7 @@ elif args not in (['llvm-cov', '--version'], ['fetch', '--locked']):
                 'uname': "print('Linux')",
                 'test/gate.py': """import os,sys,json
 from pathlib import Path
-containers = '--shard=2/3' in sys.argv
+containers = '--shard=2/4' in sys.argv
 if '--list' in sys.argv:
     print(json.dumps({'targets': ['containers'] if containers else ['kv']}))
 else:
@@ -1293,7 +1293,7 @@ exec env FIXTURE_BROKER=1 "$@"
                            'OPEN_COMPUTE_COVERAGE_IMAGES': str(root / 'images'),
                            'SCCACHE_GHA_ENABLED': 'true', 'GITHUB_ACTIONS': 'true',
                            'RUSTC_WRAPPER': 'sccache'}
-            for shard, ci in [('1/3', 'true'), ('3/3', 'false'), ('2/3', 'true')]:
+            for shard, ci in [('1/4', 'true'), ('3/4', 'false'), ('4/4', 'true'), ('2/4', 'true')]:
                 environment['GITHUB_ACTIONS'] = ci
                 result = subprocess.run([str(script), '--shard=' + shard],
                                         capture_output=True, env=environment, timeout=10)
