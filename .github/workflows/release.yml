@@ -682,6 +682,10 @@ jobs:
       - uses: ./.github/actions/setup-open-compute
         with:
           sccache: "true"
+      - *candidate-fixture-provenance
+      - uses: ./.github/actions/prepare-container-fixture-images
+        with:
+          run-id: ${{ inputs.fixture-run-id }}
       - name: Build current runtime and application assets
         run: bun run build
       - name: Build the test-only upgrade transport driver
@@ -718,6 +722,10 @@ jobs:
       - uses: ./.github/actions/setup-open-compute
         with:
           sccache: "true"
+      - *candidate-fixture-provenance
+      - uses: ./.github/actions/prepare-container-fixture-images
+        with:
+          run-id: ${{ inputs.fixture-run-id }}
       - name: Build current runtime and application assets
         run: bun run build
       - name: Fetch locked crates for offline packaged-binary tests

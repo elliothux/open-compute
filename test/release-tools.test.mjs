@@ -1744,9 +1744,18 @@ test("package uploads unblock qualification while native gates still block assem
       ).if,
       "always()",
     );
-    assert.doesNotMatch(
-      JSON.stringify(gate.steps),
-      /prepare-container-fixture-images|p23-images-/,
+    // bun run build needs the fixture input; a dispatch verifies its run first.
+    const names = gate.steps.map((step) => step.name ?? step.uses);
+    assert.ok(
+      names.indexOf("Verify candidate fixture provenance") <
+        names.indexOf("./.github/actions/prepare-container-fixture-images"),
+    );
+    assert.equal(
+      gate.steps.find(
+        (step) =>
+          step.uses === "./.github/actions/prepare-container-fixture-images",
+      ).with["run-id"],
+      "${{ inputs.fixture-run-id }}",
     );
     assert.ok(
       gate.steps.some((step) =>

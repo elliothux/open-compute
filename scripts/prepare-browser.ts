@@ -186,10 +186,14 @@ try {
         join(scratch, "profile/DevToolsActivePort"),
         "utf8",
       );
-      const candidate = Number(text.split("\n")[0]);
-      if (!Number.isInteger(candidate) || candidate < 1 || candidate > 65535)
-        throw new Error("invalid native debugger port");
-      port = candidate;
+      // Chrome creates the file before writing it; wait for the complete first line.
+      const newline = text.indexOf("\n");
+      if (newline !== -1) {
+        const candidate = Number(text.slice(0, newline));
+        if (!Number.isInteger(candidate) || candidate < 1 || candidate > 65535)
+          throw new Error("invalid native debugger port");
+        port = candidate;
+      } else await delay(25);
     } catch (error) {
       if (!(
         error instanceof Error &&
