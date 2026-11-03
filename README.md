@@ -128,6 +128,10 @@ Production remains **one release executable and one shared daemon**, with explic
 
 For the complete installation path, remote targets, CI, environments, tail, and rollback, see [Get started](https://open-compute.dev/docs/get-started/) and [Develop](https://open-compute.dev/docs/develop/).
 
+## One-Click Deploy
+
+[![Deploy on RepoCloud](https://d16t0pc4846x52.cloudfront.net/deploylobe.svg)](https://repocloud.io/details/Open%20Compute/)
+
 ## Architecture
 
 <p align="center">
