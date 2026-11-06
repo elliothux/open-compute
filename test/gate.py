@@ -156,12 +156,14 @@ GROUPS['products'] = ['contract', 'recorded', *GROUPS['core'], *GROUPS['platform
                       *GROUPS['scheduling'], *PRODUCT_SCENARIOS]
 
 
-# Balanced from release 41581410808 with --jobs 2 and exclusive barriers.
+# Balanced from release 42243289682 with --jobs 2 and exclusive barriers.
 COVERAGE_SHARDS = (
     (
+        'cf-resources',
         'open-compute-service.lib.open_compute_service',
         'open-compute-service.test.msrv_audit',
         'open-compute-storage.lib.open_compute_storage',
+        'python-frameworks',
         'service-process-lifecycle',
     ),
     (
@@ -206,7 +208,6 @@ COVERAGE_SHARDS = (
     (
         'capabilities',
         'cf-cli',
-        'cf-resources',
         'contract',
         'core-products',
         'crash-recovery',
@@ -221,7 +222,6 @@ COVERAGE_SHARDS = (
         'open-compute-search.lib.open_compute_search',
         'open-compute-vendor-schema.bin.open-compute-vendor-schema',
         'python-durable-objects',
-        'python-frameworks',
         'python-queues',
         'queues',
         'r2',
