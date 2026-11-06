@@ -18,6 +18,14 @@ inputs:
     description: Cache Rust compilation in GitHub Actions (CI only)
     required: false
     default: "false"
+  rust-cache-key:
+    description: Cache compiled third-party crates under this build-kind key (empty disables)
+    required: false
+    default: ""
+  rust-cache-target:
+    description: Cargo target directory that rust-cache saves, relative to the workspace
+    required: false
+    default: target
   llvm-cov:
     description: Install cargo-llvm-cov
     required: false
@@ -86,7 +94,17 @@ runs:
         toolchain: 1.98.0
         components: ${{ inputs.rust-components }}
 
+    # Restores dependency artifacts and registry downloads; workspace crates still rebuild.
+    - name: Cache compiled Rust dependencies
+      if: ${{ inputs.rust-cache-key != '' }}
+      uses: Swatinem/rust-cache@v2.9.3
+      with:
+        shared-key: ${{ inputs.rust-cache-key }}-${{ runner.os }}-${{ runner.arch }}
+        workspaces: ". -> ${{ inputs.rust-cache-target }}"
+        cache-bin: "false"
+
     - name: Cache Cargo downloads
+      if: ${{ inputs.rust-cache-key == '' }}
       uses: actions/cache@v6
       with:
         path: |

@@ -131,7 +131,7 @@ workspace/final binary。当前没有应用 benchmark，且仓库 cache 已接�
 - tag qualification：`failfast` 先验证 release environment、source/release identity、notes、SDK report
   contract、npm credential 和目标版本。四个 coverage shard 与 package 并行， 在受控 egress fixture 中各执行一次 Gate 子集；四者合起来覆盖完整 workspace，包含 `workers`。
 - 三个正式平台 package：身份验证后即并行构建。四个 coverage shard 只等待 `failfast` 与 fixture images；候选 dispatch 在下载前复用 package 的同一来源校验步骤。含 `containers` 的第二片在 coverage flags 与 target 目录内先执行完整 workspace `cargo test --no-run`，得到本提交的 test-support Broker。Gate 再次调用同一 Cargo 构建只做 fresh 检查，保留精确对象且避免 feature graph 不同导致二次编译；其余三片不启动 Engine。`package` 等待全部平台包上传。`upgrade-driver` 在 `failfast` 后独立构建；安装等待 `package` 与驱动，stress 等待 `package`。两个 package Gate 任务各等待对应 package producer，再下载包执行测试；assemble 等待全部 Gate 与原有检查，publish 等待 assemble。
-- 候选 41581410808 中 service library 串行用时 31.6 分钟，是最长的单个目标。workspace Gate 把其普通 case 按名称 SHA-256 首字节奇偶分成 `open-compute-service.lib.open_compute_service` 与 `service-library-second-half`，与独占的 `service-process-lifecycle` 共用同一 executable；三者由完整 inventory 推导，单片只持有其中一部分时结果不变。两半分在第一、四片，workers library 移到第三片。候选 42243289682 中第二半用时 988 秒，第一半 735 秒，因此 `cf-resources` 与 `python-frameworks` 从第四片移到第一片。
+- 候选 41581410808 中 service library 串行用时 31.6 分钟，是最长的单个目标。workspace Gate 把其普通 case 按名称 SHA-256 首字节奇偶分成 `open-compute-service.lib.open_compute_service` 与 `service-library-second-half`，与独占的 `service-process-lifecycle` 共用同一 executable；三者由完整 inventory 推导，单片只持有其中一部分时结果不变。两半分在第一、四片，workers library 移到第三片。候选 42265222727 中第二片先为 Broker 编译一次，Gate 又重编 26 个 crate 用时 581 秒：Broker 环境丢弃 setup-python 导出的 `PKG_CONFIG_PATH`，`aws-lc-sys` 与 `xberg-tesseract` 的 pkg-config build script 因此重跑。Broker 现在保留该变量。merge 并行解压四个分片并并行执行 lcov 与 summary 两次 export。候选 42243289682 中第二半用时 988 秒，第一半 735 秒，因此 `cf-resources` 与 `python-frameworks` 从第四片移到第一片。
 - `test/gate.py` 定义唯一分区，拒绝遗漏、重复和未分配的新 workspace 目标。各片保留本片测试 object 与共享子进程 binary；merge 复用 Linux wrapper 的磁盘检查与空闲 SDK 清理，不启动 Engine，再合并所有原始 profile 和精确 object，检查 90.00% 行覆盖率。四个冷插桩构建会增加总 runner 时间。
 - package 与普通 production hygiene 使用同一 executable verifier，生成 mode 0600 临时配置再查询
   capabilities，同时核对 release identity、版本、licenses 和嵌入 docs；不初始化平台数据目录。
@@ -189,21 +189,21 @@ SKU，单独增加 SKU 预算不能覆盖它。要允许 cache 写入，Actions 
 
 该表保留当时的决定与依据；现行缓存策略以上节和 setup action 为准。
 
-| 候选                            | 当前决定与依据                                                                                                           |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| full CI 并行职责                | 三个 runner 把 89 秒 Clippy 与 80 秒 production link/scan 移出 core 关键路径；不再细拆，控制总 runner 成本               |
-| package 与 qualification 依赖   | 三包、驱动与四片 coverage 并行；package Gate 在上传后运行，publish 保留所有依赖                                          |
-| coverage 构建并行               | 3 CPU macOS runner 上由 1 提到保守的 2；不改变 Gate/test 并发，以下一次完整 coverage 验证实际收益与资源稳定性            |
-| CI coverage HTML                | 正式 workflow 不上传或消费 HTML，跳过约 74 秒；本地默认继续生成                                                          |
-| Cargo target cache              | 保留按 profile/平台区分的依赖缓存；不盲目上传整个几十 GiB workspace target 导致缓存驱逐                                  |
-| sccache                         | package、package Gate、upgrade-driver、coverage、checks、product-gates 启用 GHA backend，关闭 incremental 并收集命中数据 |
-| S3 SDK 默认 feature             | 生产注入自有 verified HTTP client；只保留 `rt-tokio`，删除未使用的默认 TLS client 与 SigV4a 依赖                         |
-| 容器 / cargo-chef               | 当前三个正式平台原生 runner 不增加一套容器构建；Linux 容器不能证明 macOS 原生行为，镜像不能直接复用所有架构的机器码      |
-| Fat LTO → ThinLTO               | timing 证实最终 binary 单元占 524.74 秒；改 ThinLTO，保留单 codegen unit，暂不叠加未测的运行时权衡                       |
-| 增加 codegen units              | 暖跑剩余 245.58 秒为最终 ThinLTO/link；没有应用 benchmark 前不拿未知运行时退化换几十秒构建时间                           |
-| 缓存完整 workspace/final binary | 当前 target/compiler cache 已证明 9 分钟暖跑；不增加 source-keyed 全量 target 缓存挤占 20 GB 配额                        |
-| nightly 编译参数 / 替换 linker  | 不引入 nightly 或未验证 linker；保持正式 Rust 1.98 和原生链接契约                                                        |
-| Gate 调度                       | 保持 `--jobs 2`；service lib 的 787/8 case 分区并行调度，但三分片 P0.5 矩阵继续独占，避免以资源争用换时序失败            |
+| 候选                            | 当前决定与依据                                                                                                                  |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| full CI 并行职责                | 三个 runner 把 89 秒 Clippy 与 80 秒 production link/scan 移出 core 关键路径；不再细拆，控制总 runner 成本                      |
+| package 与 qualification 依赖   | 三包、驱动与四片 coverage 并行；package Gate 在上传后运行，publish 保留所有依赖                                                 |
+| coverage 构建并行               | 3 CPU macOS runner 上由 1 提到保守的 2；不改变 Gate/test 并发，以下一次完整 coverage 验证实际收益与资源稳定性                   |
+| CI coverage HTML                | 正式 workflow 不上传或消费 HTML，跳过约 74 秒；本地默认继续生成                                                                 |
+| Cargo target cache              | coverage、package、upgrade-driver、package Gate 用 rust-cache 按构建种类/平台保存第三方依赖；失败不保存，不缓存 workspace crate |
+| sccache                         | package、package Gate、upgrade-driver、coverage、checks、product-gates 启用 GHA backend，关闭 incremental 并收集命中数据        |
+| S3 SDK 默认 feature             | 生产注入自有 verified HTTP client；只保留 `rt-tokio`，删除未使用的默认 TLS client 与 SigV4a 依赖                                |
+| 容器 / cargo-chef               | 当前三个正式平台原生 runner 不增加一套容器构建；Linux 容器不能证明 macOS 原生行为，镜像不能直接复用所有架构的机器码             |
+| Fat LTO → ThinLTO               | timing 证实最终 binary 单元占 524.74 秒；改 ThinLTO，保留单 codegen unit，暂不叠加未测的运行时权衡                              |
+| 增加 codegen units              | 暖跑剩余 245.58 秒为最终 ThinLTO/link；没有应用 benchmark 前不拿未知运行时退化换几十秒构建时间                                  |
+| 缓存完整 workspace/final binary | 当前 target/compiler cache 已证明 9 分钟暖跑；不增加 source-keyed 全量 target 缓存挤占 20 GB 配额                               |
+| nightly 编译参数 / 替换 linker  | 不引入 nightly 或未验证 linker；保持正式 Rust 1.98 和原生链接契约                                                               |
+| Gate 调度                       | 保持 `--jobs 2`；service lib 的 787/8 case 分区并行调度，但三分片 P0.5 矩阵继续独占，避免以资源争用换时序失败                   |
 
 ## 测试与复用边界
 

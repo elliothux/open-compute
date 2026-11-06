@@ -447,9 +447,11 @@ test("release qualification and local Docker diagnostic keep their exact boundar
     workflow + ci + rustSetup + localDryRunDockerfile,
     /\bmbx\b|MBX_|mr-boxington/,
   );
+  // Dependency artifacts come from one pinned rust-cache; failed builds never save half-built targets.
+  assert.match(rustSetup, /uses: Swatinem\/rust-cache@v2\.9\.3/);
   assert.doesNotMatch(
     workflow + ci + rustSetup,
-    /Swatinem\/rust-cache|rust-cache-key|rust-cache-save/,
+    /cache-on-failure|rust-cache-save/,
   );
   assert.match(
     workflow,

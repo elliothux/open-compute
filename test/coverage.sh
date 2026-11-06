@@ -183,10 +183,13 @@ if [ "$#" -eq 0 ]; then
   exit 1
 fi
 
+# The two exports read the same inputs; run them together and fail if either fails.
 "$llvm_cov" export --format=lcov --instr-profile="$profdata" \
-  --ignore-filename-regex="$ignore_filename_regex" "$@" > "$report_dir/lcov.info"
+  --ignore-filename-regex="$ignore_filename_regex" "$@" > "$report_dir/lcov.info" &
+lcov_pid=$!
 "$llvm_cov" export --format=text --summary-only --instr-profile="$profdata" \
   --ignore-filename-regex="$ignore_filename_regex" "$@" > "$report_dir/summary.json"
+wait "$lcov_pid"
 if [ "$coverage_html" = 1 ]; then
   "$llvm_cov" show --format=html --output-dir="$report_dir/html" --instr-profile="$profdata" \
     --ignore-filename-regex="$ignore_filename_regex" "$@" >/dev/null

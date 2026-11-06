@@ -442,6 +442,7 @@ jobs:
       - uses: ./.github/actions/setup-open-compute
         with:
           sccache: "true"
+          rust-cache-key: coverage
           llvm-cov: "true"
           rust-components: llvm-tools-preview
           browser-fixture: "true"
@@ -518,13 +519,21 @@ jobs:
       - name: Merge all shards and enforce 90 percent Rust line coverage
         env:
           OPEN_COMPUTE_COVERAGE_HTML: "0"
+          # Merge needs only llvm-tools; skip the rustfmt and clippy downloads from rust-toolchain.toml.
+          RUSTUP_TOOLCHAIN: 1.98.0
         run: |
           set -euo pipefail
+          extract() {
+            mkdir -p ".temp/coverage-inputs/$1"
+            tar --use-compress-program=zstd -xf ".temp/coverage-downloads/coverage-raw-$1.tar.zst" -C ".temp/coverage-inputs/$1"
+            rm ".temp/coverage-downloads/coverage-raw-$1.tar.zst"
+          }
+          pids=()
           for shard in 1 2 3 4; do
-            mkdir -p ".temp/coverage-inputs/$shard"
-            tar --use-compress-program=zstd -xf ".temp/coverage-downloads/coverage-raw-$shard.tar.zst" -C ".temp/coverage-inputs/$shard"
-            rm ".temp/coverage-downloads/coverage-raw-$shard.tar.zst"
+            extract "$shard" &
+            pids+=("$!")
           done
+          for pid in "${pids[@]}"; do wait "$pid"; done
           ./test/coverage.sh merge .temp/coverage-inputs/*/run-*
       - uses: actions/upload-artifact@v7
         if: always()
@@ -564,6 +573,8 @@ jobs:
       - uses: ./.github/actions/setup-open-compute
         with:
           sccache: "true"
+          rust-cache-key: package
+          rust-cache-target: .temp/release-target
       - name: Verify reused native fixture graphs against candidate sources
         if: github.event_name == 'workflow_dispatch'
         shell: bash
@@ -682,6 +693,8 @@ jobs:
       - uses: ./.github/actions/setup-open-compute
         with:
           sccache: "true"
+          rust-cache-key: upgrade-driver
+          rust-cache-target: .temp/release-target
       - *candidate-fixture-provenance
       - uses: ./.github/actions/prepare-container-fixture-images
         with:
@@ -722,6 +735,7 @@ jobs:
       - uses: ./.github/actions/setup-open-compute
         with:
           sccache: "true"
+          rust-cache-key: package-gate
       - *candidate-fixture-provenance
       - uses: ./.github/actions/prepare-container-fixture-images
         with:

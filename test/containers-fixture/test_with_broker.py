@@ -24,6 +24,7 @@ class CommandEnvironment(unittest.TestCase):
                   'OPEN_COMPUTE_TEST_WORKERD': '/controlled/workerd',
                   'OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE': '/controlled/workerd.tar',
                   'RUSTC_WRAPPER': 'sccache', 'SCCACHE_GHA_ENABLED': 'true',
+                  'PKG_CONFIG_PATH': '/controlled/python/lib/pkgconfig',
                   'SCCACHE_SERVER_PORT': '4226', 'LLVM_PROFILE_FILE': '/controlled/%m.profraw',
                   'CARGO_LLVM_COV': '1', 'RUSTFLAGS': '-C instrument-coverage',
                   'OPEN_COMPUTE_COVERAGE_RUN_DIR': '/controlled/coverage-run',
@@ -37,7 +38,7 @@ class CommandEnvironment(unittest.TestCase):
                     'OPEN_COMPUTE_TEST_WORKERD', 'OPEN_COMPUTE_BUILD_WORKERD_ARCHIVE',
                     'RUSTC_WRAPPER', 'SCCACHE_GHA_ENABLED', 'SCCACHE_SERVER_PORT',
                     'LLVM_PROFILE_FILE', 'CARGO_LLVM_COV', 'RUSTFLAGS',
-                    'OPEN_COMPUTE_COVERAGE_RUN_DIR'):
+                    'OPEN_COMPUTE_COVERAGE_RUN_DIR', 'PKG_CONFIG_PATH'):
             self.assertEqual(value[key], source[key])
         for key in ('NPM_TOKEN', 'GITHUB_TOKEN', 'CLOUDFLARE_API_TOKEN',
                     'OPEN_COMPUTE_ADMIN_TOKEN', 'DYLD_INSERT_LIBRARIES'):
