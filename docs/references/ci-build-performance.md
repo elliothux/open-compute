@@ -131,7 +131,7 @@ workspace/final binary。当前没有应用 benchmark，且仓库 cache 已接�
 - tag qualification：`failfast` 先验证 release environment、source/release identity、notes、SDK report
   contract、npm credential 和目标版本。四个 coverage shard 与 package 并行， 在受控 egress fixture 中各执行一次 Gate 子集；四者合起来覆盖完整 workspace，包含 `workers`。
 - 三个正式平台 package：身份验证后即并行构建。四个 coverage shard 只等待 `failfast` 与 fixture images；候选 dispatch 在下载前复用 package 的同一来源校验步骤。含 `containers` 的第二片在 coverage flags 与 target 目录内先执行完整 workspace `cargo test --no-run`，得到本提交的 test-support Broker。Gate 再次调用同一 Cargo 构建只做 fresh 检查，保留精确对象且避免 feature graph 不同导致二次编译；其余三片不启动 Engine。`package` 等待全部平台包上传。`upgrade-driver` 在 `failfast` 后独立构建；安装等待 `package` 与驱动，stress 等待 `package`。两个 package Gate 任务各等待对应 package producer，再下载包执行测试；assemble 等待全部 Gate 与原有检查，publish 等待 assemble。
-- 按 2026-11-02 候选 41490630149 的目标耗时、`--jobs 2` 与独占屏障估算，四片测试分别为 34.9、21.4、21.3、21.1 分钟。第一片 service library 本身为 31.6 分钟，另有同片的 3.3 分钟 process 分区；编译与 merge 仍可能使 coverage 超过 55 分钟。
+- 候选 41581410808 中 service library 串行用时 31.6 分钟，是最长的单个目标。workspace Gate 把其普通 case 按名称 SHA-256 首字节奇偶分成 `open-compute-service.lib.open_compute_service` 与 `service-library-second-half`，与独占的 `service-process-lifecycle` 共用同一 executable；三者由完整 inventory 推导，单片只持有其中一部分时结果不变。两半分在第一、四片，workers library 移到第三片。
 - `test/gate.py` 定义唯一分区，拒绝遗漏、重复和未分配的新 workspace 目标。各片保留本片测试 object 与共享子进程 binary；merge 复用 Linux wrapper 的磁盘检查与空闲 SDK 清理，不启动 Engine，再合并所有原始 profile 和精确 object，检查 90.00% 行覆盖率。四个冷插桩构建会增加总 runner 时间。
 - package 与普通 production hygiene 使用同一 executable verifier，生成 mode 0600 临时配置再查询
   capabilities，同时核对 release identity、版本、licenses 和嵌入 docs；不初始化平台数据目录。

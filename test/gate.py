@@ -43,6 +43,10 @@ TypedTarget = namedtuple(
     defaults=[None, (), (), (), 600, 'light', 'runner'],
 )
 SERVICE_LIB_TARGET = 'open-compute-service.lib.open_compute_service'
+# The serial service library outlasts every other target; workspace runs split its
+# ordinary cases by name hash so two coverage shards can run the halves in parallel.
+SERVICE_LIB_SECOND_TARGET = 'service-library-second-half'
+SERVICE_PARTITIONS = {SERVICE_LIB_TARGET, SERVICE_LIB_SECOND_TARGET, SERVICE_PROCESS_TARGET}
 # Only these targets have been audited for independent TempDir/SQLite/S3/port-0 state
 # and bounded resource use. The service library's real-process subset remains an
 # exclusive barrier instead of starving parallel version probes.
@@ -152,14 +156,12 @@ GROUPS['products'] = ['contract', 'recorded', *GROUPS['core'], *GROUPS['platform
                       *GROUPS['scheduling'], *PRODUCT_SCENARIOS]
 
 
-# Balanced from release 41490630149 with --jobs 2 and exclusive barriers.
-# Keep the service-library case partitions together for discovery validation.
+# Balanced from release 41581410808 with --jobs 2 and exclusive barriers.
 COVERAGE_SHARDS = (
     (
         'open-compute-service.lib.open_compute_service',
         'open-compute-service.test.msrv_audit',
         'open-compute-storage.lib.open_compute_storage',
-        'open-compute-workers.lib.open_compute_workers',
         'service-process-lifecycle',
     ),
     (
@@ -190,6 +192,7 @@ COVERAGE_SHARDS = (
         'open-compute-service.test.cli',
         'open-compute-service.test.p1_reliability',
         'open-compute-service.test.p5_snapshot_restore',
+        'open-compute-workers.lib.open_compute_workers',
         'python-main',
         'python-runtime',
         'python-services',
@@ -224,6 +227,7 @@ COVERAGE_SHARDS = (
         'r2',
         'recorded',
         'scheduler',
+        'service-library-second-half',
         'services-events',
         'services-recovery',
         'workflow-product',
@@ -345,7 +349,7 @@ def discovered_cases(log, kind='cargo-test'):
     return tuple(sorted(cases))
 
 
-def verify_case_inventory(targets, prepared):
+def verify_case_inventory(targets, prepared, workspace=False):
     """Do not turn a renamed, new, or filtered-out test into successful acceptance."""
     inventories = {
         item['target']: discovered_cases(item['log'], targets[item['target']].kind)
@@ -357,13 +361,11 @@ def verify_case_inventory(targets, prepared):
         if expected != actual:
             raise ValueError(f'{name}: case registry mismatch; missing={sorted(expected - actual)}; '
                              f'unregistered={sorted(actual - expected)}')
-    service_partitions = {SERVICE_LIB_TARGET, SERVICE_PROCESS_TARGET} & targets.keys()
+    # A coverage shard may hold only some partitions; each is derived from the full inventory.
+    service_partitions = SERVICE_PARTITIONS & targets.keys() if workspace else set()
     if service_partitions:
-        if service_partitions != {SERVICE_LIB_TARGET, SERVICE_PROCESS_TARGET}:
-            raise ValueError('service library case partitions must be planned together')
-        ordinary_inventory = set(inventories[SERVICE_LIB_TARGET])
-        process_inventory = set(inventories[SERVICE_PROCESS_TARGET])
-        if ordinary_inventory != process_inventory:
+        ordinary_inventory = set(inventories[min(service_partitions)])
+        if any(set(inventories[name]) != ordinary_inventory for name in service_partitions):
             raise ValueError('service library case partitions discovered different inventories')
         exclusive = set(SERVICE_PROCESS_CASES)
         if missing := exclusive - ordinary_inventory:
@@ -371,8 +373,14 @@ def verify_case_inventory(targets, prepared):
         ordinary = ordinary_inventory - exclusive
         if not ordinary or ordinary & exclusive or ordinary | exclusive != ordinary_inventory:
             raise ValueError('service library case partition is incomplete or overlapping')
-        inventories[SERVICE_LIB_TARGET] = tuple(sorted(ordinary))
-        inventories[SERVICE_PROCESS_TARGET] = tuple(sorted(exclusive))
+        second = {case for case in ordinary
+                  if hashlib.sha256(case.encode()).digest()[0] & 1}
+        if not second or second == ordinary:
+            raise ValueError('service library halves must both contain cases')
+        partitions = {SERVICE_LIB_TARGET: ordinary - second, SERVICE_LIB_SECOND_TARGET: second,
+                      SERVICE_PROCESS_TARGET: exclusive}
+        for name in service_partitions:
+            inventories[name] = tuple(sorted(partitions[name]))
     return {name: target._replace(cases=inventories[name]) for name, target in targets.items()}
 
 
@@ -409,6 +417,7 @@ def resolve_targets(selected, workspace):
                 )
                 if workspace and label == SERVICE_LIB_TARGET:
                     found[label] = resolved._replace(exclusive=False)
+                    found[SERVICE_LIB_SECOND_TARGET] = resolved._replace(exclusive=False)
                     found[SERVICE_PROCESS_TARGET] = resolved._replace(exclusive=True)
                 else:
                     found[label] = resolved
@@ -711,9 +720,8 @@ def build_targets(targets, directory, workspace, *, coverage_targets=None):
     for name, target in cargo_targets.items():
         key = (target.package_id, target.name, target.kind)
         expected.setdefault(key, []).append(name)
-    allowed_aliases = {SERVICE_LIB_TARGET, SERVICE_PROCESS_TARGET}
     for names in expected.values():
-        if len(names) > 1 and set(names) != allowed_aliases:
+        if len(names) > 1 and not set(names) <= SERVICE_PARTITIONS:
             raise RuntimeError(f'Cargo test executable has duplicate Gate owners: {sorted(names)}')
     command = ['cargo', 'test', '--locked', '--offline',
                '--all-features', '--no-run', '--message-format=json']
@@ -1154,7 +1162,7 @@ def main():
                                  'processes_executed': len(prepared), 'targets': prepared}
         if len(prepared) != len(targets) or any(result['exit_code'] for result in prepared):
             raise RuntimeError('test harness preparation failed; no product tests started')
-        targets = verify_case_inventory(targets, prepared)
+        targets = verify_case_inventory(targets, prepared, args.workspace)
         plans = round_plan(targets, rounds)
         report['round_plan'] = plan_summary(plans)
         report['inventory_verified'] = True
