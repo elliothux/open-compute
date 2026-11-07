@@ -150,7 +150,13 @@ support bundle 不采集输入文档、Markdown、pipe 或 child stderr 正文�
 运行时磁盘会产生独立文件；“单二进制”指分发物，不指单进程或零磁盘写入。
 data-dir 与 macOS staging 所在文件系统应允许执行，并为解压文件、执行副本及业务状态留足空间。
 
-当前 Linux fork 使用 Ubuntu 24.04 runner 与 Bazel `release_linux` 的 LLVM 22 toolchain 构建，二进制符号基线要求 glibc 2.38+；ocd 同时受实际编译主机的 libc 基线约束。
+Linux 发行基线是 glibc 2.34（RHEL/Rocky/Alma 9、Ubuntu 22.04、Debian 12），定义在 `scripts/glibc-baseline.ts`。
+`package-release.ts` 读取 ocd 与内嵌 workerd 的 `.gnu.version_r`：任一二进制要求高于基线的 `GLIBC_` 版本、
+动态链接 `libstdc++.so` 或要求 `GLIBCXX_`/`CXXABI_` 时打包失败；`assemble-release.ts` 对每个 Linux artifact 复查，
+并在 `release.json` 中记录 `glibc`。`install.sh` 先校验 `release.json`，主机 glibc 低于该值或主机不报告 glibc（如 musl）时，
+在下载二进制前报错。正式 pin r25 的 workerd 仍在 Ubuntu 24.04 上构建（要求 `GLIBC_2.38`），v0.4.0 的 ocd 还动态链接
+libstdc++；在 2.34 基线上重建两者之前，Linux 发行打包会按上述检查失败
+（[#194](https://github.com/elliothux/open-compute/issues/194)）。
 容器示例与 CI 使用 Ubuntu 24.04，不使用 scratch/Alpine。macOS 与 CPU 要求继承
 [正式 pin upstream base 的要求](https://github.com/cloudflare/workerd/tree/d99bc6b777e35d72d71c2f1fe2fd1db53284528a#running-workerd)。
 服务配置见 examples/systemd、examples/launchd 和 examples/container；三者保持同一 binary/config/data-dir 合同，凭据不得嵌入镜像、service unit 或发行文件。

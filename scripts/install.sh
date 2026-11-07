@@ -233,6 +233,35 @@ lookup_sum() {
   awk -v name="${name}" '$2 == name { print $1; found=1 } END { exit !found }' "${sums_file}"
 }
 
+version_at_least() {
+  # Compare dotted numeric versions: succeed when $1 >= $2.
+  awk -v have="$1" -v need="$2" 'BEGIN {
+    n = split(have, a, "."); m = split(need, b, ".")
+    for (i = 1; i <= (n > m ? n : m); i++) {
+      if (a[i] + 0 > b[i] + 0) exit 0
+      if (a[i] + 0 < b[i] + 0) exit 1
+    }
+    exit 0
+  }'
+}
+
+require_host_glibc() {
+  # release.json records the minimum glibc of each Linux artifact.
+  manifest=$1
+  target=$2
+  required=$(awk -v target="\"${target}\"" '
+    /"target"[[:space:]]*:/ { current = index($0, target) > 0 }
+    current && /"glibc"[[:space:]]*:/ {
+      sub(/.*"glibc"[[:space:]]*:[[:space:]]*"/, ""); sub(/".*/, ""); print; exit
+    }' "${manifest}")
+  [ -n "${required}" ] || return 0
+  host=$(getconf GNU_LIBC_VERSION 2>/dev/null | awk '$1 == "glibc" { print $2 }')
+  [ -n "${host}" ] \
+    || die "ocd for ${target} requires glibc ${required} or newer; this host does not report a glibc version (musl is unsupported)"
+  version_at_least "${host}" "${required}" \
+    || die "ocd for ${target} requires glibc ${required} or newer; this host has glibc ${host}"
+}
+
 refuse_foreign_destination() {
   if [ ! -e "${DEST}" ] && [ ! -L "${DEST}" ]; then
     return 0
@@ -295,13 +324,17 @@ main() {
     || die "failed to download release.json"
   curl -fsSL --max-time 60 -o "${work}/SHA256SUMS" "${base}/SHA256SUMS" \
     || die "failed to download SHA256SUMS"
-  curl -fsSL --max-time 600 -o "${work}/${asset}" "${base}/${asset}" \
-    || die "failed to download ${asset}"
 
   expected_manifest=$(lookup_sum "${work}/SHA256SUMS" "release.json") \
     || die "SHA256SUMS missing release.json"
   actual_manifest=$(sha256_file "${work}/release.json")
   [ "${expected_manifest}" = "${actual_manifest}" ] || die "release.json checksum mismatch"
+  case "${target}" in
+    linux-*) require_host_glibc "${work}/release.json" "${target}" ;;
+  esac
+
+  curl -fsSL --max-time 600 -o "${work}/${asset}" "${base}/${asset}" \
+    || die "failed to download ${asset}"
 
   expected_bin=$(lookup_sum "${work}/SHA256SUMS" "${asset}") \
     || die "SHA256SUMS missing ${asset}"

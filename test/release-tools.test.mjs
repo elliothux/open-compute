@@ -29,6 +29,11 @@ import {
   workspaceVersion,
 } from "../scripts/assemble-release.ts";
 import { loadCaddyPin, prepareCaddy } from "../scripts/caddy-archive.ts";
+import {
+  checkGlibcBaseline,
+  elfLinkage,
+  LINUX_GLIBC_BASELINE,
+} from "../scripts/glibc-baseline.ts";
 import { verifyReleaseExecutable } from "../scripts/verify-release-executable.ts";
 import { verifyReleasePackage } from "../scripts/verify-release-package.ts";
 import {
@@ -833,7 +838,9 @@ test("release assembly requires and describes the exact three native executables
   try {
     for (const target of releaseTargets) {
       const filename = `ocd-v1.2.3-${target}`;
-      const bytes = Buffer.from(`native-${target}`);
+      const bytes = target.startsWith("linux-")
+        ? syntheticElf(["libc.so.6"], [["libc.so.6", ["GLIBC_2.34"]]])
+        : Buffer.from(`native-${target}`);
       await writeFile(join(root, filename), bytes);
       await writeFile(
         join(root, `release-report-${target}.json`),
@@ -850,7 +857,7 @@ test("release assembly requires and describes the exact three native executables
     await createReleaseEvidence(
       evidenceDirectory,
       identity,
-      sha256(Buffer.from("native-linux-x64")),
+      sha256(await readFile(join(root, "ocd-v1.2.3-linux-x64"))),
     );
     const badReportPath = join(root, "release-report-linux-x64.json");
     const badReport = JSON.parse(await readFile(badReportPath, "utf8"));
@@ -896,8 +903,12 @@ test("release assembly requires and describes the exact three native executables
       cloudflareSdkVersion: "7.3.0",
     });
     assert.deepEqual(
-      manifest.artifacts.map((artifact) => artifact.target),
-      releaseTargets,
+      manifest.artifacts.map((artifact) => [artifact.target, artifact.glibc]),
+      [
+        ["darwin-arm64", undefined],
+        ["linux-arm64", "2.34"],
+        ["linux-x64", "2.34"],
+      ],
     );
     const checksums = await readFile(join(root, "SHA256SUMS"), "utf8");
     assert.equal(checksums.trim().split("\n").length, 6);
@@ -1869,5 +1880,173 @@ test("package uploads unblock qualification while native gates still block assem
       evaluate(jobs["install-lifecycle"].if, event, target, needs),
       false,
     );
+  }
+});
+
+/** Build a minimal ELF64 with DT_NEEDED and one `.gnu.version_r` entry per library. */
+function syntheticElf(needed, requirements) {
+  const strings = [
+    "",
+    ...needed,
+    ...requirements.flatMap(([file, names]) => [file, ...names]),
+  ];
+  const offsets = new Map();
+  let strtab = Buffer.alloc(0);
+  for (const value of strings) {
+    if (offsets.has(value)) continue;
+    offsets.set(value, strtab.length);
+    strtab = Buffer.concat([strtab, Buffer.from(`${value}\0`, "latin1")]);
+  }
+  const dynamic = Buffer.alloc((needed.length + 1) * 16);
+  needed.forEach((library, index) => {
+    dynamic.writeBigInt64LE(1n, index * 16);
+    dynamic.writeBigUInt64LE(BigInt(offsets.get(library)), index * 16 + 8);
+  });
+  const verneed = [];
+  requirements.forEach(([file, names], index) => {
+    const need = Buffer.alloc(16 + names.length * 16);
+    need.writeUInt16LE(1, 0);
+    need.writeUInt16LE(names.length, 2);
+    need.writeUInt32LE(offsets.get(file), 4);
+    need.writeUInt32LE(16, 8);
+    need.writeUInt32LE(index + 1 < requirements.length ? need.length : 0, 12);
+    names.forEach((name, position) => {
+      const aux = 16 + position * 16;
+      need.writeUInt32LE(offsets.get(name), aux + 8);
+      need.writeUInt32LE(position + 1 < names.length ? 16 : 0, aux + 12);
+    });
+    verneed.push(need);
+  });
+  const versionR = Buffer.concat(verneed);
+  const header = Buffer.alloc(64);
+  header.writeUInt32BE(0x7f454c46, 0);
+  header[4] = 2;
+  header[5] = 1;
+  const bodies = [strtab, dynamic, versionR];
+  const bodyOffsets = [];
+  let cursor = 64;
+  for (const body of bodies) {
+    bodyOffsets.push(cursor);
+    cursor += body.length;
+  }
+  header.writeBigUInt64LE(BigInt(cursor), 0x28);
+  header.writeUInt16LE(64, 0x3a);
+  header.writeUInt16LE(4, 0x3c);
+  const sections = Buffer.alloc(4 * 64);
+  const section = (index, type, body, link, info) => {
+    const base = index * 64;
+    sections.writeUInt32LE(type, base + 4);
+    sections.writeBigUInt64LE(BigInt(bodyOffsets[body]), base + 0x18);
+    sections.writeBigUInt64LE(BigInt(bodies[body].length), base + 0x20);
+    sections.writeUInt32LE(link, base + 0x28);
+    sections.writeUInt32LE(info, base + 0x2c);
+  };
+  section(1, 3, 0, 0, 0);
+  section(2, 6, 1, 1, 0);
+  section(3, 0x6ffffffe, 2, 1, requirements.length);
+  return Buffer.concat([header, ...bodies, sections]);
+}
+
+test("Linux release binaries stay within the glibc baseline without a dynamic C++ runtime", () => {
+  assert.equal(LINUX_GLIBC_BASELINE, "2.34");
+  const ok = syntheticElf(
+    ["libc.so.6", "libm.so.6"],
+    [
+      ["libc.so.6", ["GLIBC_2.2.5", "GLIBC_2.34", "GLIBC_PRIVATE"]],
+      ["libm.so.6", ["GLIBC_2.29"]],
+    ],
+  );
+  assert.deepEqual(elfLinkage(ok).needed, ["libc.so.6", "libm.so.6"]);
+  assert.deepEqual(elfLinkage(ok).versions.get("libm.so.6"), ["GLIBC_2.29"]);
+  assert.equal(checkGlibcBaseline(ok, "ocd"), "2.34");
+  assert.throws(
+    () =>
+      checkGlibcBaseline(
+        syntheticElf(["libc.so.6"], [["libc.so.6", ["GLIBC_2.38"]]]),
+        "ocd",
+      ),
+    /requires GLIBC_2.38, above the GLIBC_2.34/,
+  );
+  assert.throws(
+    () =>
+      checkGlibcBaseline(
+        syntheticElf(["libc.so.6"], [["libstdc++.so.6", ["GLIBCXX_3.4.31"]]]),
+        "workerd",
+      ),
+    /system C\+\+ runtime GLIBCXX_3.4.31/,
+  );
+  assert.throws(
+    () => checkGlibcBaseline(syntheticElf(["libstdc++.so.6"], []), "ocd"),
+    /links libstdc\+\+ dynamically/,
+  );
+  assert.throws(() => elfLinkage(Buffer.from("#!/bin/sh\n")), /ELF64/);
+});
+
+test("installer refuses a host below the Linux glibc baseline before downloading the binary", async () => {
+  const root = await mkdtemp(join(tmpdir(), "oc-install-glibc-test-"));
+  const commands = join(root, "commands");
+  await mkdir(commands);
+  await writeTargetCommands(commands);
+  await writeTestCommand(
+    commands,
+    "getconf",
+    '#!/bin/sh\n[ "$1" = "GNU_LIBC_VERSION" ] || exit 2\n[ -n "$OPEN_COMPUTE_TEST_GLIBC" ] || exit 1\nprintf \'glibc %s\\n\' "$OPEN_COMPUTE_TEST_GLIBC"\n',
+  );
+  const target = "linux-x64";
+  const asset = `ocd-v1.2.3-${target}`;
+  const release = join(root, "releases/v1.2.3");
+  const binary = Buffer.from(
+    '#!/bin/sh\n[ "$1" = "--version" ] || exit 2\nprintf \'ocd 1.2.3\\n\'\n',
+  );
+  const manifest = Buffer.from(
+    `${JSON.stringify(
+      {
+        version: "1.2.3",
+        tag: "v1.2.3",
+        artifacts: [
+          { target: "darwin-arm64" },
+          { target, filename: asset, glibc: "2.34" },
+        ],
+      },
+      null,
+      2,
+    )}\n`,
+  );
+  await mkdir(release, { recursive: true });
+  await writeFile(join(release, "release.json"), manifest);
+  await writeFile(
+    join(release, "SHA256SUMS"),
+    `${sha256(manifest)}  release.json\n${sha256(binary)}  ${asset}\n`,
+  );
+  const install = (home, glibc) =>
+    execFileAsync("/bin/sh", [installerPath], {
+      env: {
+        ...process.env,
+        HOME: home,
+        OPEN_COMPUTE_RELEASE_DOWNLOAD_BASE: `file://${join(root, "releases")}`,
+        OPEN_COMPUTE_RELEASE_TAG: "v1.2.3",
+        OPEN_COMPUTE_TEST_ARCH: "x86_64",
+        OPEN_COMPUTE_TEST_OS: "Linux",
+        OPEN_COMPUTE_TEST_UID: "1000",
+        OPEN_COMPUTE_TEST_GLIBC: glibc,
+        SHELL: "/bin/sh",
+        PATH: `${commands}:${process.env.PATH ?? ""}`,
+      },
+    });
+  try {
+    // The binary asset is absent, so reaching the download would fail differently.
+    await assert.rejects(
+      install(join(root, "old-home"), "2.28"),
+      /requires glibc 2\.34 or newer; this host has glibc 2\.28/,
+    );
+    await assert.rejects(
+      install(join(root, "musl-home"), ""),
+      /does not report a glibc version/,
+    );
+    await writeFile(join(release, asset), binary, { mode: 0o755 });
+    const result = await install(join(root, "new-home"), "2.34");
+    assert.match(result.stderr, /installed 1\.2\.3/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
   }
 });

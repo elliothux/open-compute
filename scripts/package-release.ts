@@ -3,6 +3,7 @@ import { link, mkdtemp, open, readFile, rm, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { prepareCaddy } from "./caddy-archive.ts";
+import { checkGlibcBaseline } from "./glibc-baseline.ts";
 import { verifyReleaseExecutable } from "./verify-release-executable.ts";
 import {
   absoluteDestination,
@@ -71,6 +72,10 @@ try {
   );
   const source = join(buildDirectory, target, "release/ocd");
   const bytes = await readFile(source);
+  if (pin.target.startsWith("linux-")) {
+    checkGlibcBaseline(bytes, "ocd");
+    checkGlibcBaseline(await readFile(pin.binary), "workerd");
+  }
   const file = await open(temporary, "wx", 0o500);
   ownsTemporary = true;
   try {

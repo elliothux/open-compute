@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { lstat, open, readdir, readFile } from "node:fs/promises";
 import { basename, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { checkGlibcBaseline, LINUX_GLIBC_BASELINE } from "./glibc-baseline.ts";
 import { releaseTestReport } from "./release-test-report.ts";
 import { command, repository, sha256 } from "./workerd-archive.ts";
 
@@ -244,6 +245,7 @@ export async function verifyPackageArtifact(
       `${target} package report does not match the immutable release inputs`,
     );
   }
+  if (target.startsWith("linux-")) checkGlibcBaseline(bytes, filename);
   return report;
 }
 
@@ -305,6 +307,8 @@ export async function assembleRelease(
       filename,
       bytes: report.bytes,
       sha256: report.sha256,
+      // install.sh refuses an older host before it downloads the binary.
+      ...(os === "linux" ? { glibc: LINUX_GLIBC_BASELINE } : {}),
     });
   }
 
