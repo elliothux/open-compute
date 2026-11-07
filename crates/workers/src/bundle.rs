@@ -22,9 +22,7 @@ pub struct BundleLimits {
     pub max_manifest_bytes: usize,
     /// Maximum module count.
     pub max_modules: usize,
-    /// Maximum bytes in one module.
-    pub max_module_bytes: usize,
-    /// Maximum raw module bytes across the bundle.
+    /// Maximum raw module bytes across the bundle; one module may use all of it.
     pub max_total_module_bytes: usize,
     /// Maximum complete canonical artifact bytes.
     pub max_artifact_bytes: usize,
@@ -41,7 +39,6 @@ impl BundleLimits {
     pub const DEFAULT: Self = Self {
         max_manifest_bytes: 1024 * 1024,
         max_modules: 4096,
-        max_module_bytes: 8 * 1024 * 1024,
         max_total_module_bytes: 32 * 1024 * 1024,
         max_artifact_bytes: 34 * 1024 * 1024,
     };
@@ -292,9 +289,6 @@ impl CanonicalBundle {
         let mut total = 0_usize;
         for module in modules {
             let name = canonical_module_name(&module.name)?;
-            if module.bytes.len() > limits.max_module_bytes {
-                return Err(too_large());
-            }
             total = total
                 .checked_add(module.bytes.len())
                 .ok_or_else(too_large)?;
@@ -428,7 +422,7 @@ impl CanonicalBundle {
                 return Err(invalid("module offsets are not contiguous"));
             }
             let size = usize::try_from(module.size).map_err(|_| too_large())?;
-            if size > limits.max_module_bytes {
+            if size > limits.max_total_module_bytes {
                 return Err(too_large());
             }
             let start = blob_offset
@@ -560,7 +554,7 @@ fn parse_manifest(
             return Err(invalid("module offsets are not contiguous"));
         }
         let module_size = usize::try_from(module.size).map_err(|_| too_large())?;
-        if module_size > limits.max_module_bytes {
+        if module_size > limits.max_total_module_bytes {
             return Err(too_large());
         }
         if module.name == manifest.main_module {

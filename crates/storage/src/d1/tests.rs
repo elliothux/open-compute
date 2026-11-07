@@ -65,6 +65,8 @@ mod exec_commit_failure_keeps_data_rolled_back_and_head_reconcilable;
 
 mod authorizer_blocks_cross_database_internal_and_connection_state_sql;
 
+mod authorizer_allows_fts5_writes_and_match;
+
 mod migration_ledger_is_atomic_idempotent_and_detects_drift;
 
 mod migration_gap_failure_and_authorizer_rollback_without_ledger_rows;

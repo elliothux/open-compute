@@ -35,8 +35,8 @@ Artifacts binding。正式 runtime lock 的 `workersSdk` 字段记录 integratio
 当前 scanner 已发现 revision `01a855ec4bd180a1173f1b4587ef0fd0ca9f55e6` 新增 AI Search item schema，而 stable SDK 尚未同步，下一轮继续
 保持 `blocked`，不改变上述 formal pin。
 
-Worker bundle 使用通用本地结构限制：4096 modules、单 module 8 MiB、总 module bytes 32 MiB、manifest 1 MiB，
-canonical artifact 默认 34 MiB。multipart streaming、离线 base64 encoder 和 framework importer 保持同一预算；
+Worker bundle 使用通用本地结构限制：4096 modules、总 module bytes 32 MiB、manifest 1 MiB，
+canonical artifact 默认 34 MiB。与 Cloudflare 相同，单个 module 不另设上限，可以使用全部 module 预算。multipart streaming、离线 base64 encoder 和 framework importer 保持同一预算；
 扩大 `workers.max_bundle_bytes` 不解除结构限制。Cloudflare 当前声明 64 MiB uncompressed Worker size，
 本地差异记录于 [`OC-WKR-LIMIT-001`](p1-deviations.md)，不声明 hosted quota parity。Python 普通部署的已记录资格证据使用正式 R4 workerd pin、Pyodide `314.0.6_2026-08-17_6` 与未修改 SDK 1.9.2。
 

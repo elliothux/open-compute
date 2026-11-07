@@ -95,24 +95,19 @@ pub(crate) async fn parse_worker_upload(
         let content_type = field.content_type().map(ToOwned::to_owned);
         let mut bytes = Vec::new();
         while let Some(chunk) = field.chunk().await.map_err(|_| invalid())? {
-            let next_part = bytes.len().checked_add(chunk.len()).ok_or_else(too_large)?;
             let aggregate = if is_metadata {
                 &mut metadata_total
             } else {
                 &mut module_total
             };
             *aggregate = aggregate.checked_add(chunk.len()).ok_or_else(too_large)?;
+            // A part never exceeds its aggregate, so one module may use the whole module budget.
             let aggregate_limit = if is_metadata {
                 MAX_METADATA_BYTES
             } else {
                 limits.max_total_module_bytes
             };
-            let part_limit = if is_metadata {
-                MAX_METADATA_BYTES
-            } else {
-                limits.max_module_bytes
-            };
-            if *aggregate > aggregate_limit || next_part > part_limit {
+            if *aggregate > aggregate_limit {
                 return Err(too_large());
             }
             bytes.extend_from_slice(&chunk);

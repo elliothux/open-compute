@@ -52,14 +52,14 @@ pub(crate) fn encode_bundle(
     let mut modules = Vec::with_capacity(input.modules.len());
     let mut total = 0_usize;
     for module in input.modules {
-        if module.bytes_base64.len() > limits.max_module_bytes.div_ceil(3) * 4 {
+        if module.bytes_base64.len() > limits.max_total_module_bytes.div_ceil(3) * 4 {
             return Err(too_large());
         }
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(module.bytes_base64)
             .map_err(|_| invalid("Worker module base64 is invalid"))?;
         total = total.checked_add(bytes.len()).ok_or_else(too_large)?;
-        if bytes.len() > limits.max_module_bytes || total > limits.max_total_module_bytes {
+        if total > limits.max_total_module_bytes {
             return Err(too_large());
         }
         modules.push(ModuleInput {
@@ -123,17 +123,14 @@ mod tests {
     #[test]
     fn full_module_budget_round_trips_through_bounded_base64_input() {
         let limits = BundleLimits::default();
+        let main_bytes = 9 * 1024 * 1024;
         let mut modules = vec![serde_json::json!({"name": "index.js", "type": "esModule",
                 "bytesBase64": base64::engine::general_purpose::STANDARD
-                    .encode(vec![b' '; limits.max_module_bytes])})];
-        for index in 1..4 {
-            modules.push(
-                serde_json::json!({"name": format!("data{index}.bin"), "type": "data",
-                "bytesBase64": base64::engine::general_purpose::STANDARD
-                    .encode(vec![0; limits.max_module_bytes])}),
-            );
-        }
-        for index in 4..132 {
+                    .encode(vec![b' '; main_bytes])})];
+        modules.push(serde_json::json!({"name": "data.bin", "type": "data",
+            "bytesBase64": base64::engine::general_purpose::STANDARD
+                .encode(vec![0; limits.max_total_module_bytes - main_bytes])}));
+        for index in 2..132 {
             modules.push(serde_json::json!({"name": format!("data{index}.bin"),
                 "type": "data", "bytesBase64": ""}));
         }
@@ -146,6 +143,12 @@ mod tests {
         encode_bundle(bytes.as_slice(), &mut output).unwrap();
         let bundle = CanonicalBundle::parse(output, limits).unwrap();
         assert_eq!(bundle.manifest().modules.len(), 132);
+        let main = bundle
+            .manifest()
+            .modules
+            .iter()
+            .find(|module| module.name == "index.js");
+        assert_eq!(main.unwrap().size, main_bytes as u64);
         assert_eq!(
             bundle
                 .manifest()
@@ -189,7 +192,7 @@ mod tests {
         let error = encode_bundle(std::io::repeat(b' ').take(MAX_INPUT_BYTES + 2), &mut output)
             .unwrap_err();
         assert_eq!(error.code(), ErrorCode::BundleTooLarge);
-        let source = vec![0; BundleLimits::default().max_module_bytes + 1];
+        let source = vec![0; BundleLimits::default().max_total_module_bytes + 1];
         let error = encode_bundle(input(&source).to_string().as_bytes(), &mut output).unwrap_err();
         assert_eq!(error.code(), ErrorCode::BundleTooLarge);
         assert!(output.is_empty());

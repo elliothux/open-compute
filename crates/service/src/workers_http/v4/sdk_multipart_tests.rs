@@ -340,7 +340,7 @@ fn near_limit_sdk_body(boundary: &str) -> Vec<u8> {
             &mut body,
             boundary,
             name,
-            &vec![b' '; BundleLimits::DEFAULT.max_module_bytes],
+            &vec![b' '; BundleLimits::DEFAULT.max_total_module_bytes / 4],
         );
     }
     for index in 4..BundleLimits::DEFAULT.max_modules {
@@ -356,28 +356,34 @@ fn near_limit_sdk_body(boundary: &str) -> Vec<u8> {
 }
 
 #[tokio::test]
-async fn explicit_worker_limit_accepts_more_than_axum_default() {
+async fn explicit_worker_limit_accepts_one_module_above_the_old_per_module_cap() {
     let boundary = "open-compute-large-worker";
-    let mut module = vec![b' '; 2 * 1024 * 1024 + 1];
-    module.extend_from_slice(b"\nexport default {};");
-    let app = Router::new()
-        .route("/", post(bounded_upload))
-        .layer(DefaultBodyLimit::max(MAX_BODY_BYTES));
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/")
-                .header(
-                    header::CONTENT_TYPE,
-                    format!("multipart/form-data; boundary={boundary}"),
-                )
-                .body(Body::from(multipart_body(boundary, &module)))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    let total = BundleLimits::DEFAULT.max_total_module_bytes;
+    for (size, status) in [
+        (9 * 1024 * 1024, StatusCode::NO_CONTENT),
+        (total + 1, StatusCode::BAD_REQUEST),
+    ] {
+        let mut module = vec![b' '; size - b"export default {};".len()];
+        module.extend_from_slice(b"export default {};");
+        let app = Router::new()
+            .route("/", post(bounded_upload))
+            .layer(DefaultBodyLimit::max(MAX_BODY_BYTES));
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/")
+                    .header(
+                        header::CONTENT_TYPE,
+                        format!("multipart/form-data; boundary={boundary}"),
+                    )
+                    .body(Body::from(multipart_body(boundary, &module)))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), status, "{size}");
+    }
 }
 
 #[tokio::test]

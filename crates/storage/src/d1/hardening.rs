@@ -317,7 +317,13 @@ fn authorize_pragma(name: &str, value: Option<&str>, authority: SqlAuthority) ->
     if introspection.contains(&name.as_str()) {
         return Authorization::Allow;
     }
-    if value.is_none() && matches!(name.as_str(), "user_version" | "application_id") {
+    // FTS5 reads `data_version` on every write and MATCH to detect a stale index cache.
+    if value.is_none()
+        && matches!(
+            name.as_str(),
+            "user_version" | "application_id" | "data_version"
+        )
+    {
         return Authorization::Allow;
     }
     if authority == SqlAuthority::Migration

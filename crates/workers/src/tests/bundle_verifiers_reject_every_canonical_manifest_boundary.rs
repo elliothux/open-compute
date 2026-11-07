@@ -141,16 +141,6 @@ fn bundle_verifiers_reject_every_canonical_manifest_boundary() {
         staged_error(
             bundle.bytes(),
             BundleLimits {
-                max_module_bytes: 1,
-                ..limits
-            }
-        ),
-        ErrorCode::BundleTooLarge
-    );
-    assert_eq!(
-        staged_error(
-            bundle.bytes(),
-            BundleLimits {
                 max_total_module_bytes: 1,
                 ..limits
             }

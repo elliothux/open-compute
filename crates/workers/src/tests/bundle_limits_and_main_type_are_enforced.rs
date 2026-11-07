@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn bundle_limits_and_main_type_are_enforced() {
     let limits = BundleLimits {
-        max_module_bytes: 3,
+        max_total_module_bytes: 3,
         ..BundleLimits::default()
     };
     assert_eq!(
@@ -26,7 +26,6 @@ fn bundle_limits_and_main_type_are_enforced() {
 fn default_bundle_limits_admit_a_full_bounded_module_set_and_reject_overflow() {
     let limits = BundleLimits::default();
     assert_eq!(limits.max_modules, 4096);
-    assert_eq!(limits.max_module_bytes, 8 * 1024 * 1024);
     assert_eq!(limits.max_total_module_bytes, 32 * 1024 * 1024);
     assert_eq!(limits.max_manifest_bytes, 1024 * 1024);
     assert_eq!(
@@ -42,10 +41,10 @@ fn default_bundle_limits_admit_a_full_bounded_module_set_and_reject_overflow() {
         .collect::<Vec<_>>();
     modules[0].name = "index.js".to_owned();
     modules[0].module_type = ModuleType::EsModule;
-    for entry in &mut modules[..3] {
-        entry.bytes = vec![b' '; limits.max_module_bytes];
-    }
-    modules[3].bytes = vec![0; limits.max_module_bytes - (limits.max_modules - 4)];
+    // One module may take the whole module budget; Cloudflare limits only the Worker total.
+    modules[0].bytes = vec![b' '; 9 * 1024 * 1024];
+    modules[3].bytes =
+        vec![0; limits.max_total_module_bytes - 9 * 1024 * 1024 - (limits.max_modules - 2)];
     let bundle = CanonicalBundle::build("index.js", modules.clone(), limits).unwrap();
     assert_eq!(bundle.manifest().modules.len(), limits.max_modules);
     assert!(bundle.bytes().len() > limits.max_total_module_bytes);

@@ -122,18 +122,6 @@ fn bundle_build_and_parse_cover_structural_validation_matrix() {
         CanonicalBundle::parse(
             bundle.bytes().to_vec(),
             BundleLimits {
-                max_module_bytes: 1,
-                ..limits
-            },
-        )
-        .unwrap_err()
-        .code(),
-        ErrorCode::BundleTooLarge
-    );
-    assert_eq!(
-        CanonicalBundle::parse(
-            bundle.bytes().to_vec(),
-            BundleLimits {
                 max_total_module_bytes: 1,
                 ..limits
             },
