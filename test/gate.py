@@ -43,10 +43,15 @@ TypedTarget = namedtuple(
     defaults=[None, (), (), (), 600, 'light', 'runner'],
 )
 SERVICE_LIB_TARGET = 'open-compute-service.lib.open_compute_service'
-# The serial service library outlasts every other target; workspace runs split its
-# ordinary cases by name hash so two coverage shards can run the halves in parallel.
-SERVICE_LIB_SECOND_TARGET = 'service-library-second-half'
-SERVICE_PARTITIONS = {SERVICE_LIB_TARGET, SERVICE_LIB_SECOND_TARGET, SERVICE_PROCESS_TARGET}
+STORAGE_LIB_TARGET = 'open-compute-storage.lib.open_compute_storage'
+# These serial libraries outlast every other target; workspace runs split their ordinary
+# cases by name hash so coverage shards can run the parts in parallel.
+CASE_PARTS = {
+    SERVICE_LIB_TARGET: (SERVICE_LIB_TARGET, 'service-library-part-2',
+                         'service-library-part-3', 'service-library-part-4'),
+    STORAGE_LIB_TARGET: (STORAGE_LIB_TARGET, 'storage-library-part-2'),
+}
+CASE_PART_OWNERS = {SERVICE_PROCESS_TARGET, *(name for parts in CASE_PARTS.values() for name in parts)}
 # Only these targets have been audited for independent TempDir/SQLite/S3/port-0 state
 # and bounded resource use. The service library's real-process subset remains an
 # exclusive barrier instead of starving parallel version probes.
@@ -156,15 +161,18 @@ GROUPS['products'] = ['contract', 'recorded', *GROUPS['core'], *GROUPS['platform
                       *GROUPS['scheduling'], *PRODUCT_SCENARIOS]
 
 
-# Balanced from release 42324455717 (warm rust-cache) with --jobs 2 and exclusive barriers.
+# Balanced from release 42344896562 with --jobs 2: independent targets share two slots,
+# then exclusive targets run one at a time.
 COVERAGE_SHARDS = (
     (
+        'browser',
         'cf-resources',
         'open-compute-service.lib.open_compute_service',
         'open-compute-service.test.msrv_audit',
         'open-compute-storage.lib.open_compute_storage',
         'python-frameworks',
         'python-queues',
+        'python-services',
         'service-process-lifecycle',
     ),
     (
@@ -174,15 +182,15 @@ COVERAGE_SHARDS = (
         'kv',
         'open-compute-runtime.bin.open-compute-supervisor-fixture',
         'open-compute-service.bin.host-extension-test-provider',
-        'python-workflows',
         'queue-workflow-recovery',
         'search',
+        'service-library-part-2',
         'services-product',
         'single-binary',
+        'storage-library-part-2',
     ),
     (
         'bindings',
-        'browser',
         'cache-images',
         'cloudflare-sdk',
         'd1',
@@ -196,15 +204,13 @@ COVERAGE_SHARDS = (
         'open-compute-service.test.p1_reliability',
         'open-compute-service.test.p5_snapshot_restore',
         'open-compute-workers.lib.open_compute_workers',
-        'python-durable-objects',
         'python-main',
         'python-runtime',
-        'python-services',
         'runtime',
+        'service-library-part-3',
         'services-rpc',
         'snapshots',
         'workers',
-        'workflow-recovery',
         'workflow-runtime',
     ),
     (
@@ -223,14 +229,17 @@ COVERAGE_SHARDS = (
         'open-compute-runtime.lib.open_compute_runtime',
         'open-compute-search.lib.open_compute_search',
         'open-compute-vendor-schema.bin.open-compute-vendor-schema',
+        'python-durable-objects',
+        'python-workflows',
         'queues',
         'r2',
         'recorded',
         'scheduler',
-        'service-library-second-half',
+        'service-library-part-4',
         'services-events',
         'services-recovery',
         'workflow-product',
+        'workflow-recovery',
     ),
 )
 
@@ -362,24 +371,24 @@ def verify_case_inventory(targets, prepared, workspace=False):
             raise ValueError(f'{name}: case registry mismatch; missing={sorted(expected - actual)}; '
                              f'unregistered={sorted(actual - expected)}')
     # A coverage shard may hold only some partitions; each is derived from the full inventory.
-    service_partitions = SERVICE_PARTITIONS & targets.keys() if workspace else set()
-    if service_partitions:
-        ordinary_inventory = set(inventories[min(service_partitions)])
-        if any(set(inventories[name]) != ordinary_inventory for name in service_partitions):
-            raise ValueError('service library case partitions discovered different inventories')
-        exclusive = set(SERVICE_PROCESS_CASES)
-        if missing := exclusive - ordinary_inventory:
-            raise ValueError(f'service library exclusive cases are missing: {sorted(missing)}')
-        ordinary = ordinary_inventory - exclusive
-        if not ordinary or ordinary & exclusive or ordinary | exclusive != ordinary_inventory:
-            raise ValueError('service library case partition is incomplete or overlapping')
-        second = {case for case in ordinary
-                  if hashlib.sha256(case.encode()).digest()[0] & 1}
-        if not second or second == ordinary:
-            raise ValueError('service library halves must both contain cases')
-        partitions = {SERVICE_LIB_TARGET: ordinary - second, SERVICE_LIB_SECOND_TARGET: second,
-                      SERVICE_PROCESS_TARGET: exclusive}
-        for name in service_partitions:
+    for base, parts in CASE_PARTS.items() if workspace else ():
+        exclusive = set(SERVICE_PROCESS_CASES) if base == SERVICE_LIB_TARGET else set()
+        owners = [*parts, SERVICE_PROCESS_TARGET] if exclusive else parts
+        present = [name for name in owners if name in targets]
+        if not present:
+            continue
+        inventory = set(inventories[present[0]])
+        if any(set(inventories[name]) != inventory for name in present):
+            raise ValueError(f'{base}: case partitions discovered different inventories')
+        if missing := exclusive - inventory:
+            raise ValueError(f'{base}: exclusive cases are missing: {sorted(missing)}')
+        partitions = {name: set() for name in parts}
+        for case in inventory - exclusive:
+            partitions[parts[hashlib.sha256(case.encode()).digest()[0] % len(parts)]].add(case)
+        if not all(partitions.values()):
+            raise ValueError(f'{base}: every case partition must contain cases')
+        partitions[SERVICE_PROCESS_TARGET] = exclusive
+        for name in present:
             inventories[name] = tuple(sorted(partitions[name]))
     return {name: target._replace(cases=inventories[name]) for name, target in targets.items()}
 
@@ -415,10 +424,12 @@ def resolve_targets(selected, workspace):
                     tuple(sorted(ONCE.get(label, ()) + TIMING.get(label, ())))
                     if label in CARGO_TARGETS else None,
                 )
-                if workspace and label == SERVICE_LIB_TARGET:
-                    found[label] = resolved._replace(exclusive=False)
-                    found[SERVICE_LIB_SECOND_TARGET] = resolved._replace(exclusive=False)
-                    found[SERVICE_PROCESS_TARGET] = resolved._replace(exclusive=True)
+                if workspace and label in CASE_PARTS:
+                    # Only the service library's real-process cases need the exclusive barrier.
+                    for part in CASE_PARTS[label]:
+                        found[part] = resolved._replace(exclusive=False)
+                    if label == SERVICE_LIB_TARGET:
+                        found[SERVICE_PROCESS_TARGET] = resolved._replace(exclusive=True)
                 else:
                     found[label] = resolved
     typed = {}
@@ -721,7 +732,7 @@ def build_targets(targets, directory, workspace, *, coverage_targets=None):
         key = (target.package_id, target.name, target.kind)
         expected.setdefault(key, []).append(name)
     for names in expected.values():
-        if len(names) > 1 and not set(names) <= SERVICE_PARTITIONS:
+        if len(names) > 1 and not set(names) <= CASE_PART_OWNERS:
             raise RuntimeError(f'Cargo test executable has duplicate Gate owners: {sorted(names)}')
     command = ['cargo', 'test', '--locked', '--offline',
                '--all-features', '--no-run', '--message-format=json']

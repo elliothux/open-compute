@@ -827,8 +827,8 @@ class GateTests(unittest.TestCase):
             targets[gate.SERVICE_LIB_TARGET]._replace(exclusive=True),
             targets[gate.SERVICE_PROCESS_TARGET],
         )
-        self.assertEqual(targets[gate.SERVICE_LIB_TARGET],
-                         targets[gate.SERVICE_LIB_SECOND_TARGET])
+        parts = gate.CASE_PARTS[gate.SERVICE_LIB_TARGET]
+        self.assertTrue(all(targets[part] == targets[gate.SERVICE_LIB_TARGET] for part in parts))
         self.assertTrue(targets['open-compute-runtime.lib.open_compute_runtime'].exclusive)
         self.assertTrue(targets['workers'].exclusive)
         self.assertTrue(gate.CARGO_TARGETS['r2'][2])
@@ -845,9 +845,9 @@ class GateTests(unittest.TestCase):
         assigned = [name for shard in shards for name in shard]
         self.assertEqual(set(assigned), set(targets))
         self.assertEqual(len(assigned), len(set(assigned)))
-        # The serial service library halves must run on different shards.
-        self.assertFalse(any(gate.SERVICE_LIB_TARGET in shard
-                             and gate.SERVICE_LIB_SECOND_TARGET in shard for shard in shards))
+        # The parts of one serial library must run on different shards.
+        for parts in gate.CASE_PARTS.values():
+            self.assertTrue(all(sum(part in shard for part in parts) <= 1 for shard in shards))
         self.assertEqual(sum('containers' in shard for shard in shards), 1)
         for invalid in ('0/4', '5/4', '1/3', '1', 'x/4', '01/4'):
             with self.assertRaisesRegex(ValueError, '--shard'):
@@ -1001,13 +1001,13 @@ class GateTests(unittest.TestCase):
             self.assertEqual(gate.discovered_cases(log), ())
 
     def test_service_library_inventory_is_partitioned_once_before_execution(self):
-        ordinary_cases = tuple(f'ordinary::case_{index}' for index in range(16))
+        ordinary_cases = tuple(f'ordinary::case_{index}' for index in range(64))
         cases = (*gate.SERVICE_PROCESS_CASES, *ordinary_cases)
+        parts = gate.CASE_PARTS[gate.SERVICE_LIB_TARGET]
+        last = parts[-1]
         targets = {
-            gate.SERVICE_LIB_TARGET:
-                gate.Target('service', 'open_compute_service', 'lib', '/repo', False),
-            gate.SERVICE_LIB_SECOND_TARGET:
-                gate.Target('service', 'open_compute_service', 'lib', '/repo', False),
+            **{part: gate.Target('service', 'open_compute_service', 'lib', '/repo', False)
+               for part in parts},
             gate.SERVICE_PROCESS_TARGET:
                 gate.Target('service', 'open_compute_service', 'lib', '/repo', True),
         }
@@ -1020,19 +1020,25 @@ class GateTests(unittest.TestCase):
                 {'target': name, 'log': str(full)} for name in targets
             ]
             partitioned = gate.verify_case_inventory(targets, prepared, workspace=True)
-            first = set(partitioned[gate.SERVICE_LIB_TARGET].cases)
-            second = set(partitioned[gate.SERVICE_LIB_SECOND_TARGET].cases)
+            split = [set(partitioned[part].cases) for part in parts]
             process = set(partitioned[gate.SERVICE_PROCESS_TARGET].cases)
-            self.assertTrue(first and second)
-            self.assertEqual(first | second, set(ordinary_cases))
+            self.assertTrue(all(split))
+            self.assertEqual(set().union(*split), set(ordinary_cases))
+            self.assertEqual(sum(map(len, split)), len(ordinary_cases))
             self.assertEqual(process, set(gate.SERVICE_PROCESS_CASES))
-            self.assertFalse(first & second or (first | second) & process)
 
             # A coverage shard holding one partition derives the same cases.
             alone = gate.verify_case_inventory(
-                {gate.SERVICE_LIB_SECOND_TARGET: targets[gate.SERVICE_LIB_SECOND_TARGET]},
-                [{'target': gate.SERVICE_LIB_SECOND_TARGET, 'log': str(full)}], workspace=True)
-            self.assertEqual(set(alone[gate.SERVICE_LIB_SECOND_TARGET].cases), second)
+                {last: targets[last]}, [{'target': last, 'log': str(full)}], workspace=True)
+            self.assertEqual(set(alone[last].cases), split[-1])
+
+            # The storage library has no exclusive cases; its parts cover every case.
+            storage = {part: gate.Target('storage', 'open_compute_storage', 'lib', '/repo', False)
+                       for part in gate.CASE_PARTS[gate.STORAGE_LIB_TARGET]}
+            stored = gate.verify_case_inventory(
+                storage, [{'target': part, 'log': str(full)} for part in storage], workspace=True)
+            self.assertEqual(sorted(case for part in storage for case in stored[part].cases),
+                             sorted(cases))
             # Outside the workspace inventory the library keeps every case.
             whole = gate.verify_case_inventory(
                 {gate.SERVICE_LIB_TARGET: targets[gate.SERVICE_LIB_TARGET]}, prepared[:1])
@@ -1043,7 +1049,7 @@ class GateTests(unittest.TestCase):
                                  + f'\n\n{len(cases) - 1} tests, 0 benchmarks\n')
             with self.assertRaisesRegex(ValueError, 'different inventories'):
                 gate.verify_case_inventory(targets, [
-                    *prepared[:2],
+                    *prepared[:-1],
                     {'target': gate.SERVICE_PROCESS_TARGET, 'log': str(different)},
                 ], workspace=True)
 
