@@ -89,7 +89,9 @@ impl<'a> WorkerRepository<'a> {
         version_id: VersionId,
     ) -> Result<(), PlatformError> {
         self.db.with_immediate(|tx| {
-            let worker = require_live_worker(tx, instance_id, worker_id)?;
+            // Tombstoned Workers keep their versions until retention. The live-worker
+            // guard would make those versions unreachable and pin their artifacts.
+            let worker = read_worker_tx(tx, instance_id, worker_id)?;
             if worker.active_version_id == Some(version_id) {
                 return Err(PlatformError::new(
                     ErrorCode::VersionActive,
@@ -385,6 +387,8 @@ impl<'a> WorkerRepository<'a> {
                          SELECT 1 FROM version_referrers r WHERE r.version_id = d.id
                        )
                        AND (
+                         w.deleted_at_ms IS NOT NULL
+                         OR
                          (d.state = 'ready' AND (
                            SELECT count(*) FROM worker_versions newer
                            WHERE newer.worker_id = d.worker_id AND newer.state = 'ready'
