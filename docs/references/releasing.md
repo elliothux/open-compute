@@ -92,9 +92,9 @@ parser，producer 在写报告前即调用 consumer parser；schema 漂移不再
 `package-gate-linux-x64` 等待 `package-linux-x64`，`package-gate-other` 等待 `package-other`，再下载对应包执行 `single-binary`；Linux ARM64 另执行 Dashboard e2e。
 `install-lifecycle` 等待 `package` 和 `upgrade-driver`，`stress` 只等待 `package`；`assemble` 应等待全部包、package Gate、安装、stress、coverage 和现有 provider/SDK 检查，`publish` 等待 `assemble` 与现有检查。
 `package` 在 tag push 时等待三个平台，候选 dispatch 时只等待所选平台。
-四个 coverage shard 与 package 并行，只依赖 `failfast` 和 `fixture-images`；候选 dispatch 在各片下载前独立验证 fixture run 来源。
+六个 coverage shard 与 package 并行，只依赖 `failfast` 和 `fixture-images`；候选 dispatch 在各片下载前独立验证 fixture run 来源。
 只有含 `containers` 的第二片在 coverage 环境与 target 目录中先执行 Gate 的完整 workspace `cargo test --no-run` 构建，得到本提交的 test-support Broker，再进入 Linux engine；四片都在受控 egress 中执行 workspace 子集。
-`coverage` 合并四片的原始 profile 和各片的精确 object 集合，再检查 90.00% 行覆盖率；release report 要求四片各有一份成功的 Gate 报告。
+`coverage` 合并六片的原始 profile 和各片的精确 object 集合，再检查 90.00% 行覆盖率；release report 要求六片各有一份成功的 Gate 报告。
 静态资格直接复用 release source commit 已通过的 main `ci`，不在 tag workflow 重跑。
 三个原生 runner 使用正式 workerd lock 打包自己的 `ocd`，并以 `OPEN_COMPUTE_TEST_OCD` 跑单文件隔离、
 首启、重启和损坏拒绝测试。Linux ARM64 package 还对 production binary 执行精确的 embedded Dashboard

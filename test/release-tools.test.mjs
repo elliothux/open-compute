@@ -396,7 +396,7 @@ test("release qualification and local Docker diagnostic keep their exact boundar
   );
   assert.match(
     workflow,
-    /name: Collect Rust coverage shard[\s\S]*?OPEN_COMPUTE_COVERAGE_IMAGES:[\s\S]*?OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO: "1"[\s\S]*?run: \.\/test\/coverage\.sh --shard \$\{\{ matrix\.shard \}\}\/4 --jobs 2/,
+    /name: Collect Rust coverage shard[\s\S]*?OPEN_COMPUTE_COVERAGE_IMAGES:[\s\S]*?OPEN_COMPUTE_EGRESS_FIXTURE_ALLOW_SUDO: "1"[\s\S]*?run: \.\/test\/coverage\.sh --shard \$\{\{ matrix\.shard \}\}\/6 --jobs 2/,
   );
   assert.doesNotMatch(workflow, /\n  integration:/);
   assert.match(
@@ -1682,7 +1682,7 @@ test("native ARM fixture provenance binds the exact source, tree and workflow", 
 test("release coverage partitions start independently and publish waits for their merged result", async () => {
   const { jobs } = await parseWorkflow(releaseWorkflowPath);
   const shards = jobs["coverage-shards"];
-  assert.deepEqual(shards.strategy.matrix.shard, [1, 2, 3, 4]);
+  assert.deepEqual(shards.strategy.matrix.shard, [1, 2, 3, 4, 5, 6]);
   assert.deepEqual(shards.needs, ["failfast", "fixture-images"]);
   assert.equal(jobs.coverage.needs, "coverage-shards");
   assert.deepEqual(
@@ -1777,7 +1777,7 @@ test("package uploads unblock qualification while native gates still block assem
   assert.match(
     jobs.coverage.steps.find((step) => step.run?.includes("coverage.sh merge"))
       .run,
-    /for shard in 1 2 3 4; do/,
+    /for shard in 1 2 3 4 5 6; do/,
   );
 
   // Evaluate the actual dispatch conditions with failfast and the unused producer skipped.

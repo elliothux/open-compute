@@ -161,85 +161,89 @@ GROUPS['products'] = ['contract', 'recorded', *GROUPS['core'], *GROUPS['platform
                       *GROUPS['scheduling'], *PRODUCT_SCENARIOS]
 
 
-# Balanced from releases 42344896562 and 42355843101 with --jobs 2: independent targets share two slots,
-# then exclusive targets run one at a time.
+# Balanced from releases 42355843101 and 42364385332 with --jobs 2: independent targets share
+# two slots, then exclusive targets run one at a time.
 COVERAGE_SHARDS = (
     (
-        'cf-resources',
-        'open-compute-service.lib.open_compute_service',
+        'cache-images',
+        'd1',
+        'kv',
+        'open-compute-core.lib.open_compute_core',
+        'open-compute-document-parser.lib.open_compute_document_parser',
+        'open-compute-document-parser.test.ocr',
+        'open-compute-service.test.ai_provider_contract',
+        'open-compute-service.test.cli',
         'open-compute-service.test.msrv_audit',
         'open-compute-storage.lib.open_compute_storage',
-        'python-frameworks',
+        'python-durable-objects',
+        'recorded',
+        'scheduler',
+        'service-library-part-3',
+        'services-recovery',
+        'workflow-recovery',
+    ),
+    (
+        'containers',
+        'open-compute-document-parser.test.corpus',
         'python-queues',
+        'r2',
+        'search',
         'service-process-lifecycle',
     ),
     (
         'alarms',
-        'assets',
-        'containers',
-        'kv',
+        'cf-resources',
+        'durable-objects',
+        'isolation',
+        'open-compute-images.lib.open_compute_images',
+        'open-compute-p1-fuzz.bin.p1-fuzz',
         'open-compute-runtime.bin.open-compute-supervisor-fixture',
-        'open-compute-service.bin.host-extension-test-provider',
-        'python-services',
-        'queue-workflow-recovery',
-        'search',
-        'service-library-part-2',
-        'services-product',
-        'single-binary',
-        'storage-library-part-2',
-    ),
-    (
-        'bindings',
-        'browser',
-        'cache-images',
-        'cloudflare-sdk',
-        'd1',
-        'dashboard',
-        'open-compute-artifacts.lib.open_compute_artifacts',
-        'open-compute-core.lib.open_compute_core',
-        'open-compute-document-parser.test.corpus',
-        'open-compute-service.bin.ocd',
-        'open-compute-service.test.ai_provider_contract',
-        'open-compute-service.test.cli',
+        'open-compute-service.lib.open_compute_service',
         'open-compute-service.test.p1_reliability',
-        'open-compute-service.test.p5_snapshot_restore',
-        'open-compute-workers.lib.open_compute_workers',
-        'python-main',
-        'python-runtime',
+        'queue-workflow-recovery',
+        'queues',
         'runtime',
-        'service-library-part-3',
+        'services-events',
         'services-rpc',
-        'snapshots',
+        'single-binary',
         'workers',
         'workflow-runtime',
     ),
     (
         'capabilities',
         'cf-cli',
-        'contract',
-        'core-products',
-        'crash-recovery',
         'daemon',
-        'durable-objects',
-        'isolation',
-        'open-compute-document-parser.lib.open_compute_document_parser',
-        'open-compute-document-parser.test.ocr',
-        'open-compute-images.lib.open_compute_images',
-        'open-compute-p1-fuzz.bin.p1-fuzz',
-        'open-compute-runtime.lib.open_compute_runtime',
-        'open-compute-search.lib.open_compute_search',
+        'open-compute-artifacts.lib.open_compute_artifacts',
+        'open-compute-service.bin.host-extension-test-provider',
+        'open-compute-service.bin.ocd',
         'open-compute-vendor-schema.bin.open-compute-vendor-schema',
-        'python-durable-objects',
+        'python-services',
         'python-workflows',
-        'queues',
-        'r2',
-        'recorded',
-        'scheduler',
+        'service-library-part-2',
+        'storage-library-part-2',
+    ),
+    (
+        'assets',
+        'browser',
+        'contract',
+        'crash-recovery',
+        'open-compute-search.lib.open_compute_search',
+        'open-compute-service.test.p5_snapshot_restore',
+        'open-compute-workers.lib.open_compute_workers',
+        'python-frameworks',
         'service-library-part-4',
-        'services-events',
-        'services-recovery',
+    ),
+    (
+        'bindings',
+        'cloudflare-sdk',
+        'core-products',
+        'dashboard',
+        'open-compute-runtime.lib.open_compute_runtime',
+        'python-main',
+        'python-runtime',
+        'services-product',
+        'snapshots',
         'workflow-product',
-        'workflow-recovery',
     ),
 )
 
@@ -249,9 +253,11 @@ def coverage_shard(targets, value):
     assigned = [name for shard in COVERAGE_SHARDS for name in shard]
     if len(assigned) != len(set(assigned)) or set(assigned) != targets.keys():
         raise ValueError("coverage shard partition must equal the full workspace target inventory")
-    if not re.fullmatch(r"[1-4]/4", value):
-        raise ValueError("--shard must be i/4 with i between 1 and 4")
-    members = set(COVERAGE_SHARDS[int(value[0]) - 1])
+    count = len(COVERAGE_SHARDS)
+    match = re.fullmatch(r"([1-9][0-9]*)/([1-9][0-9]*)", value)
+    if not match or int(match[2]) != count or int(match[1]) > count:
+        raise ValueError(f"--shard must be i/{count} with i between 1 and {count}")
+    members = set(COVERAGE_SHARDS[int(match[1]) - 1])
     return {name: target for name, target in targets.items() if name in members}
 
 
@@ -783,7 +789,7 @@ def build_targets(targets, directory, workspace, *, coverage_targets=None):
         object_dir.mkdir(mode=0o700)
         executables = sorted(set(coverage_executables))
         if coverage_targets is not None:
-            # Retain this shard's tests and shared child binaries, so merge does not need four full workspaces.
+            # Retain this shard's tests and shared child binaries, so merge does not need every full workspace.
             all_tests = {Path(artifacts[name]) for name in cargo_targets}
             selected_tests = {Path(artifacts[name]) for name in cargo_targets if name in coverage_targets}
             executables = [path for path in executables if path not in all_tests or path in selected_tests]
@@ -1091,7 +1097,7 @@ def main():
     parser.add_argument('targets', nargs='*', help='Gate targets/groups; use --list to inspect the plan')
     parser.add_argument('--workspace', action='store_true',
                         help='all Cargo test executables; diagnostic rounds repeat only product timing cases')
-    parser.add_argument('--shard', help='workspace coverage partition i/4 (all targets must be assigned)')
+    parser.add_argument('--shard', help='workspace coverage partition i/N (all targets must be assigned)')
     parser.add_argument('--jobs', type=int, default=DEFAULT_JOBS,
                         help='audited independent processes (default: min(4, CPU count))')
     parser.add_argument('--list', action='store_true', help='validate and print the exact plan without building or running')

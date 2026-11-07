@@ -16,7 +16,7 @@ for option do
   case "$option" in --shard|--shard=*) sharded=1 ;; esac
 done
 if [ "${1:-}" = --help ]; then
-  echo 'Usage: test/coverage.sh [--shard i/4] [Gate options]'
+  echo 'Usage: test/coverage.sh [--shard i/N] [Gate options]'
   echo '       test/coverage.sh merge RUN_DIR...'
   echo 'Shards retain raw profiles and exact objects; merge enforces 90% with the same exclusions.'
   exit 0

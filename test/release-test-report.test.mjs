@@ -31,6 +31,8 @@ test("release report requires one workspace coverage pass and all supported nati
     "coverage-shard-2",
     "coverage-shard-3",
     "coverage-shard-4",
+    "coverage-shard-5",
+    "coverage-shard-6",
     "package-gate-darwin-arm64",
     "package-gate-linux-arm64",
     "package-gate-linux-x64",
@@ -71,7 +73,7 @@ test("release report publishes selected metrics and escaped case names; rejects 
     );
   }
   const report = JSON.parse(rendered.json);
-  assert.equal(report.gates.length, 7);
+  assert.equal(report.gates.length, 9);
   assert.deepEqual(
     report.gates
       .find((entry) => entry.label === "coverage-shard-1")

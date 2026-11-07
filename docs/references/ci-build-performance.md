@@ -129,9 +129,9 @@ workspace/final binary。当前没有应用 benchmark，且仓库 cache 已接�
   Rust、runtime、workerd、`ci.yml`、共享 setup 或未知路径仍执行完整静态资格。汇总 job `ci` 保留不变，
   避免分支保护因跳过具体 job 失效。
 - tag qualification：`failfast` 先验证 release environment、source/release identity、notes、SDK report
-  contract、npm credential 和目标版本。四个 coverage shard 与 package 并行， 在受控 egress fixture 中各执行一次 Gate 子集；四者合起来覆盖完整 workspace，包含 `workers`。
-- 三个正式平台 package：身份验证后即并行构建。四个 coverage shard 只等待 `failfast` 与 fixture images；候选 dispatch 在下载前复用 package 的同一来源校验步骤。含 `containers` 的第二片在 coverage flags 与 target 目录内先执行完整 workspace `cargo test --no-run`，得到本提交的 test-support Broker。Gate 再次调用同一 Cargo 构建只做 fresh 检查，保留精确对象且避免 feature graph 不同导致二次编译；其余三片不启动 Engine。`package` 等待全部平台包上传。`upgrade-driver` 在 `failfast` 后独立构建；安装等待 `package` 与驱动，stress 等待 `package`。两个 package Gate 任务各等待对应 package producer，再下载包执行测试；assemble 等待全部 Gate 与原有检查，publish 等待 assemble。
-- 候选 41581410808 中 service library 串行用时 31.6 分钟，是最长的单个目标。workspace Gate 把 service library 与 storage library 的普通 case 按名称 SHA-256 首字节取模分成 `CASE_PARTS` 中的四份与两份；service 的各份与独占的 `service-process-lifecycle` 共用同一 executable。各份由完整 inventory 推导，单片只持有其中一部分时结果不变，同一 library 的各份分在不同分片。候选 42265222727 中第二片先为 Broker 编译一次，Gate 又重编 26 个 crate 用时 581 秒：Broker 环境丢弃 setup-python 导出的 `PKG_CONFIG_PATH`，`aws-lc-sys` 与 `xberg-tesseract` 的 pkg-config build script 因此重跑。Broker 现在保留该变量。merge 并行解压四个分片并并行执行 lcov 与 summary 两次 export。rust-cache 命中后，候选 42324455717、42339728154 与 42344896562 总用时 42.9、47.8 与 48.5 分钟；同一目标在不同 runner 上相差 20%–75%，最慢分片每次不同。42344896562 中 service library 后半独占一个槽位 981 秒，storage library 778 秒，独占目标在第三片累计 1268 秒、第四片 280 秒。分片因此按“两个槽位并行跑独立目标，再串行跑独占目标”重排，使每片的独立目标与独占目标用时都接近平均值。拆分后的候选 42355843101 用时 44.5 分钟，第一片独占目标累计 823 秒、测试阶段 1633 秒，其余三片 1160–1311 秒；`browser` 与 `python-services` 因此移到第三、二片。
+  contract、npm credential 和目标版本。六个 coverage shard 与 package 并行， 在受控 egress fixture 中各执行一次 Gate 子集；四者合起来覆盖完整 workspace，包含 `workers`。
+- 三个正式平台 package：身份验证后即并行构建。六个 coverage shard 只等待 `failfast` 与 fixture images；候选 dispatch 在下载前复用 package 的同一来源校验步骤。含 `containers` 的第二片在 coverage flags 与 target 目录内先执行完整 workspace `cargo test --no-run`，得到本提交的 test-support Broker。Gate 再次调用同一 Cargo 构建只做 fresh 检查，保留精确对象且避免 feature graph 不同导致二次编译；其余三片不启动 Engine。`package` 等待全部平台包上传。`upgrade-driver` 在 `failfast` 后独立构建；安装等待 `package` 与驱动，stress 等待 `package`。两个 package Gate 任务各等待对应 package producer，再下载包执行测试；assemble 等待全部 Gate 与原有检查，publish 等待 assemble。
+- 候选 41581410808 中 service library 串行用时 31.6 分钟，是最长的单个目标。workspace Gate 把 service library 与 storage library 的普通 case 按名称 SHA-256 首字节取模分成 `CASE_PARTS` 中的四份与两份；service 的各份与独占的 `service-process-lifecycle` 共用同一 executable。各份由完整 inventory 推导，单片只持有其中一部分时结果不变，同一 library 的各份分在不同分片。候选 42265222727 中第二片先为 Broker 编译一次，Gate 又重编 26 个 crate 用时 581 秒：Broker 环境丢弃 setup-python 导出的 `PKG_CONFIG_PATH`，`aws-lc-sys` 与 `xberg-tesseract` 的 pkg-config build script 因此重跑。Broker 现在保留该变量。merge 并行解压所有分片并并行执行 lcov 与 summary 两次 export。rust-cache 命中后，候选 42324455717、42339728154 与 42344896562 总用时 42.9、47.8 与 48.5 分钟；同一目标在不同 runner 上相差 20%–75%，最慢分片每次不同。42344896562 中 service library 后半独占一个槽位 981 秒，storage library 778 秒，独占目标在第三片累计 1268 秒、第四片 280 秒。分片因此按“两个槽位并行跑独立目标，再串行跑独占目标”重排，使每片的独立目标与独占目标用时都接近平均值。拆分后的候选 42355843101 用时 44.5 分钟，第一片独占目标累计 823 秒、测试阶段 1633 秒，其余三片 1160–1311 秒；`browser` 与 `python-services` 因此移到第三、二片。候选 42364385332 中第一片降到 31.9 分钟，但第二、三片的 runner 慢 15%–45%，四片布局的测试阶段已接近下限。coverage 因此分为六片，按两次候选各目标的平均用时排布，估算每片测试阶段约 15 分钟；此后 stress 约 30 分钟的固定预算成为候选主要耗时。
 - `test/gate.py` 定义唯一分区，拒绝遗漏、重复和未分配的新 workspace 目标。各片保留本片测试 object 与共享子进程 binary；merge 复用 Linux wrapper 的磁盘检查与空闲 SDK 清理，不启动 Engine，再合并所有原始 profile 和精确 object，检查 90.00% 行覆盖率。四个冷插桩构建会增加总 runner 时间。
 - package 与普通 production hygiene 使用同一 executable verifier，生成 mode 0600 临时配置再查询
   capabilities，同时核对 release identity、版本、licenses 和嵌入 docs；不初始化平台数据目录。
@@ -144,7 +144,7 @@ workspace/final binary。当前没有应用 benchmark，且仓库 cache 已接�
 - 共享 setup 的 `sccache: "true"` 仅供 CI 显式启用，固定 action `v0.0.11` 与 sccache `v0.16.0`，使用 GitHub Actions cache backend、`RUSTC_WRAPPER=sccache`、`CARGO_INCREMENTAL=0`；每个启用 job 结束输出统计。
 - Linux CI coverage 在应用 llvm-cov flags 后直接调用 sccache，不恢复 llvm-cov wrapper。Broker 的环境白名单保留 coverage 与 sccache 配置；setup 先启动不自动闲置退出的 cache server，cache 凭据不进入 Gate 子进程。
 - provider/gateway、fixture images、coverage merge 与其他无显式启用的 job 保持原设置；生产启动和本地构建不依赖 sccache。
-- 原始 coverage 输入用 `zstd -T0` 归档，artifact 上传 compression-level 为 0；merge 解压全部四片后仍使用原始 profiles 与精确 objects。
+- 原始 coverage 输入用 `zstd -T0` 归档，artifact 上传 compression-level 为 0；merge 解压全部六片后仍使用原始 profiles 与精确 objects。
 - 正式 package profile 使用 `.temp/release-target/`，普通开发使用 `target/`；不互相覆盖，不把开发产物或缓存当发行物。
 - 保留 Cargo timings，结合 fresh units 与墙钟判断收益；最终链接等不可缓存部分仍可能占主要耗时。下一次必需 package run 提供测量，不为性能分析单独重复构建。
 - pin、source、生成资产和 artifact SHA 仍需校验。不得伪造 mtime、复用不同 revision 的二进制或把 cache hit 当成验证通过。诊断产物按[证据生命周期](testing.md#日志与保留证据)保留。
@@ -192,7 +192,7 @@ SKU，单独增加 SKU 预算不能覆盖它。要允许 cache 写入，Actions 
 | 候选                            | 当前决定与依据                                                                                                                  |
 | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | full CI 并行职责                | 三个 runner 把 89 秒 Clippy 与 80 秒 production link/scan 移出 core 关键路径；不再细拆，控制总 runner 成本                      |
-| package 与 qualification 依赖   | 三包、驱动与四片 coverage 并行；package Gate 在上传后运行，publish 保留所有依赖                                                 |
+| package 与 qualification 依赖   | 三包、驱动与六片 coverage 并行；package Gate 在上传后运行，publish 保留所有依赖                                                 |
 | coverage 构建并行               | 3 CPU macOS runner 上由 1 提到保守的 2；不改变 Gate/test 并发，以下一次完整 coverage 验证实际收益与资源稳定性                   |
 | CI coverage HTML                | 正式 workflow 不上传或消费 HTML，跳过约 74 秒；本地默认继续生成                                                                 |
 | Cargo target cache              | coverage、package、upgrade-driver、package Gate 用 rust-cache 按构建种类/平台保存第三方依赖；失败不保存，不缓存 workspace crate |
