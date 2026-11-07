@@ -87,7 +87,9 @@ configure_user_path() {
   esac
 
   export_line='export PATH="$HOME/.local/bin:$PATH"'
-  shell_name=${SHELL##*/}
+  # SHELL is unset under cron, docker exec and some CI runners.
+  shell_name=${SHELL:-}
+  shell_name=${shell_name##*/}
   case "${shell_name}" in
     zsh) shell_rc="${user_home}/.zshrc" ;;
     bash) shell_rc="${user_home}/.bashrc" ;;
