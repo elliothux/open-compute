@@ -604,3 +604,42 @@ fn rejects_invalid_limits_schema_versions_and_data_formats() {
         );
     }
 }
+
+#[test]
+fn retention_subtracts_deleted_bytes_and_uses_the_arrival_index() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("observability.sqlite");
+    let store = ObservabilityStore::open(&path, instance(), 100, 1_000, 8_000_000).unwrap();
+    assert!(store.insert(&invocation("old", 1_000)).unwrap());
+    assert!(store.insert(&invocation("kept", 5_000)).unwrap());
+    let fresh = ObservabilityStore::open(
+        &dir.path().join("fresh.sqlite"),
+        instance(),
+        100,
+        1_000,
+        8_000_000,
+    )
+    .unwrap();
+    assert!(fresh.insert(&invocation("kept", 5_000)).unwrap());
+    let events = store
+        .query_events(instance(), 0, 10_000, None, None, 10)
+        .unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].invocation_id, "kept");
+    assert_eq!(
+        store.accounted_bytes().unwrap(),
+        fresh.accounted_bytes().unwrap()
+    );
+    assert_eq!(store.prune(6_000, 10).unwrap(), 0);
+
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    let index_sql: String = connection
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?1",
+            ["observability_invocations_received"],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(index_sql.contains("received_at_ms"));
+    assert!(index_sql.contains("invocation_id"));
+}
