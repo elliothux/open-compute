@@ -17,15 +17,32 @@ RUN ln -s /usr/local/bin/bun /usr/local/bin/bunx \
     && apt-get install -y --no-install-recommends \
       build-essential \
       cmake \
+      curl \
       git-lfs \
       libssl-dev \
       pkg-config \
       python3 \
+      xz-utils \
     && git lfs install --system \
     && rm -rf /var/lib/apt/lists/* \
     && test "$(rustc --version | awk '{print $2}')" = 1.98.0 \
     && test "$(bun --version)" = 1.3.14 \
     && test "$(node --version)" = v26.8.1
+
+# Linux release packaging links ocd against the glibc baseline with `cargo zigbuild`.
+RUN curl --fail --location --output /tmp/zig.tar.xz \
+      https://ziglang.org/download/0.14.1/zig-aarch64-linux-0.14.1.tar.xz \
+    && echo 'f7a654acc967864f7a050ddacfaa778c7504a0eca8d2b678839c21eea47c992b  /tmp/zig.tar.xz' | sha256sum -c - \
+    && curl --fail --location --output /tmp/cargo-zigbuild.tar.xz \
+      https://github.com/rust-cross/cargo-zigbuild/releases/download/v0.24.1/cargo-zigbuild-aarch64-unknown-linux-gnu.tar.xz \
+    && echo '70bb4c9cc71a6d16211b9079996e3cd588671053312adeff4d043499ed887601  /tmp/cargo-zigbuild.tar.xz' | sha256sum -c - \
+    && tar -xJf /tmp/zig.tar.xz -C /opt \
+    && ln -s /opt/zig-aarch64-linux-0.14.1/zig /usr/local/bin/zig \
+    && tar -xJf /tmp/cargo-zigbuild.tar.xz -C /usr/local/bin --strip-components=1 \
+      cargo-zigbuild-aarch64-unknown-linux-gnu/cargo-zigbuild \
+    && rm /tmp/zig.tar.xz /tmp/cargo-zigbuild.tar.xz \
+    && test "$(zig version)" = 0.14.1 \
+    && test "$(cargo-zigbuild --version)" = 'cargo-zigbuild 0.24.1'
 
 USER pwuser
 

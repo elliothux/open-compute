@@ -30,6 +30,10 @@ inputs:
     description: Install cargo-llvm-cov
     required: false
     default: "false"
+  zig:
+    description: Install pinned zig and cargo-zigbuild for Linux release packaging
+    required: false
+    default: "false"
   browser-fixture:
     description: Explicitly download and prepare the pinned chrome-headless-shell test input
     required: false
@@ -134,6 +138,38 @@ runs:
     - name: Install cargo-llvm-cov
       if: ${{ inputs.llvm-cov == 'true' }}
       uses: taiki-e/install-action@cargo-llvm-cov
+
+    # package-release.ts links Linux ocd against the glibc baseline with
+    # `cargo zigbuild`; both tools are build-time only.
+    - name: Install pinned zig and cargo-zigbuild
+      if: ${{ inputs.zig == 'true' && runner.os == 'Linux' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        case "$(uname -m)" in
+          x86_64)
+            zig=x86_64-linux zig_sha256=24aeeec8af16c381934a6cd7d95c807a8cb2cf7df9fa40d359aa884195c4716c
+            zigbuild=x86_64-unknown-linux-gnu zigbuild_sha256=32581c8e13f27a807bb244aaaac870522f5b51263c766cf77b1a99771ce9fa5c ;;
+          aarch64)
+            zig=aarch64-linux zig_sha256=f7a654acc967864f7a050ddacfaa778c7504a0eca8d2b678839c21eea47c992b
+            zigbuild=aarch64-unknown-linux-gnu zigbuild_sha256=70bb4c9cc71a6d16211b9079996e3cd588671053312adeff4d043499ed887601 ;;
+          *) echo 'zig is pinned only for Linux x86_64 and aarch64' >&2; exit 1 ;;
+        esac
+        tools="$RUNNER_TEMP/open-compute-zig"
+        mkdir -p "$tools/bin"
+        curl --fail --location --output "$tools/zig.tar.xz" \
+          "https://ziglang.org/download/0.14.1/zig-$zig-0.14.1.tar.xz"
+        printf '%s  %s\n' "$zig_sha256" "$tools/zig.tar.xz" | shasum -a 256 --check
+        curl --fail --location --output "$tools/cargo-zigbuild.tar.xz" \
+          "https://github.com/rust-cross/cargo-zigbuild/releases/download/v0.24.1/cargo-zigbuild-$zigbuild.tar.xz"
+        printf '%s  %s\n' "$zigbuild_sha256" "$tools/cargo-zigbuild.tar.xz" | shasum -a 256 --check
+        tar -xJf "$tools/zig.tar.xz" -C "$tools"
+        tar -xJf "$tools/cargo-zigbuild.tar.xz" -C "$tools/bin" --strip-components=1 \
+          "cargo-zigbuild-$zigbuild/cargo-zigbuild"
+        ln -s "../zig-$zig-0.14.1/zig" "$tools/bin/zig"
+        echo "$tools/bin" >> "$GITHUB_PATH"
+        test "$("$tools/bin/zig" version)" = 0.14.1
+        test "$("$tools/bin/cargo-zigbuild" --version)" = 'cargo-zigbuild 0.24.1'
 
     - name: Use local temporary storage
       shell: bash

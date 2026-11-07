@@ -575,6 +575,7 @@ jobs:
           sccache: "true"
           rust-cache-key: package
           rust-cache-target: .temp/release-target
+          zig: "true"
       - name: Verify reused native fixture graphs against candidate sources
         if: github.event_name == 'workflow_dispatch'
         shell: bash

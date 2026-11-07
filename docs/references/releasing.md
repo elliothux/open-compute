@@ -130,7 +130,7 @@ GitHub Release，上传七个公开 assets，再全部下载回来逐字节比�
 `./scripts/release-dry-run.sh` 是本地 Docker 隔离的 Linux ARM64 package 诊断，不是第二套远端发布资格。
 它只接受干净的当前 `HEAD`，在保留的 detached worktree 中准备锁定依赖，然后断网执行 source/release-tool
 fail-fast、正式 `package-release.sh`、一次 `single-binary` Gate 和与正式 Linux ARM64 package job 相同的
-Dashboard smoke。工具链镜像固定 Rust 1.98.0、Bun 1.3.14、Node 26.8.1 和 Playwright 1.63.0；容器不挂载
+Dashboard smoke。工具链镜像固定 Rust 1.98.0、Bun 1.3.14、Node 26.8.1、Playwright 1.63.0、zig 0.14.1 和 cargo-zigbuild 0.24.1；容器不挂载
 宿主 HOME、凭据、SSH agent 或 Docker socket。候选二进制、package report、runtime 和 Dashboard server
 日志保留在 `.temp/release-dry-run/output/`；Gate 与 Playwright 的详细失败树保留在 retained
 worktree 的 `.temp/release-dry-run/source/.temp/` 和 `apps/dashboard/test-results/`。

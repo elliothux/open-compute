@@ -3,7 +3,7 @@ import { link, mkdtemp, open, readFile, rm, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { prepareCaddy } from "./caddy-archive.ts";
-import { checkGlibcBaseline } from "./glibc-baseline.ts";
+import { checkGlibcBaseline, LINUX_GLIBC_BASELINE } from "./glibc-baseline.ts";
 import { verifyReleaseExecutable } from "./verify-release-executable.ts";
 import {
   absoluteDestination,
@@ -48,15 +48,19 @@ try {
   };
   command("bun", ["run", "build"], buildEnvironment);
   command("bun", ["run", "check:generated"]);
+  // A Linux toolchain links against the host glibc and libstdc++, so a
+  // binary built on a current distribution does not start on the baseline.
+  // cargo-zigbuild links against the baseline glibc stubs and a static libc++.
+  const linux = pin.target.startsWith("linux-");
   command(
     "cargo",
     [
-      "build",
+      linux ? "zigbuild" : "build",
       "--locked",
       "--release",
       "--timings",
       "--target",
-      target,
+      linux ? `${target}.${LINUX_GLIBC_BASELINE}` : target,
       "-p",
       "open-compute-service",
       "--bin",
@@ -72,7 +76,7 @@ try {
   );
   const source = join(buildDirectory, target, "release/ocd");
   const bytes = await readFile(source);
-  if (pin.target.startsWith("linux-")) {
+  if (linux) {
     checkGlibcBaseline(bytes, "ocd");
     checkGlibcBaseline(await readFile(pin.binary), "workerd");
   }

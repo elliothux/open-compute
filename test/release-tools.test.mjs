@@ -1982,6 +1982,39 @@ test("Linux release binaries stay within the glibc baseline without a dynamic C+
   assert.throws(() => elfLinkage(Buffer.from("#!/bin/sh\n")), /ELF64/);
 });
 
+test("Linux packaging links against the glibc baseline with one pinned zig toolchain", async () => {
+  const packaging = await readFile(
+    new URL("../scripts/package-release.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(packaging, /`\$\{target\}\.\$\{LINUX_GLIBC_BASELINE\}`/);
+  assert.match(packaging, /checkGlibcBaseline\(bytes, "ocd"\)/);
+  const setup = await readFile(
+    new URL(
+      "../.github/actions/setup-open-compute/action.yml",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  const dryRun = await readFile(localDryRunDockerfilePath, "utf8");
+  const workflow = await readFile(releaseWorkflowPath, "utf8");
+  assert.match(workflow, /rust-cache-key: package\n.*\n\s+zig: "true"/);
+  for (const source of [setup, dryRun]) {
+    assert.deepEqual(
+      [...new Set(source.match(/ziglang\.org\/download\/[0-9.]+\//g))],
+      ["ziglang.org/download/0.14.1/"],
+    );
+    assert.deepEqual(
+      [
+        ...new Set(
+          source.match(/cargo-zigbuild\/releases\/download\/v[0-9.]+\//g),
+        ),
+      ],
+      ["cargo-zigbuild/releases/download/v0.24.1/"],
+    );
+  }
+});
+
 test("installer refuses a host below the Linux glibc baseline before downloading the binary", async () => {
   const root = await mkdtemp(join(tmpdir(), "oc-install-glibc-test-"));
   const commands = join(root, "commands");
