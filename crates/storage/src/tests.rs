@@ -141,6 +141,8 @@ mod inspect_lock_holds_and_releases_flock;
 
 mod operation_receipt_reads_are_bounded;
 
+mod live_worker_by_name_reads_the_name_index;
+
 mod inspect_control_db_accepts_uri_special_path_chars;
 
 mod snapshot_version_artifact_inventory_uses_the_canonical_sharded_key;
