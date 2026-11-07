@@ -59,7 +59,7 @@ fn serve_target(requests: usize) -> (String, thread::JoinHandle<()>) {
             let body = if first_line.contains("/accounts/") {
                 format!(r#"{{"success":true,"result":{{"id":"{ACCOUNT_ID}"}}}}"#)
             } else {
-                r#"{"success":true,"result":{"cf_version":"1.0.0-beta.12"}}"#.to_owned()
+                r#"{"success":true,"result":{"cf_version":"1.0.0-beta.21"}}"#.to_owned()
             };
             write!(
                 stream,
@@ -74,8 +74,23 @@ fn serve_target(requests: usize) -> (String, thread::JoinHandle<()>) {
 }
 
 fn write_fake_cf(project: &Path, api_base_url: &str, started: &Path, version: &str) -> PathBuf {
-    let bin = project.join("node_modules/.bin/cf");
+    // The package declares its JavaScript entry; `.bin/cf` is a shell shim node must not run.
+    let package = project.join("node_modules/cf");
+    let bin = package.join("bin/cf");
     fs::create_dir_all(bin.parent().unwrap()).unwrap();
+    fs::write(
+        package.join("package.json"),
+        r#"{"name":"cf","bin":{"cf":"./bin/cf"}}"#,
+    )
+    .unwrap();
+    let shim = project.join("node_modules/.bin/cf");
+    fs::create_dir_all(shim.parent().unwrap()).unwrap();
+    fs::write(
+        &shim,
+        "#!/bin/sh\nexec node \"$(dirname \"$0\")/../cf/bin/cf\" \"$@\"\n",
+    )
+    .unwrap();
+    fs::set_permissions(&shim, fs::Permissions::from_mode(0o755)).unwrap();
     let script = format!(
         r#"const args = process.argv.slice(2);
 if (args[0] === '--version') {{ console.log('{version}'); process.exit(0); }}
@@ -140,14 +155,14 @@ fn target_commands_and_cf_wrapper_preserve_the_day1_boundary() {
     let test = run(ocd(&config_home).args(["target", "test", "remote", "--json"]));
     assert_success(&test);
     let test_body = String::from_utf8(test.stdout).unwrap();
-    assert!(test_body.contains("\"cf_version\":\"1.0.0-beta.12\""));
+    assert!(test_body.contains("\"cf_version\":\"1.0.0-beta.21\""));
     assert!(!test_body.contains("fixture-deployer-token"));
 
     let project = temp.path().join("project");
     fs::create_dir(&project).unwrap();
     fs::write(project.join("cloudflare.config.ts"), "export default {};\n").unwrap();
     let started = temp.path().join("cf-started");
-    write_fake_cf(&project, &api_base_url, &started, "1.0.0-beta.12");
+    write_fake_cf(&project, &api_base_url, &started, "1.0.0-beta.21");
     let wrapped = run(ocd(&config_home)
         .env("CLOUDFLARE_API_KEY", "legacy-key")
         .env("CLOUDFLARE_EMAIL", "legacy@example.invalid")
@@ -170,8 +185,8 @@ fn target_commands_and_cf_wrapper_preserve_the_day1_boundary() {
     assert_eq!(cross_major.status.code(), Some(37));
     let cross_major_stderr = String::from_utf8(cross_major.stderr).unwrap();
     assert!(cross_major_stderr.contains("CF_VERSION_WARNING"));
-    assert!(cross_major_stderr.contains("detected=1.1.0 certified=1.0.0-beta.12"));
-    assert!(cross_major_stderr.contains("certified_cf=1.0.0-beta.12"));
+    assert!(cross_major_stderr.contains("detected=1.1.0 certified=1.0.0-beta.21"));
+    assert!(cross_major_stderr.contains("certified_cf=1.0.0-beta.21"));
     assert!(!cross_major_stderr.contains("fixture-deployer-token"));
 
     let terminated = ocd(&config_home)

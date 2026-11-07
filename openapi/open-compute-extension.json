@@ -2736,7 +2736,7 @@
           },
           "cf_version": {
             "type": "string",
-            "const": "1.0.0-beta.12"
+            "const": "1.0.0-beta.21"
           },
           "compatibility": {
             "type": "object",

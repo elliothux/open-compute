@@ -417,8 +417,11 @@ function loadManifestSelections(): {
   };
 }
 
-async function npmIdentity(name: string): Promise<NpmIdentity> {
-  const response = await fetch(`https://registry.npmjs.org/${name}/latest`);
+async function npmIdentity(
+  name: string,
+  version = "latest",
+): Promise<NpmIdentity> {
+  const response = await fetch(`https://registry.npmjs.org/${name}/${version}`);
   if (!response.ok)
     throw new Error(
       `npm registry lookup for ${name} failed: ${response.status}`,
@@ -594,7 +597,41 @@ function summarize(report: UpstreamReport): string {
   return lines.join("\n");
 }
 
+/** Exact candidate identities pinned on the command line; absent ones resolve to HEAD/latest. */
+function candidateOverrides(argv: string[]): {
+  openapiRevision?: string;
+  cloudflare?: string;
+  cf?: string;
+} {
+  const flags = new Map([
+    ["--openapi-revision", "openapiRevision"],
+    ["--cloudflare", "cloudflare"],
+    ["--cf", "cf"],
+  ] as const);
+  const overrides: {
+    openapiRevision?: string;
+    cloudflare?: string;
+    cf?: string;
+  } = {};
+  for (let index = 0; index < argv.length; index += 2) {
+    const key = flags.get(argv[index] as never);
+    const value = argv[index + 1];
+    if (key === undefined || value === undefined || value.length === 0)
+      throw new Error(
+        "usage: scanner.ts [--openapi-revision SHA] [--cloudflare VERSION] [--cf VERSION]",
+      );
+    overrides[key] = value;
+  }
+  if (
+    overrides.openapiRevision !== undefined &&
+    !/^[0-9a-f]{40}$/.test(overrides.openapiRevision)
+  )
+    throw new Error("--openapi-revision must be a full 40-character commit");
+  return overrides;
+}
+
 async function main(): Promise<void> {
+  const overrides = candidateOverrides(process.argv.slice(2));
   mkdirSync(REVIEW_ROOT, { recursive: true });
   const baseline = loadBaseline();
   const selections = loadManifestSelections();
@@ -604,26 +641,26 @@ async function main(): Promise<void> {
       operationSha256: string;
     }>;
   };
-  const revision = headRevision();
+  const revision = overrides.openapiRevision ?? headRevision();
   const candidateSchemaBytes = await downloadSchema(revision);
   const [cloudflare, cf] = await Promise.all([
-    npmIdentity("cloudflare"),
-    npmIdentity("cf"),
+    npmIdentity("cloudflare", overrides.cloudflare),
+    npmIdentity("cf", overrides.cf),
   ]);
   const sdkRoutes = await candidateSdkRoutesFor(cloudflare);
-  const baselineCf = baseline.cf;
-  const cfPackage =
-    cf.version === baselineCf.version
-      ? {
-          root: resolve(REPO_ROOT, "node_modules/cf"),
-          packageSha256: baselineCf.packageSha256,
-          packageJsonSha256: sha256Hex(
-            readFileSync(resolve(REPO_ROOT, "node_modules/cf/package.json")),
-          ),
-        }
-      : await extractCandidatePackage("cf", cf, "candidate-cf");
-  const candidateCfEvidence = cfEvidence(cfPackage.root);
-  candidateCfEvidence.packageSha256 = cfPackage.packageSha256;
+  // An installed exact candidate carries its resolved cf/config dependency graph;
+  // the extracted tarball alone does not, so its config schema stays unknown.
+  const extractedCf = await extractCandidatePackage("cf", cf, "candidate-cf");
+  const installedCf = resolve(REPO_ROOT, "node_modules/cf");
+  const installedVersion = (
+    JSON.parse(readFileSync(join(installedCf, "package.json"), "utf8")) as {
+      version: string;
+    }
+  ).version;
+  const candidateCfEvidence = cfEvidence(
+    installedVersion === cf.version ? installedCf : extractedCf.root,
+  );
+  candidateCfEvidence.packageSha256 = extractedCf.packageSha256;
   const manifest = JSON.parse(readFileSync(MANIFEST_PATH, "utf8"));
   const surface = JSON.parse(
     readFileSync(join(REPO_ROOT, "packages/sdk/surface.json"), "utf8"),

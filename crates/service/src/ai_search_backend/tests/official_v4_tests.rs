@@ -752,3 +752,93 @@ async fn exercise_jobs_and_items(state: &HttpState, instances: &str, docs: &str)
     .await;
     assert_eq!(delete_instance.status(), StatusCode::OK);
 }
+
+#[tokio::test]
+async fn official_instance_move_and_purge_cache_follow_the_namespace_contract() {
+    let fixture = SearchBehaviorFixture::create().await;
+    let (state, account) = official_ai_state(&fixture);
+    let namespaces = format!("/accounts/{account}/ai-search/namespaces");
+    let send = |method: &'static str, path: String, body: Value| {
+        let state = state.clone();
+        async move {
+            official_ai_send(
+                &state,
+                method,
+                &path,
+                "deployer-token",
+                Some("application/json"),
+                body.to_string(),
+            )
+            .await
+        }
+    };
+    let created = send("POST", namespaces.clone(), json!({"name": "destination"})).await;
+    assert_eq!(created.status(), StatusCode::OK);
+    let origin = format!("{namespaces}/search-behavior/instances");
+    let destination = format!("{namespaces}/destination/instances");
+    for (base, id) in [
+        (&origin, "movable"),
+        (&origin, "clash"),
+        (&destination, "clash"),
+    ] {
+        let config = json!({
+            "id": id,
+            "embedding_model": "@cf/qwen/qwen3-embedding-0.6b",
+            "index_method": {"vector": false, "keyword": true},
+            "metadata": {"created_from_emdash_plugin": {"type": "rest", "version": "1.2.0"}}
+        });
+        assert_eq!(
+            send("POST", base.clone(), config).await.status(),
+            StatusCode::OK
+        );
+    }
+
+    let purge = send("POST", format!("{origin}/movable/purge_cache"), json!({})).await;
+    assert_eq!(purge.status(), StatusCode::OK);
+    assert_eq!(official_ai_json(purge).await["success"], true);
+    let missing = send("POST", format!("{origin}/absent/purge_cache"), json!({})).await;
+    assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+
+    for (body, status) in [
+        (json!({}), StatusCode::BAD_REQUEST),
+        (
+            json!({"new_namespace": "Bad Name"}),
+            StatusCode::BAD_REQUEST,
+        ),
+        (json!({"new_namespace": "absent"}), StatusCode::NOT_FOUND),
+    ] {
+        let response = send("PATCH", format!("{origin}/movable"), body.clone()).await;
+        assert_eq!(response.status(), status, "{body}");
+    }
+    // An id must stay unique inside the destination namespace.
+    let clash = send(
+        "PATCH",
+        format!("{origin}/clash"),
+        json!({"new_namespace": "destination"}),
+    )
+    .await;
+    assert_eq!(clash.status(), StatusCode::BAD_REQUEST);
+
+    let moved = send(
+        "PATCH",
+        format!("{origin}/movable"),
+        json!({"new_namespace": "destination"}),
+    )
+    .await;
+    assert_eq!(moved.status(), StatusCode::OK);
+    assert_eq!(official_ai_json(moved).await["result"], json!({}));
+    let read = |path: String| {
+        let state = state.clone();
+        async move { official_ai_send(&state, "GET", &path, "read-token", None, Body::empty()).await }
+    };
+    assert_eq!(
+        read(format!("{origin}/movable")).await.status(),
+        StatusCode::NOT_FOUND
+    );
+    let after = official_ai_json(read(format!("{destination}/movable")).await).await;
+    assert_eq!(after["result"]["namespace"], "destination");
+    assert_eq!(
+        after["result"]["metadata"]["created_from_emdash_plugin"],
+        json!({"type": "rest", "version": "1.2.0"})
+    );
+}

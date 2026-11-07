@@ -380,6 +380,69 @@ impl<'a> AiSearchCatalog<'a> {
         })
     }
 
+    /// Move one ready instance to another ready namespace of the same account.
+    ///
+    /// The instance keeps its resource, storage, and index identity; only its
+    /// parent link and the namespace-qualified resource name change.
+    pub fn move_instance(
+        &self,
+        instance_id: InstanceId,
+        resource_id: ResourceId,
+        target_namespace_resource_id: ResourceId,
+        now_ms: i64,
+    ) -> Result<AiSearchInstanceRecord, PlatformError> {
+        self.db.with_immediate(|tx| {
+            let resource = read_resource_conn(tx, instance_id, resource_id)?;
+            let current = read_instance(tx, &resource)?;
+            if resource.state != ResourceState::Ready {
+                return Err(PlatformError::new(
+                    ErrorCode::ResourceNameConflict,
+                    "AI Search instance is not ready to move",
+                ));
+            }
+            let target = read_resource_conn(tx, instance_id, target_namespace_resource_id)?;
+            if target.kind != BindingKind::AiSearchNamespace || target.state != ResourceState::Ready
+            {
+                return Err(not_found());
+            }
+            if current.namespace_resource_id == target.id {
+                return Ok(current);
+            }
+            let taken = tx
+                .query_row(
+                    "SELECT 1 FROM ai_search_instances
+                      WHERE namespace_resource_id=?1 AND instance_key=?2",
+                    params![target.id, current.instance_key],
+                    |_| Ok(()),
+                )
+                .optional()
+                .map_err(|_| invariant())?
+                .is_some();
+            if taken {
+                return Err(PlatformError::new(
+                    ErrorCode::ConfigInvalid,
+                    "target AI Search namespace already has an instance with this id",
+                ));
+            }
+            tx.execute(
+                "UPDATE ai_search_instances SET namespace_resource_id=?1 WHERE resource_id=?2",
+                params![target.id, resource.id],
+            )
+            .map_err(|_| invariant())?;
+            tx.execute(
+                "UPDATE resources SET name=?1, updated_at_ms=?2 WHERE id=?3",
+                params![
+                    format!("{}:{}", target.id, current.instance_key),
+                    now_ms,
+                    resource.id
+                ],
+            )
+            .map_err(|_| invariant())?;
+            let resource = read_resource_conn(tx, instance_id, resource_id)?;
+            read_instance(tx, &resource)
+        })
+    }
+
     /// List live child instances in stable instance-key order.
     pub fn list_instances(
         &self,

@@ -822,7 +822,7 @@ test("release assembly requires and describes the exact three native executables
     tarballIntegrity: "sha512-cdkovenkZmV2ZGVk",
     surfaceDigest: "c".repeat(64),
     openapiRevision: "d".repeat(40),
-    cloudflareSdkVersion: "7.2.0",
+    cloudflareSdkVersion: "7.3.0",
     files: ["package/package.json"],
   };
   assert.deepEqual(parseSdkPackageReport(sdkReport), sdkReport);
@@ -893,7 +893,7 @@ test("release assembly requires and describes the exact three native executables
       tarballIntegrity: "sha512-cdkovenkZmV2ZGVk",
       surfaceDigest: "c".repeat(64),
       openapiRevision: "d".repeat(40),
-      cloudflareSdkVersion: "7.2.0",
+      cloudflareSdkVersion: "7.3.0",
     });
     assert.deepEqual(
       manifest.artifacts.map((artifact) => artifact.target),

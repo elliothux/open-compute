@@ -162,7 +162,7 @@ test("settings surfaces, bulk asset upload, and old routes are classified exactl
     capability.managementApi.routes.filter(
       (item) => item.status === "supported",
     ).length,
-    200,
+    202,
   );
   assert.equal(
     capability.managementApi.routes.filter(
@@ -346,9 +346,18 @@ test("Container management inventory records the implemented cf subset and SDK b
   );
   assert.equal(routes.length, 13);
   assert.equal(new Set(routes.map((route) => route.id)).size, routes.length);
+  // Official OpenAPI defines 10 routes; the cf-only reads stay observed.
+  assert.equal(
+    routes.filter((route) => route.source === "cloudflare-openapi").length,
+    10,
+  );
   for (const route of routes) {
     assert.equal(route.status, "supported_with_deviation");
-    assert.equal(route.source, "cf-1.0.0-beta.12-containers");
+    assert.ok(
+      ["cloudflare-openapi", "cf-1.0.0-beta.12-containers"].includes(
+        route.source,
+      ),
+    );
     assert.deepEqual(route.deviations, ["OC-CONTAINERS-MGMT-001"]);
     assert.equal(
       route.requestMediaType,

@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "sourceDigest": "7c7c2c1df9aeb55c2c7a96b8d85a8c1abb758c174b6c5a485e13079e3ec84c6e",
+  "sourceDigest": "1db98a146de11c860d67e468e28c4d12ed8d9741f39b720957eca590ec778cad",
   "sourceDigestScope": "tracked production, test, toolchain, manifest, and embedded runbook inputs; excludes rule files, .agents/**, .claude/**, other docs, generated Python caches, and test/conformance/baseline.json",
-  "workerdLockSha256": "d755339d9a60a3df06a9e43d874bc5a8c7035e73e5b31c8048b156ba38a189e6",
+  "workerdLockSha256": "95e7fa2b2f13179922dae5b01a98717868bd57f876398a908e806b8f60ce1e88",
   "workerd": {
     "release": "v1.20260930.0-open-compute-r25.2ff33d645",
     "revision": "2ff33d645813e1d6253f44ec312d75ee70153912",
@@ -21,7 +21,7 @@
     "gitHead": "d99bc6b777e35d72d71c2f1fe2fd1db53284528a",
     "packageSha256": "0488b340017b706e19e521b96cf28efe3732206acc322344c74c7e4cc3823250",
     "astSha256": "c49a9c138ef23712f324432807840b7eec7cbcd696487ad9c42217015482be5b",
-    "lockSha256": "9d5fa73bef1700e0d4496b571d1828ac3b1d8283aed7faf0a536d2c201a30beb",
+    "lockSha256": "5c0bcef67657ab258e94db1cba7432edbef3d9f2dd0623d466754872dddedba6",
     "indexSha256": "5cba0df0ed430c5ba6bdf249221c2be24f4344e539e29f2113a042a5e5d23a6f"
   },
   "workersSdk": {
@@ -38,6 +38,6 @@
     "rolldown": "1.2.6"
   },
   "cf": {
-    "version": "1.0.0-beta.12"
+    "version": "1.0.0-beta.21"
   }
 }

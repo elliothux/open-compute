@@ -135,6 +135,12 @@ pub(crate) enum V4OfficialError {
     ArtifactMemoryLimit,
     /// Cloudflare Artifacts internal failure.
     ArtifactInternal,
+    /// Cloudflare AI Search query capacity is temporarily exceeded.
+    AiSearchCapacityExceeded,
+    /// Cloudflare AI Search query provider failed upstream.
+    AiSearchUpstreamError,
+    /// Cloudflare AI Search management is temporarily unavailable.
+    AiSearchUnavailable,
 }
 
 impl V4Error {
@@ -195,7 +201,11 @@ impl V4Error {
 
     const fn retry_after_seconds(self) -> Option<u16> {
         match self {
-            Self::Unavailable | Self::RateLimited => Some(1),
+            Self::Unavailable
+            | Self::RateLimited
+            | Self::Official(
+                V4OfficialError::AiSearchCapacityExceeded | V4OfficialError::AiSearchUnavailable,
+            ) => Some(1),
             _ => None,
         }
     }
@@ -221,6 +231,9 @@ impl V4OfficialError {
             Self::ArtifactInternal => 10_400,
             Self::ArtifactUpstreamUnavailable => 10_401,
             Self::ArtifactMemoryLimit => 10_402,
+            Self::AiSearchCapacityExceeded => 7_119,
+            Self::AiSearchUpstreamError => 7_120,
+            Self::AiSearchUnavailable => 7_125,
         }
     }
 
@@ -244,6 +257,9 @@ impl V4OfficialError {
             Self::ArtifactUpstreamUnavailable => StatusCode::SERVICE_UNAVAILABLE,
             Self::ArtifactMemoryLimit => StatusCode::PAYLOAD_TOO_LARGE,
             Self::ArtifactInternal => StatusCode::INTERNAL_SERVER_ERROR,
+            Self::AiSearchCapacityExceeded => StatusCode::TOO_MANY_REQUESTS,
+            Self::AiSearchUpstreamError => StatusCode::BAD_GATEWAY,
+            Self::AiSearchUnavailable => StatusCode::SERVICE_UNAVAILABLE,
         }
     }
 
@@ -266,6 +282,9 @@ impl V4OfficialError {
             Self::ArtifactUpstreamUnavailable => "Artifact upstream is unavailable",
             Self::ArtifactMemoryLimit => "Artifact operation exceeded its memory limit",
             Self::ArtifactInternal => "Artifact operation failed",
+            Self::AiSearchCapacityExceeded => "Workers AI capacity temporarily exceeded",
+            Self::AiSearchUpstreamError => "Workers AI upstream error",
+            Self::AiSearchUnavailable => "AI Search temporarily unavailable",
         }
     }
 }

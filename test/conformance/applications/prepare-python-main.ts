@@ -528,7 +528,7 @@ async function main() {
       project,
       env,
     );
-    const cf = /\bv(1\.0\.0-beta\.12)(?:\s|$)/.exec(versionOutput)?.[1];
+    const cf = /\bv?(1\.0\.0-beta\.21)(?:\s|$)/.exec(versionOutput)?.[1];
     if (!cf) throw new Error("cf version differs from fixture pin");
     const output = await command(
       "node",

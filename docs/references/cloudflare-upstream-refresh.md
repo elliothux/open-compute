@@ -9,7 +9,10 @@ Queue create `jurisdiction`），当时 Wrangler 需要协调评审。2026-09-25
 `780de88d0324b007c907a1782259b1a0e5e87c7d`、SDK `7.2.0` 与 Wrangler `4.143.0`；selected operation、生成 SDK 与固定
 Wrangler 证据同步更新。这些是旧 producer 的历史输入，不是当前 cf 组合的验收；P20 已将 CLI pin、scanner、
 fixtures 与刷新 workflow 切换为 cf。历史只读 scan 已发现更新的 OpenAPI `01a855ec4bd180a1173f1b4587ef0fd0ca9f55e6` 改动四个 AI Search item operation，而 stable SDK
-仍未表达这些变化，因此下一候选继续 `blocked`，formal pin 不移动。当前已接受的版本与支持面仍由
+仍未表达这些变化，因此当时的候选继续 `blocked`。2026-11-08 经 three-way closure 接受 OpenAPI
+`1e7d44922a8a0174a7e68f81c9ff5709cd8c6db7`、SDK `7.3.0` 与 cf `1.0.0-beta.21`
+（[#139](https://github.com/elliothux/open-compute/issues/139)）；合同变化见
+[Cloudflare 兼容矩阵](cloudflare-compatibility.md)。当前已接受的版本与支持面仍由
 [`cloudflare-openapi.lock.json`](../../openapi/upstream/cloudflare-openapi.lock.json)、
 [`cloudflare-subset-manifest.json`](../../openapi/cloudflare-subset-manifest.json) 和
 [Cloudflare 兼容矩阵](cloudflare-compatibility.md)共同定义。
@@ -33,6 +36,8 @@ SDK package version 和 cf package version 是不同身份，不能把其中一�
 ## 手动运行与只读发现
 
 通过 `workflow_dispatch` 手动运行 `.github/workflows/cloudflare-upstream-review.yml`，执行已提交的仓库内 scanner，以当前 lock 为基线解析三个上游的 stable/HEAD 身份。
+本地评审可用 `--openapi-revision <40 位 commit>`、`--cloudflare <version>`、`--cf <version>` 固定精确候选。已安装的
+`node_modules/cf` 版本等于候选时，scanner 用它的依赖图读取 `cf/config` schema；否则只读 tarball，schema 无法加载时报告 `blocked`。
 
 发现 job 默认只有 `contents: read`。它只能把下载内容写入 `.temp/upstream-review/`，静态检查 schema 和 npm tarball；不得运行
 upstream package lifecycle script、生成代码、执行下载且尚未安装/验证依赖图的 cf CLI，或持有 npm、GitHub Release、environment、deployment 与 OIDC
@@ -107,4 +112,4 @@ unknown 降级成 compatible。PR 合并后关闭当前 tracking cycle，下一�
 scanner、classification fixture 与 workflow 本身属于普通 CI 检查范围。上游布局、npm metadata 或 schema 格式变化导致 scanner 无法继续时，
 必须显式失败并更新 issue，不能把“没有结果”解释为“没有更新”。
 
-P20 当前内部 CI 固定 `cf@1.0.0-beta.12`；用户版本不受该准确 pin 限制。scanner 若无法加载候选的准确 `cf/config` 依赖图，必须报告 blocked，不能用已安装旧 schema 代替。安装并资格验证该候选后才能刷新正式组合。
+P20 当前内部 CI 固定 `cf@1.0.0-beta.21`；用户版本不受该准确 pin 限制。scanner 若无法加载候选的准确 `cf/config` 依赖图，必须报告 blocked，不能用已安装旧 schema 代替。安装并资格验证该候选后才能刷新正式组合。

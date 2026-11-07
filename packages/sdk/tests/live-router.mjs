@@ -94,7 +94,7 @@ async function identityContract() {
   assert.equal(memberships.result[0].account.id, accountID);
 
   const capabilities = await client.openCompute.capabilities.get();
-  assert.equal(capabilities.cf_version, "1.0.0-beta.12");
+  assert.equal(capabilities.cf_version, "1.0.0-beta.21");
   assert.equal(capabilities.compatibility.validation, "workerd_code_version");
   assert.match(
     capabilities.compatibility.binary_maximum_date,

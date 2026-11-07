@@ -266,3 +266,31 @@ fn reranking_and_boosting_resolve_independently_and_fail_closed() {
         assert!(input.prepare(&catalog()).is_err());
     }
 }
+
+#[test]
+fn plugin_origin_metadata_round_trips_and_rejects_untyped_shapes() {
+    let prepare = |origin: Value| {
+        let input: AiSearchCreateInput = serde_json::from_value(serde_json::json!({
+            "id": "origin",
+            "metadata": {"created_from_emdash_plugin": origin, "owner": "docs"}
+        }))
+        .unwrap();
+        input.prepare(&catalog())
+    };
+    for origin in [
+        serde_json::json!({"type": "native", "version": "1.0.0"}),
+        serde_json::json!({"type": "rest", "version": "2", "extra": true}),
+    ] {
+        let prepared = prepare(origin.clone()).unwrap();
+        let public: Value = serde_json::from_slice(&prepared.public_config_json).unwrap();
+        assert_eq!(public["metadata"]["created_from_emdash_plugin"], origin);
+    }
+    for origin in [
+        serde_json::json!("rest"),
+        serde_json::json!({"type": "cli", "version": "1"}),
+        serde_json::json!({"type": "rest"}),
+        serde_json::json!({"type": "rest", "version": 1}),
+    ] {
+        assert!(prepare(origin.clone()).is_err(), "{origin}");
+    }
+}

@@ -79,7 +79,7 @@ open-compute 补上了这一层，并把它交付为一个文件。
 | Version Metadata、WebSocket Hibernation       |                                                                                                                                                     | mTLS certificates             |
 | Vectorize、Markdown Conversion、AI Search     |                                                                                                                                                     | Tail Workers、traces、Logpush |
 | Artifacts、Dynamic Workers                    |                                                                                                                                                     |                               |
-| cf `1.0.0-beta.12` 可部署和管理上述支持的产品 |                                                                                                                                                     |                               |
+| cf `1.0.0-beta.21` 可部署和管理上述支持的产品 |                                                                                                                                                     |                               |
 
 依赖“尚未支持”能力的上传或配置会被拒绝。
 
@@ -115,10 +115,10 @@ curl -fsSL https://open-compute.dev/install.sh | sudo sh
 sudo ocd setup --system --yes
 ```
 
-应用使用 `cloudflare.config.ts` 和官方 cf + Vite 插件 v2，由 Node.js 22.18+ 执行 cf，`ocd cf` 选择部署目标。内部 CI 固定 cf 1.0.0-beta.12；用户的非 1.0.x 版本仅警告：
+应用使用 `cloudflare.config.ts` 和官方 cf + Vite 插件 v2，由 Node.js 22.18+ 执行 cf，`ocd cf` 选择部署目标。内部 CI 固定 cf 1.0.0-beta.21；用户的非 1.0.x 版本仅警告：
 
 ```sh
-npm install --save-dev cf@1.0.0-beta.12 @cloudflare/vite-plugin@beta vite typescript
+npm install --save-dev cf@1.0.0-beta.21 @cloudflare/vite-plugin@beta vite typescript
 npm run dev
 npm run build
 ocd cf deploy --prebuilt --mode production

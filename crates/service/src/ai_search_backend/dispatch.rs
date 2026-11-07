@@ -23,6 +23,8 @@ impl AiSearchBindingService {
                 | "namespace.openComputeCreateManual"
                 | "namespace.delete"
                 | "instance.update"
+                | "instance.move"
+                | "instance.purgeCache"
                 | "items.delete"
                 | "items.openComputeUpsert"
                 | "item.sync"
@@ -43,6 +45,12 @@ impl AiSearchBindingService {
             "instance.search" => self.instance_search(authority, call).await?,
             "instance.chatCompletions" => self.instance_chat(authority, call).await?,
             "instance.update" => self.instance_update(authority, call).await?,
+            "instance.move" => self.instance_move(authority, call).await?,
+            "instance.purgeCache" => {
+                // Search results are never cached locally, so a purge has nothing to drop.
+                self.resolve_instance(authority, call.instance.as_deref())?;
+                json!({})
+            }
             "instance.info" => self.instance_info_call(authority, &call)?,
             "instance.stats" => self.instance_stats(authority, &call)?,
             "items.list" => self.items_list(authority, call)?,

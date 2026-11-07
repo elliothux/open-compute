@@ -640,7 +640,7 @@ rollout 将 grace 0 传给 Broker；停止意图持久化，重启后继续同�
 rolling rollout 请求在 `steps` 与 `step_percentage` 中选一项，同时提供或同时省略均拒绝。
 `step_percentage` 只接受 5、10、20、25、50、100；平台将每步增量规范为累计百分比，终点为 100。
 例如 25 产生 `[25, 50, 75, 100]`，100 产生 `[100]`。
-固定 `cf@1.0.0-beta.12` 的 deploy producer 在 immediate 模式发送 `step_percentage: 100`。
+固定 `cf@1.0.0-beta.21` 的 deploy producer 在 immediate 模式发送 `step_percentage: 100`。
 字段语义见 [Rollout create API](https://developers.cloudflare.com/api/resources/containers/subresources/applications/subresources/rollouts/methods/create/)，于 2026-10-11 核对。
 规范后的步骤仍由同一事务匹配 live target、冻结 cohort；不增加 manual 或 new_instances rollout。
 

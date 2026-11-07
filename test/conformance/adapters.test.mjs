@@ -342,7 +342,7 @@ test("Cloudflare refresh collects normalized responses, preserves unchanged reco
     const baseline = JSON.parse(await readFile(baselinePath, "utf8"));
     assert.deepEqual(baseline.portableRecording, {
       date: new Date().toISOString().slice(0, 10),
-      cfVersion: "1.0.0-beta.12",
+      cfVersion: "1.0.0-beta.21",
       accountAlias: "qualification",
     });
     const reloaded = (await loadPortableFixtures(root))[0];

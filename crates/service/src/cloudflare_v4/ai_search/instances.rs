@@ -162,6 +162,96 @@ pub(super) async fn update(
     .await
 }
 
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MoveBody {
+    new_namespace: String,
+}
+
+/// `PATCH .../instances/{id}`: move the instance into another namespace.
+pub(super) async fn move_to_namespace(
+    State(state): State<HttpState>,
+    Path((public_account, namespace, instance)): Path<(String, String, String)>,
+    request: Request,
+) -> Response {
+    let (context, account, api) = match authenticated(
+        &state,
+        &request,
+        V4Permission::ProductWrite,
+        &public_account,
+    ) {
+        Ok(value) => value,
+        Err(response) => return response.into_response(),
+    };
+    if !valid_namespace(&namespace) || !valid_instance(&instance) {
+        return error_response(V4Error::NotFound, context.request_id());
+    }
+    if let Err(error) = require_no_query(&request) {
+        return error_response(error, context.request_id());
+    }
+    let body = match json::<MoveBody>(request, context.request_id()).await {
+        Ok(value) => value,
+        Err(response) => return response.into_response(),
+    };
+    if !valid_namespace(&body.new_namespace) {
+        return error_response(
+            V4Error::InvalidField("/new_namespace"),
+            context.request_id(),
+        );
+    }
+    match call(
+        &api,
+        account,
+        &namespace,
+        context.request_id(),
+        "instance.move",
+        Some(&instance),
+        json!({"new_namespace": body.new_namespace}),
+    )
+    .await
+    {
+        Ok(value) => success_response(context, value),
+        Err(error) => error_response(error, context.request_id()),
+    }
+}
+
+/// `POST .../instances/{id}/purge_cache`.
+pub(super) async fn purge_cache(
+    State(state): State<HttpState>,
+    Path((public_account, namespace, instance)): Path<(String, String, String)>,
+    request: Request,
+) -> Response {
+    let (context, account, api) = match authenticated(
+        &state,
+        &request,
+        V4Permission::ProductWrite,
+        &public_account,
+    ) {
+        Ok(value) => value,
+        Err(response) => return response.into_response(),
+    };
+    if !valid_namespace(&namespace) || !valid_instance(&instance) {
+        return error_response(V4Error::NotFound, context.request_id());
+    }
+    if let Err(error) = require_no_query(&request) {
+        return error_response(error, context.request_id());
+    }
+    match call(
+        &api,
+        account,
+        &namespace,
+        context.request_id(),
+        "instance.purgeCache",
+        Some(&instance),
+        json!({}),
+    )
+    .await
+    {
+        Ok(_) => success_response(context, json!({})),
+        Err(error) => error_response(error, context.request_id()),
+    }
+}
+
 pub(super) async fn delete(
     State(state): State<HttpState>,
     Path((public_account, namespace, instance)): Path<(String, String, String)>,

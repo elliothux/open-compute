@@ -1,4 +1,4 @@
-const CF_VERSION: &str = "1.0.0-beta.12";
+const CF_VERSION: &str = "1.0.0-beta.21";
 
 #[derive(Serialize, schemars::JsonSchema)]
 struct Capabilities<'a> {

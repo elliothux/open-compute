@@ -27,13 +27,26 @@ revision 与四目标 binary/archive digest 一起固定。`ocd capabilities --j
 平台 system Workers 继续使用 formal lock 中独立的 `systemCompatibilityDate` / `systemCompatibilityFlags`，这些值不会注入 tenant
 Version。compatibility date 只选择当前 binary 内的运行时行为，不选择旧 binary、旧 schema、旧 artifact 或旧持久化模型。
 
-管理合同使用固定 cf `1.0.0-beta.12`、Cloudflare OpenAPI revision `780de88d0324b007c907a1782259b1a0e5e87c7d`（blob
-`a37bda40bc108c44c135ee69ff83fe666ce4e25d`）与官方 SDK `cloudflare@7.2.0`。Script/Version
+管理合同使用固定 cf `1.0.0-beta.21`、Cloudflare OpenAPI revision `1e7d44922a8a0174a7e68f81c9ff5709cd8c6db7`（blob
+`c6a4812dd5b1fdf2b8b6f187b954646d82fd99eb`）与官方 SDK `cloudflare@7.3.0`。Script/Version
 上传统一使用一个 JSON `metadata` multipart part 加具名 module parts；SDK 扩展覆盖官方 SDK 尚未声明的
 Artifacts binding。正式 runtime lock 的 `workersSdk` 字段记录 integration reference 与 cf/Vite pin；CLI 版本只有
 `cfVersion`，不接受旧字段或别名，执行路径只使用 cf。
-当前 scanner 已发现 revision `01a855ec4bd180a1173f1b4587ef0fd0ca9f55e6` 新增 AI Search item schema，而 stable SDK 尚未同步，下一轮继续
-保持 `blocked`，不改变上述 formal pin。
+这次刷新（[#139](https://github.com/elliothux/open-compute/issues/139)）的合同变化：
+
+- AI Search instance 路径参数改名为 `{namespace}`。服务端路由按参数位置匹配，不受参数名影响。
+- 新选入 instance `PATCH`（在同一实例内把 instance 移到另一个 namespace）和 `purge_cache`。本地不缓存搜索结果，purge
+  校验 instance 后直接成功。官方 SDK 7.3.0 未实现这两个方法，所以它们不进入 SDK surface。
+- `metadata.created_from_emdash_plugin` 按官方形状校验：`type` 为 `native` 或 `rest`，`version` 为字符串。
+- AI Search 查询把本地容量饱和返回为 429 `7119`，把模型 provider 失败返回为 502 `7120`；管理路由的暂时不可用返回为
+  503 `7125`。429 和 503 带 `Retry-After`。
+- 10 个 Container 管理路由进入官方 OpenAPI 与 SDK 7.3.0，从 cf 观察面改为正式选入，仍使用 `OC-CONTAINERS-MGMT-001`；
+  另外 3 个只由 cf 观察的读取路由保持在 SDK surface 外。
+- R2 bucket list 的 `result_info` 返回 `total_count` 与 `per_page`；KV namespace create 接受 `mode: "instant"`，单机
+  SQLite KV 本身即时可见。
+- 官方 SDK 7.3.0 未表达的新增字段（KV `mode` 回显、Workflows jurisdiction 冲突、Observability `$metadata` 时间字段、
+  AI Search 音视频 chunk 字段）不在本地产生；它们在 schema 中都是可选字段或本地不会出现的错误。
+- cf `1.0.0-beta.21` 新增的 `access` 配置字段按 `unsupported` 失败关闭。
 
 Worker bundle 使用通用本地结构限制：4096 modules、总 module bytes 32 MiB、manifest 1 MiB，
 canonical artifact 默认 34 MiB。与 Cloudflare 相同，单个 module 不另设上限，可以使用全部 module 预算。multipart streaming、离线 base64 encoder 和 framework importer 保持同一预算；
@@ -190,7 +203,7 @@ instance，官方 `PUT /items`、upload、sync、source enum、response field �
 Artifacts 按 [REST API](https://developers.cloudflare.com/artifacts/api/rest-api/)、
 [Git protocol](https://developers.cloudflare.com/artifacts/api/git-protocol/)、
 [Workers binding](https://developers.cloudflare.com/artifacts/api/workers-binding/) 与固定
-`cf@1.0.0-beta.12` 实现。namespace/repository list 只接受官方 `limit` + opaque `cursor`；旧 Wrangler
+`cf@1.0.0-beta.21` 实现。namespace/repository list 只接受官方 `limit` + opaque `cursor`；旧 Wrangler
 专用的 `page` 分支已删除，未知 query field 直接拒绝。固定 cf 的两个 list 命令使用同一 cursor 合同。
 token list 保持官方 `page` / `per_page`。repo token 精确采用
 `art_v1_<40 lowercase hex>?expires=<unix_seconds>`；Bearer 使用完整值，Git Basic password 使用 `?expires`
@@ -291,7 +304,7 @@ Host-first dispatch、canonical authority 拒绝、endpoint OpenAPI/SDK shape �
 其中 `result.id` 是 Version ID，包含 `resources`、`metadata` 和 `number`。
 客户端须用 PUT 的 `deployment_id` 读取 fresh Version，不能把 PUT 结果当作 Version。
 PUT 的 Script ID 语义来自 [Workers Scripts update API](https://developers.cloudflare.com/api/resources/workers/subresources/scripts/methods/update/)。
-`deployment_id` 的消费合同来自固定 `cf@1.0.0-beta.12` 的原版 `deployWorker`；该字段未列于当前 API 文档。
+`deployment_id` 的消费合同来自固定 `cf@1.0.0-beta.21` 的原版 `deployWorker`；该字段未列于当前 API 文档。
 本地于 2026-10-11 核对该生产者，并以同一 SQLite authority 覆盖 Applied、Replay 和公开 Version 回读。
 此证据不代表 Cloudflare 托管写入差分已经通过。
 
@@ -366,7 +379,7 @@ Queue consumer 响应只投影官方 `script_name`，不再输出旧 CLI 专用�
 当前固定 cf 的消费者命令与 SDK 使用同一 [REST response](https://developers.cloudflare.com/api/resources/queues/subresources/consumers/methods/list/)；
 所属 CRUD 回归同时检查 create/list/get/update 的名称字段和旧别名缺失。
 
-固定 cf 1.0.0-beta.12 所依赖的 `@cloudflare/config` Queue schema 仍声明 `deliveryDelay`；cf 的
+固定 cf 1.0.0-beta.21 所依赖的 `@cloudflare/config` Queue schema 仍声明 `deliveryDelay`；cf 的
 upload builder 将 producer 的 `delivery_delay` 原样放入 queue multipart binding，内部 config validator
 又明确警告该字段已弃用且无效果。它属于当前固定 cf 的可观察 upload 合同，不能仅因实现源自 workers-sdk
 就当成旧 CLI shim 删除。两种官方 metadata wire 统一解析该数值并忽略它，不改写 Queue authority 或
@@ -501,7 +514,7 @@ qualification 仍是有效证据，但当前 token 不能生成新的合并报�
 workerd、SQLite 与选定的 Local/S3 object authority、restart/crash tests 和最终 workspace/coverage 共同组成。最终命令、报告和
 实际限制记录在归档完成报告中；机器可读 capability/catalog 仍是支持状态的唯一 authority。
 
-[P20](../implemented/p20-cf-cli-migration.md) 当前应用入口为项目内 cf 与官方 Vite 插件 v2，配置为 `cloudflare.config.ts`，构建产物为 Cloudflare Build Output。内部 CI 固定 cf 1.0.0-beta.12；用户的非 1.0.x 版本警告后仍执行。旧 Wrangler 项目需显式使用 `cf migrate <exact-file> --bundler vite`。终端流式 tail 尚无等价 cf 入口，使用 Dashboard Live Tail。
+[P20](../implemented/p20-cf-cli-migration.md) 当前应用入口为项目内 cf 与官方 Vite 插件 v2，配置为 `cloudflare.config.ts`，构建产物为 Cloudflare Build Output。内部 CI 固定 cf 1.0.0-beta.21；用户的非 1.0.x 版本警告后仍执行。旧 Wrangler 项目需显式使用 `cf migrate <exact-file> --bundler vite`。终端流式 tail 尚无等价 cf 入口，使用 Dashboard Live Tail。
 
 P21 临时例外只限开发侧 Python 构建：调用用户安装的 PyWrangler，不校验版本、不自动安装；
 Worker 配置仍为 `cloudflare.config.ts`，上游构建的 Build Output 只由 cf `--prebuilt` 上传/部署。
@@ -568,6 +581,6 @@ Knip 的 root `ignoreDependencies` 记录这个声明依赖，不添加功能代
 这只验证所用的公开声明闭包，不表示未引用的 `RawConfig` 根声明全集通过。
 上游补齐公开 schema、模块类型导入和 Pipeline 模块入口后，应移除对应补丁并重验。
 
-cf 1.0.0-beta.12 的已有 Worker redeploy 先 POST Version（带 observability），再创建 Deployment 并 PATCH script-settings。该非版本化字段在上传入口完整验证；单独 Version POST 不更改现有 Script 日志策略，Script PUT 或显式 script-settings PATCH 才更新。正式 OpenAPI 的 Version POST metadata 尚未列出该字段；这是当前官方 cf producer 的已记录差异，不引入客户端版本选择或另一路持久化实现。
+cf 1.0.0-beta.21 的已有 Worker redeploy 先 POST Version（带 observability），再创建 Deployment 并 PATCH script-settings。该非版本化字段在上传入口完整验证；单独 Version POST 不更改现有 Script 日志策略，Script PUT 或显式 script-settings PATCH 才更新。正式 OpenAPI 的 Version POST metadata 尚未列出该字段；这是当前官方 cf producer 的已记录差异，不引入客户端版本选择或另一路持久化实现。
 
 AI Search 实例创建使用 `cf ai-search create <namespace> <id> --body '{"id":"<id>","embedding_model":"<operator-alias>","chunk_size":64}'`。当前 cf 的逐项 flags 自动加入已明确不支持的 hosted cache / hybrid 字段，并将 `@cf/…` 形式的模型别名按文件参数读取；显式 JSON body 保留已声明配置，服务端仍拒绝 unsupported 字段，不静默剥除或忽略。其余 instance 查询、更新、搜索及 jobs 操作按官方命令执行。

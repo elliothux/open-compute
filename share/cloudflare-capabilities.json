@@ -79,7 +79,7 @@
         "operationId": "worker-script-list-workers",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "a641a974eaa527b7b4480b06ffca03bb3ef1b5be463325fe499c0f56f3745af6",
+        "operationSha256": "42d30facf4e860dbd4bae5420e18bdec41339c5fe152c11c8be026d7d87eebc3",
         "requestMediaType": "none"
       },
       {
@@ -89,7 +89,7 @@
         "operationId": "worker-script-download-worker",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "63df4f50992b062254d46e60aa52eda3089df86da4058e4f83771dbce322d027",
+        "operationSha256": "6ab89700c7557ed849fa21b590aeeef492901f64b49523548d8dfd62f81a4f74",
         "requestMediaType": "none"
       },
       {
@@ -99,7 +99,7 @@
         "operationId": "worker-script-upload-worker-module",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "7aa37542a1eac22a3513487fbcc7a2966e00c692f7b27c97176ca5e1dd5dc8d6",
+        "operationSha256": "025a7a1bf0f0818ff20d9db66de3d3b87e127be303abcb3cb6282085795a47bc",
         "requestMediaType": "none"
       },
       {
@@ -111,7 +111,7 @@
         "source": "cloudflare-openapi",
         "constraint": "force=true bypasses retained Version and inbound Service references and may rotate the single workerd generation, but external D1, KV, R2, Queue, Workflow, and Durable Object resources remain independent authorities rather than being cascade-deleted with the Script",
         "deviations": ["OC-DEPLOY-001"],
-        "operationSha256": "9b1d3cb349e54f0b70a6ea0482303a207654ab4d1c61bced2652db8e20837410",
+        "operationSha256": "ba126676f1df25a8dd07974f3cf319b8081599c0457547dfb0c7946b873af1b4",
         "requestMediaType": "none"
       },
       {
@@ -121,7 +121,7 @@
         "operationId": "worker-versions-upload-version",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "137c730471df702765da262577618ea1524bb2fc6efecac03a8a8bdf784e8539",
+        "operationSha256": "836ca8d185eb41da9aa95b19a0d0d3ecc2ff2cc491389080d69a3c444649ab1e",
         "requestMediaType": "none"
       },
       {
@@ -131,7 +131,7 @@
         "operationId": "worker-versions-list-versions",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "7095b04560aea7cf3e9fd6ea24ecb734e1d83af0d9412f69d92e92b311741828",
+        "operationSha256": "3d73f53891a65dadb7c83223ce9f3021fe804da82f5ca9260f9aa4cdac6559b5",
         "requestMediaType": "none"
       },
       {
@@ -141,7 +141,7 @@
         "operationId": "worker-versions-get-version-detail",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "4b1a37e0e65d5e0e93f8cd0ede16a4e1fbd2f79c36785528cb89354df76d0233",
+        "operationSha256": "2e527e037ce9ea28854c158227d75f87c5e5c13572a6a7d4252f5ccd413a3b4a",
         "requestMediaType": "none"
       },
       {
@@ -151,7 +151,7 @@
         "operationId": "worker-deployments-list-deployments",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "84add923019d32c5b2e0d46fc316f9b925d874fcbfe5cf05f2b719d4d21ac903",
+        "operationSha256": "91e38e74a71a929be9280527420528ffc485b241e930abd927a1f8c5ac983296",
         "requestMediaType": "none"
       },
       {
@@ -161,7 +161,7 @@
         "operationId": "worker-deployments-create-deployment",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "5f64310a59b76625db22e7334f89cf74772d8cada0cf54864e6e31a8dc5351fd",
+        "operationSha256": "7076ed4849b358fe08b634bc632e73d110bc0f9e2ed9e781e3905f5dbbefedd6",
         "requestMediaType": "json"
       },
       {
@@ -171,7 +171,7 @@
         "operationId": "worker-deployments-get-deployment",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "607a064422156d4d44dd97062347978afbac2ad136e3f0a7224e74f105dbd9ef",
+        "operationSha256": "3244c66d7627c505fdb732c105cb6bd1562a9c29444de87fc6c3f84989e3491a",
         "requestMediaType": "none"
       },
       {
@@ -181,7 +181,7 @@
         "operationId": "worker-deployments-delete-deployment",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "d246acaac0c1554ee68c9d60d4dfdb8e5239792ac9de0427059184db99a60acb",
+        "operationSha256": "35fd63201b7584d4f1b8be0802fa6488950456244d1e9fba378bf2460dd79a69",
         "requestMediaType": "none"
       },
       {
@@ -191,7 +191,7 @@
         "operationId": "worker-script-settings-get-settings",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "0ef47278cc3a3af3f117bde04d267fff5df2fa063ebce653292926c62bff2d1c",
+        "operationSha256": "1900d858d1c3a0d2ad1e8992fcbee5d350fb06846bef93921c3f8263ba8dba93",
         "requestMediaType": "none"
       },
       {
@@ -201,7 +201,7 @@
         "operationId": "worker-script-settings-patch-settings",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "8cc52b39423374c7fb893c684c98d7747a68bdd7de7cac14175bf69d2509af0b",
+        "operationSha256": "6f08a41998c1959e3d6a54493aa38a01e10a1b291599908cbeafe36722953a17",
         "requestMediaType": "json"
       },
       {
@@ -211,7 +211,7 @@
         "operationId": "worker-script-get-settings",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "61f9e958133be2deeb223c0080b67dc9ff8680b0ab2aa83062df9ddf2db9424c",
+        "operationSha256": "131793e73a1ebe7d13ba0bc7d87b81f85fc83079a4ddcfa902a153bd501db245",
         "requestMediaType": "none"
       },
       {
@@ -221,7 +221,7 @@
         "operationId": "worker-script-patch-settings",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "8e375717670e33288d02646cfb4bded456b937234e4f247ae7518ce87f7af940",
+        "operationSha256": "14d5986661cf5802c1da80562dc2cd6447b354f144e254109819523952e22472",
         "requestMediaType": "multipart"
       },
       {
@@ -233,7 +233,7 @@
         "source": "cloudflare-openapi",
         "constraint": "Script Tail sessions are process-local; GET returns the complete active-session array implied by List Tails instead of the pinned OpenAPI single-object type; sessions receive only the selected target Script and do not aggregate nested target logs",
         "deviations": ["OC-OBSERVABILITY-001"],
-        "operationSha256": "83775be0e924c280d3a17b1604c479aebdf76434fb2b94f572b08db0bff286c2",
+        "operationSha256": "f5988fcdd4604b815b32154703e245033055151f5a12570cfd298d3eafa3e163",
         "requestMediaType": "none"
       },
       {
@@ -245,7 +245,7 @@
         "source": "cloudflare-openapi",
         "constraint": "Script Tail sessions are process-local and receive only the selected target Script; they do not aggregate nested target logs",
         "deviations": ["OC-OBSERVABILITY-001"],
-        "operationSha256": "fe85b88074e6975d062f1b16282a31c145a2363547c20a91ce3d159772c6c2c6",
+        "operationSha256": "648dffb02838b7298ef88a5bf93b50d19f2ed8726a55a31bc30a0cc2221a30f4",
         "requestMediaType": "none"
       },
       {
@@ -257,7 +257,7 @@
         "source": "cloudflare-openapi",
         "constraint": "Script Tail sessions are process-local and disappear on daemon restart",
         "deviations": ["OC-OBSERVABILITY-001"],
-        "operationSha256": "edd34eed1cf8cbd02520df04d51ef69c33a325ca729bc729fbff3bf3123eb3ea",
+        "operationSha256": "20e3519159c9d6d1c05d0df3cca2a3a5ebd8e316604e0d7bd2372a8221383ea5",
         "requestMediaType": "none"
       },
       {
@@ -269,7 +269,7 @@
         "source": "cloudflare-openapi",
         "constraint": "Field discovery reads a bounded single-machine retention index containing target-attributed events only",
         "deviations": ["OC-OBSERVABILITY-001"],
-        "operationSha256": "8995c04966d27334de5bfce9caf57d1ef28011591d6bb338f654db03241182da",
+        "operationSha256": "38913a9a68c9506a01198308556e4f3af8d8da82e8747900bb60793091a65073",
         "requestMediaType": "json"
       },
       {
@@ -281,7 +281,7 @@
         "source": "cloudflare-openapi",
         "constraint": "Value discovery reads a bounded single-machine retention index containing target-attributed events only",
         "deviations": ["OC-OBSERVABILITY-001"],
-        "operationSha256": "dd6eecbf7196f7372e2b4186a38bad9a760283e84abea03777dbf09b00bc28ef",
+        "operationSha256": "fa3e470a00e062302e542d705a628b5b53908015e7bb92d176153ed525a0feab",
         "requestMediaType": "json"
       },
       {
@@ -293,7 +293,7 @@
         "source": "cloudflare-openapi",
         "constraint": "Events and invocations views use a bounded local single-machine index and retention authority; calculations, traces, agents, requests, saved queries, global ordering, and hosted optional metadata are not provided",
         "deviations": ["OC-OBSERVABILITY-001"],
-        "operationSha256": "8edb90cc6d3f2c705a4195abf447c7a5dd4bc1d64d880a59a931e474298cead8",
+        "operationSha256": "680e2e216702e00f1f25191ba8bcccfcb5f91dc37ce8aee1782ef9e90323b076",
         "requestMediaType": "json"
       },
       {
@@ -305,7 +305,7 @@
         "source": "cloudflare-openapi",
         "constraint": "Live Tail sessions are process-local and receive only the selected target Script; they do not aggregate nested target logs",
         "deviations": ["OC-OBSERVABILITY-001"],
-        "operationSha256": "aa04b20ac5b3b7fd889df9f508c6c4ed3554c0181d0e2043f5a85179c95c4875",
+        "operationSha256": "d476db5d25544d7ae89292824d28131c108858262a3df5a439e009a4d175da1c",
         "requestMediaType": "json"
       },
       {
@@ -317,7 +317,7 @@
         "source": "cloudflare-openapi",
         "constraint": "Heartbeat extends process-local selected-Script sessions only",
         "deviations": ["OC-OBSERVABILITY-001"],
-        "operationSha256": "9da8354733fbf39ff839f27287c2c681aa03485a0a74a96b5a1fa82ac3584b35",
+        "operationSha256": "170ea36920cc26e2cd3a9b173490d98078d84498e36bc8df51a4d5cb902bba1d",
         "requestMediaType": "json"
       },
       {
@@ -327,7 +327,7 @@
         "operationId": "worker-list-script-secrets",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "bef52deaa26e0952f18c9b300b834c3fc0f20f4f0efbb7afd06e82f0a4442863",
+        "operationSha256": "01367b16a8b0852bc0f713e16a8a9ec307965dee0439bde0353bd74e251f623b",
         "requestMediaType": "none"
       },
       {
@@ -337,7 +337,7 @@
         "operationId": "worker-put-script-secret",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "8c47448726ebba91e42dd8446ae48975287ba4078c3d9285dbd7f812d8ffcab5",
+        "operationSha256": "6e6198bdce6b2a274951d779f21a1f4e20577668a64def5cf4be075c27cb37b2",
         "requestMediaType": "json"
       },
       {
@@ -347,7 +347,7 @@
         "operationId": "worker-get-script-secret",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "d30f54ef5d1da7f81e58cb1a297a0bd2c4a654cfa2d354a5916389f30c4f21d7",
+        "operationSha256": "87dab17a94ecae6d6e2c3d1d6008579a821c0277a7abd3cdb61294b06b95b9da",
         "requestMediaType": "none"
       },
       {
@@ -357,7 +357,7 @@
         "operationId": "worker-delete-script-secret",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "03ba0bcb1a7517c17830ecd1aacb80b63b20094f24292c8075b55ed6e86aa0fb",
+        "operationSha256": "56f616a736d419704764eb933adaec7cd2027100eba123f6e5ae3b00365fa770",
         "requestMediaType": "none"
       },
       {
@@ -367,7 +367,7 @@
         "operationId": "worker-patch-script-secrets-bulk",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "8c10f48180dd442becd219db9ed6ac11eecc3ed7f0cb2d473614df189d9fba4d",
+        "operationSha256": "d8784855cf7eea162df090fa8c79e29c86608331bfef236abe7e66836d51a8e0",
         "requestMediaType": "json"
       },
       {
@@ -377,7 +377,7 @@
         "operationId": "worker-cron-trigger-get-cron-triggers",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "d8b22bc2e5cb976d9ab9693ad9e4946690e6003b33973b9c9634f672ba7773e1",
+        "operationSha256": "1f603a14c8cb48c3563b0678399530c6c0103fe74004fb0406bdb1acc50b9cdd",
         "requestMediaType": "none"
       },
       {
@@ -387,7 +387,7 @@
         "operationId": "worker-cron-trigger-update-cron-triggers",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "2f0ed6f1b4fc32c6c115ac30a943055ef8902845beb9d1ad8f97814d29ac02e2",
+        "operationSha256": "acebcb75cfb83555742063d44a5c0f7ed418704274287bea727518d0b14b4f70",
         "requestMediaType": "json"
       },
       {
@@ -397,7 +397,7 @@
         "operationId": "worker-script-get-subdomain",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "cd4e566a10dc8d27215ebacf79228c49aa6afa97e7e93112d590ce6f73294c65",
+        "operationSha256": "2ac0a8e3ec1de4204f29f0bfbbfa49511f613296113867bea679e64dc86c3e98",
         "requestMediaType": "none"
       },
       {
@@ -407,7 +407,7 @@
         "operationId": "worker-script-post-subdomain",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "be5e2f8511d558641f92461ef52ed1751329ca08154b40e2ec7e57dad3b742e6",
+        "operationSha256": "42829163ffadf5370e75ae195a3866b05b0e1a74e79dfc72d3b74ec41e75bac3",
         "requestMediaType": "json"
       },
       {
@@ -417,7 +417,7 @@
         "operationId": "worker-script-delete-subdomain",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "84c655421adec656c1fa69728dc1ed08477928c727c211cf9af761afc50426e6",
+        "operationSha256": "b2f6ff0d09ae1ffa64ef350481e4d61d40c588f30ad574843964f858384b5a5c",
         "requestMediaType": "none"
       },
       {
@@ -427,7 +427,7 @@
         "operationId": "getWorker",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "3bb5b1d292f496624928a17d684a58fd92fbe161b4b01d43eebd0612bb1688c1",
+        "operationSha256": "d7096ffb96df87a0d541c01e718846bd4a1b6094442326dc706a512575490ed2",
         "requestMediaType": "none"
       },
       {
@@ -437,7 +437,7 @@
         "operationId": "deleteWorkerVersion",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "1920047ff9ab827925d673706bfda5f1a792d539ea9312d07b7442ec54e7fddb",
+        "operationSha256": "2d90327ac181f1299d9f7d7bf0acae3f08278a6fb074f77a50722238f08ce96e",
         "requestMediaType": "none"
       },
       {
@@ -507,8 +507,8 @@
         "operationId": "workers-kv-namespace-remove-a-namespace",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "2ca913071a9cfc088e1164734099582798ad51a09a890c8c2021fa9b83beeeb0",
-        "requestMediaType": "json"
+        "operationSha256": "6f35bc13b8acd15ba2551f563e19152841ab308bf3f1efc9f3b6cbf4ee82876c",
+        "requestMediaType": "none"
       },
       {
         "id": "GET /accounts/{account_id}/storage/kv/namespaces/{namespace_id}/keys",
@@ -547,8 +547,8 @@
         "operationId": "workers-kv-namespace-delete-key-value-pair",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "228b12b000646ff0eb06e4be503e125483cdd60b04eddd7d4ffb3a202708d1e1",
-        "requestMediaType": "json"
+        "operationSha256": "3403662b01f931dd1c605441a700b8ee0875ea72fca15b56a79ae37f42e3dd6c",
+        "requestMediaType": "none"
       },
       {
         "id": "GET /accounts/{account_id}/storage/kv/namespaces/{namespace_id}/metadata/{key_name}",
@@ -597,7 +597,7 @@
         "operationId": "d1-list-databases",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "e0ace2544a6e14a42958433691e114764ab9f9c4a8ec20b74e7923c739628b36",
+        "operationSha256": "765a36d0d7b808786c2121c6f136369fb44e85ea3409c596fdfaf3f170a7027e",
         "requestMediaType": "none"
       },
       {
@@ -607,7 +607,7 @@
         "operationId": "d1-create-database",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "49eb9a0bdf97eab56cc498427dc5a531372f02aa491d80fedfafebd67b69ab70",
+        "operationSha256": "1d70f8b6084718a6a0621a2c070ab318b1c216a6a3d0586dc4fa868c1309e073",
         "requestMediaType": "json"
       },
       {
@@ -617,7 +617,7 @@
         "operationId": "d1-get-database",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "0ad5bb2175e0a9f4ffbd9c9f2681015b3503f83f0b67dc9b6be7c13f1c994494",
+        "operationSha256": "671f2dccb9f61684551825b667195abb95084ed38ff2f6b116793187589eea87",
         "requestMediaType": "none"
       },
       {
@@ -627,7 +627,7 @@
         "operationId": "d1-update-database",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "9e40e0d5c390813b893cd5f6259306eab23a3aa7ff7cd6f825314edbfc5d9c7b",
+        "operationSha256": "6ca2cac1d3dc3e7d03d36c1615897b9c283c54285ae9dca3551d5e88751f39c3",
         "requestMediaType": "json"
       },
       {
@@ -637,7 +637,7 @@
         "operationId": "d1-update-partial-database",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "8ef5deeec197d7377a380b78268b938a2c918d59f0cfb73e180573c3c1afe138",
+        "operationSha256": "f7b78bc54ddf09763d91cb7dbda0bc5a863af7e61be7fcd7523f5b6229ba6ca8",
         "requestMediaType": "json"
       },
       {
@@ -647,7 +647,7 @@
         "operationId": "d1-delete-database",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "61b6a1deda8a4553fd7e6b67ea90a1cea9d4dd8b61c4d06ecb4f59101a5cad3c",
+        "operationSha256": "924da27c08976dea22155ab059d02652a037736367eb7a140377e1ade653c061",
         "requestMediaType": "none"
       },
       {
@@ -657,7 +657,7 @@
         "operationId": "d1-query-database",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "84c9cd118807729539064e7fc958976deee03013f685d031070e4d32fe26b6aa",
+        "operationSha256": "1a6bd85da93f9c3723a70b953d004d8b96fee0cea7a1b65a4085286e4d4ac5e9",
         "requestMediaType": "json"
       },
       {
@@ -667,7 +667,7 @@
         "operationId": "d1-raw-database-query",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "9243f4d0e0571ce79e7b9a89a4e8f6843b771faa83f297fc100721dabbab4e51",
+        "operationSha256": "4701729391069c80375b778d56ebee6875d91ee4775a0bddef2ef98f43e97d9a",
         "requestMediaType": "json"
       },
       {
@@ -677,7 +677,7 @@
         "operationId": "d1-export-database",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "4b10553fa531e256103dba147014d6f7730bd56c31cdf3f090c86c32b8701d98",
+        "operationSha256": "4532e79c36524801348765672f5e54aaea3af02aad58202548c8a3467d465502",
         "requestMediaType": "json"
       },
       {
@@ -687,7 +687,7 @@
         "operationId": "d1-import-database",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "bc10d7b379eb720e149e6337c831e6363097c028416c20b60af6c424b0ac0398",
+        "operationSha256": "b7f5467868617e692d263f76c078bcf8556a7817d577584486b73db5a9de53f3",
         "requestMediaType": "json"
       },
       {
@@ -699,7 +699,7 @@
         "source": "cloudflare-openapi",
         "constraint": "Single-machine D1 retains at most eight explicit management checkpoints instead of Cloudflare's always-on minute-level 7/30-day PITR; timestamps resolve only retained checkpoints and ordinary Worker mutations do not create full database snapshots",
         "deviations": ["OC-D1-001"],
-        "operationSha256": "86192bca129579498c2727bbc8cf67193172fe98d916d4cfda9473da4dd13bd4",
+        "operationSha256": "9ec9a31276a48dc6ab024bc0696fe3439472ecf980dadf4a9bce024250053fdb",
         "requestMediaType": "none"
       },
       {
@@ -711,7 +711,7 @@
         "source": "cloudflare-openapi",
         "constraint": "Restore accepts only an exact retained explicit management checkpoint; ordinary D1 Session bookmarks are visibility tokens but are not automatically retained restore points",
         "deviations": ["OC-D1-001"],
-        "operationSha256": "b700589275d62c11cc7934768863b89343a2530ec79b60c00fa10e83527f33bb",
+        "operationSha256": "fc04a376e3802a45a150e0aac6b925fd313c581d5700fdf34f8fe5beb9548f44",
         "requestMediaType": "none"
       },
       {
@@ -721,7 +721,7 @@
         "operationId": "r2-list-buckets",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "990934c57aa454a9b6d5294519dbafedb120cbcda7295c3987263ec7b6e7cc49",
+        "operationSha256": "8f1a6005d487cfbd2e34dc04f01365b0b1ccbeb839a9d9000fc94e4139049131",
         "requestMediaType": "none"
       },
       {
@@ -751,7 +751,7 @@
         "operationId": "r2-create-bucket-by-name",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "309073bad2035483255ca6b6f1848b0d0a074e22f252d6b3e995b9cce5fa44ee",
+        "operationSha256": "4bed4e3f611e7542de789151424e5bd728eb1ebd463872db8cb0c6ead016c3e1",
         "requestMediaType": "none"
       },
       {
@@ -801,7 +801,7 @@
         "operationId": "r2-list-objects",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "fd60b192bfb1263a3e1c0f1b614298ca5441d5a70ac88616813554453a584ceb",
+        "operationSha256": "633fc7248eb0f108a6b99fc2366c23bd3b867d9c102fed66aa9691973428c371",
         "requestMediaType": "none"
       },
       {
@@ -811,7 +811,7 @@
         "operationId": "vectorize-list-vectorize-indexes",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "4bac6170648a4ca00761f2026755826e9bff05e55ab384c793111849f70f6623",
+        "operationSha256": "6a8a86e0b4a8e66932d8d8b94bf7ddb7e7d582fc77aa3c3ef450bd17c83fb814",
         "requestMediaType": "none"
       },
       {
@@ -821,7 +821,7 @@
         "operationId": "vectorize-create-vectorize-index",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "82151bec60a41d55832b9adf2fdeb468280e28926a71d3fd07b5e9cb68cea6ff",
+        "operationSha256": "3c0c19ad3201bd976c8d43859816f249d9fa9788bffab09b8d973ec016ac277f",
         "requestMediaType": "json"
       },
       {
@@ -831,7 +831,7 @@
         "operationId": "vectorize-get-vectorize-index",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "96e063712bb4f2580c1b64bea2f02bd57d6856335eadeb505f57d2e2a93d9b9d",
+        "operationSha256": "808aa5c339c8d1527b320f0392a9a332523bdad9349c7a066ff825fd7aed63ab",
         "requestMediaType": "none"
       },
       {
@@ -841,7 +841,7 @@
         "operationId": "vectorize-delete-vectorize-index",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "8f293c470c973f795cb35daa85e54ed4b817056eeccd075aa45b80529b694f3b",
+        "operationSha256": "2ba836b377412949b6ba75035224fe1c531e7f2234ae0cb198b554ad5bf77826",
         "requestMediaType": "none"
       },
       {
@@ -851,7 +851,7 @@
         "operationId": "vectorize-insert-vector",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "d0c9dc7920ba80af456e2b8a77a48c2313536e1c5865799a43a06b89374e6fcd",
+        "operationSha256": "00ddaa00a76fdd6312fc05ef86860d392109be44220ccffbfa5d581d3662c195",
         "requestMediaType": "raw"
       },
       {
@@ -861,7 +861,7 @@
         "operationId": "vectorize-upsert-vector",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "3d5c1ca98be67dca5b0398c127f8022f9b40e7029c5e8340d9ba2d13f56d5135",
+        "operationSha256": "4b7a1dc24bd4d88bab01861f3e786046b7dbf92115b984f56a336876f44ff06c",
         "requestMediaType": "raw"
       },
       {
@@ -871,7 +871,7 @@
         "operationId": "vectorize-query-vector",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "3f2c061bef9d923800733c6c73ad4751ce78e5fe19218f81342f5aa07c9ecde3",
+        "operationSha256": "15fb73e0a33b63ce1c634da96d4550c7653f9a435807130c48ecdb04bd5700ec",
         "requestMediaType": "json"
       },
       {
@@ -881,7 +881,7 @@
         "operationId": "vectorize-get-vectors-by-id",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "727889cae59307979a4841b2a7d5ab8261b81c15e6eb31baa0bf261c258ede39",
+        "operationSha256": "bc38027e1b0f086c7a7197026761b436a499fd9acb0d6376123e25da7b54d7e7",
         "requestMediaType": "json"
       },
       {
@@ -891,7 +891,7 @@
         "operationId": "vectorize-delete-vectors-by-id",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "5f876e5dc3c7aa8d78d58926bccdd629499558be012e89dd690085d657ed1587",
+        "operationSha256": "7dc2ffcb092b00e43247ede735c46c7503ea01e0a238a218643c9ab5a8baef32",
         "requestMediaType": "json"
       },
       {
@@ -901,7 +901,7 @@
         "operationId": "vectorize-index-info",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "4cadafa76bd5bfad97a7da85dbaa3afb77af10371aab2ee8d1cce197b9784acd",
+        "operationSha256": "bc450c66d29aeca6c29f52d7eb37992682fa96f95ee94f86b66912f9f8528a81",
         "requestMediaType": "none"
       },
       {
@@ -911,7 +911,7 @@
         "operationId": "vectorize-list-vectors",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "a7c9515fd5fa26b57b4c8bdd18d271fed95d91666a707dfcb2ababec7514caa0",
+        "operationSha256": "4fd0fe9cb41d8423297ebf8eb0e44141b537a60339fe516acc53a54b0f7b79ab",
         "requestMediaType": "none"
       },
       {
@@ -921,7 +921,7 @@
         "operationId": "vectorize-create-metadata-index",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "1ec8100121fd226408eec48f39c256aa40c0739e5b7135a9dbd6dfaa3ed80c22",
+        "operationSha256": "d5cc279d5df56a7a7cd93f9d34afbcd09dde96a07a156231a1fdfc3d65e4a36d",
         "requestMediaType": "json"
       },
       {
@@ -931,7 +931,7 @@
         "operationId": "vectorize-list-metadata-indexes",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "566f7184435fe45f229ed74e6b9f2242c996b72a6430d1bab487c4ebec33ce92",
+        "operationSha256": "9d7645f6731a077f03f1c7c50c9d59c0ec37699652af302b827bad99f306c195",
         "requestMediaType": "none"
       },
       {
@@ -941,7 +941,7 @@
         "operationId": "vectorize-delete-metadata-index",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "9e3abf18af6e000788c054f701204b5427c5824c14cf2ef936dc0aea41eeaf25",
+        "operationSha256": "bab57f20f40971fef6ce1c6ef4ada744785054fc8a364fc066664349f2937122",
         "requestMediaType": "json"
       },
       {
@@ -953,7 +953,7 @@
         "source": "cloudflare-openapi",
         "constraint": "Fixed Wrangler 4.143.0 requires account token metadata before AI Search creation; open-compute exposes one stable installation-managed metadata record without Cloudflare account credential storage or token mutation",
         "deviations": ["OC-AI-SEARCH-TOKEN-001"],
-        "operationSha256": "5325159dd20b495d3374783d44caf0f117b2f8561a59ca2f0d64fbe383c5c7de",
+        "operationSha256": "fe8cc77f5e3f7b4a811db90597b490c036497da9a9d3294f068cd631c2f7f108",
         "requestMediaType": "none"
       },
       {
@@ -963,7 +963,7 @@
         "operationId": "ai-search-list-namespaces",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "6602ba819fa3158a66ab032c397ffee081e3068ae126a9202f52f967867daf9e",
+        "operationSha256": "da78771196b1a32f6a3a118ff67e9de373d0d6396848ae5f1a12ec7ac0af7fbe",
         "requestMediaType": "none"
       },
       {
@@ -973,7 +973,7 @@
         "operationId": "ai-search-create-namespace",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "562fe9644922d3a2465e11f35d308702adc85c344c9a9b9ff94f341b44a745ba",
+        "operationSha256": "762efa3967847b8f36ff52424b56044fe11edb7084ec729027c110080d1c9069",
         "requestMediaType": "json"
       },
       {
@@ -983,7 +983,7 @@
         "operationId": "ai-search-fetch-namespace",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "d10f5061c7842ef5cd63bba15fa7aef69655e88c2d8b9794d40d257aeb5ec1e2",
+        "operationSha256": "922b2cf2f89217285ab2b4e7c90ad835cab0d2262b94367979ee9a338a06e709",
         "requestMediaType": "none"
       },
       {
@@ -993,7 +993,7 @@
         "operationId": "ai-search-update-namespace",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "3e482af144086896a52049c7c0550f42d54190da67d7f941196aa46ab97428dc",
+        "operationSha256": "e5679d8ed1d03e37816703bed02775420ac45c8edc7feee1322e6c959e5a93b2",
         "requestMediaType": "json"
       },
       {
@@ -1003,7 +1003,7 @@
         "operationId": "ai-search-delete-namespace",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "eb127735240ea584dd58eaab26d6c69509b22663b65148c31534d9b34041f4a7",
+        "operationSha256": "257edae665f2568e5f74e057f0513f3bf0b07213c0547bdf1af5de8a65131bd5",
         "requestMediaType": "none"
       },
       {
@@ -1013,7 +1013,7 @@
         "operationId": "ai-search-namespace-multi-instance-search",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "768b0b658c13ec7fe14cee71f1ca20bf30337074d4868cede88928e7c4d05c1b",
+        "operationSha256": "66547e3449c7d1590d1ede91543da791037173aac4247fc2af5cd7dd62e061bd",
         "requestMediaType": "json"
       },
       {
@@ -1023,227 +1023,247 @@
         "operationId": "ai-search-namespace-multi-instance-chat-completion",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "9275e8ba9ac066e36aba30941de484a227a1559d88a46ec9585f91bf11e8241d",
+        "operationSha256": "891bdde0772ff7a52fc8373aad4180e643e3d8566ecb9a359eea90000a13a230",
         "requestMediaType": "json"
       },
       {
-        "id": "GET /accounts/{account_id}/ai-search/namespaces/{name}/instances",
+        "id": "GET /accounts/{account_id}/ai-search/namespaces/{namespace}/instances",
         "method": "GET",
-        "path": "/accounts/{account_id}/ai-search/namespaces/{name}/instances",
+        "path": "/accounts/{account_id}/ai-search/namespaces/{namespace}/instances",
         "operationId": "ai-search-namespace-list-instances",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "43c284c6bf20cf953b9751f7e52f379d0e3f4557112caa6ed1e5414456969298",
+        "operationSha256": "486e6ac29dde1cfc40a68f97be48bc09f1f74acd9d9eb1b3473ba8880ab8080a",
         "requestMediaType": "none"
       },
       {
-        "id": "POST /accounts/{account_id}/ai-search/namespaces/{name}/instances",
+        "id": "POST /accounts/{account_id}/ai-search/namespaces/{namespace}/instances",
         "method": "POST",
-        "path": "/accounts/{account_id}/ai-search/namespaces/{name}/instances",
+        "path": "/accounts/{account_id}/ai-search/namespaces/{namespace}/instances",
         "operationId": "ai-search-namespace-create-instance",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "a5237999ef3e9734e42dc1fd4cbafa0f00c0545e7914833c785271d926deec6f",
+        "operationSha256": "2d450c4f98225b8c02f684e3faa8392952ff8de7362e9af6be2214208cda1561",
         "requestMediaType": "json"
       },
       {
-        "id": "GET /accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}",
+        "id": "GET /accounts/{account_id}/ai-search/namespaces/{namespace}/instances/{id}",
         "method": "GET",
-        "path": "/accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}",
+        "path": "/accounts/{account_id}/ai-search/namespaces/{namespace}/instances/{id}",
         "operationId": "ai-search-namespace-fetch-instance",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "baa308c676317776e80d738b4217d51123b20ae17aedcf002add74a3b0cdb498",
+        "operationSha256": "425d702c6849219fae3058eaa5b0e729f8654843c4a2193b59eacfa71ca96152",
         "requestMediaType": "none"
       },
       {
-        "id": "PUT /accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}",
+        "id": "PUT /accounts/{account_id}/ai-search/namespaces/{namespace}/instances/{id}",
         "method": "PUT",
-        "path": "/accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}",
+        "path": "/accounts/{account_id}/ai-search/namespaces/{namespace}/instances/{id}",
         "operationId": "ai-search-namespace-update-instance",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "57d65e448fb78b3fdf7471232da3063ce3cc5baaad34a01a65af8d080cb64289",
+        "operationSha256": "120f93383c2cb1ee65457dbaa27f52fa4f91cfa1344815f76a00ea1c34238115",
         "requestMediaType": "json"
       },
       {
-        "id": "DELETE /accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}",
+        "id": "PATCH /accounts/{account_id}/ai-search/namespaces/{namespace}/instances/{id}",
+        "method": "PATCH",
+        "path": "/accounts/{account_id}/ai-search/namespaces/{namespace}/instances/{id}",
+        "operationId": "ai-search-move-instance",
+        "status": "supported",
+        "source": "cloudflare-openapi",
+        "operationSha256": "1b9c3b9abfa665ac35e9900d250309387e9aa0b7103bbe60da1d424fd84c1fe5",
+        "requestMediaType": "json"
+      },
+      {
+        "id": "POST /accounts/{account_id}/ai-search/namespaces/{namespace}/instances/{id}/purge_cache",
+        "method": "POST",
+        "path": "/accounts/{account_id}/ai-search/namespaces/{namespace}/instances/{id}/purge_cache",
+        "operationId": "ai-search-namespace-purge-instance-cache",
+        "status": "supported",
+        "source": "cloudflare-openapi",
+        "operationSha256": "1e68a6af9e193aa784dacd3f5da6a9d3e0f819aa644a5e0b81afa8cc7f7471c3",
+        "requestMediaType": "none"
+      },
+      {
+        "id": "DELETE /accounts/{account_id}/ai-search/namespaces/{namespace}/instances/{id}",
         "method": "DELETE",
-        "path": "/accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}",
+        "path": "/accounts/{account_id}/ai-search/namespaces/{namespace}/instances/{id}",
         "operationId": "ai-search-namespace-delete-instance",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "3419a795db62a22eac04170ebea6d67672a17d2262a96d19ea010310c125f5af",
+        "operationSha256": "bba6cbd00924f4ac68f77351852d5d5c0c6698478cccc165e42967fb07b7c52d",
         "requestMediaType": "none"
       },
       {
-        "id": "GET /accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/stats",
+        "id": "GET /accounts/{account_id}/ai-search/namespaces/{namespace}/instances/{id}/stats",
         "method": "GET",
-        "path": "/accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/stats",
+        "path": "/accounts/{account_id}/ai-search/namespaces/{namespace}/instances/{id}/stats",
         "operationId": "ai-search-namespace-stats",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "6cd4ca2f1e24eb1e4db0dbb11710cc6f1526f3d7a6d083113b24dd07e61ad980",
+        "operationSha256": "4dee351cc4866cbb2f08421dc0530c3228337d4b4a9f628e9aa2a9637fe8d691",
         "requestMediaType": "none"
       },
       {
-        "id": "POST /accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/search",
+        "id": "POST /accounts/{account_id}/ai-search/namespaces/{namespace}/instances/{id}/search",
         "method": "POST",
-        "path": "/accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/search",
+        "path": "/accounts/{account_id}/ai-search/namespaces/{namespace}/instances/{id}/search",
         "operationId": "ai-search-namespace-instance-search",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "62c1a6bc497f423e0c7e1ece45aaa2baf0394e816ce78b958f41bf1473782cd9",
+        "operationSha256": "aa97c8fbe067b8760a8f4cb9ed1edb38b63752513d01fbab5c90ffda0cfd16e1",
         "requestMediaType": "json"
       },
       {
-        "id": "POST /accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/chat/completions",
+        "id": "POST /accounts/{account_id}/ai-search/namespaces/{namespace}/instances/{id}/chat/completions",
         "method": "POST",
-        "path": "/accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/chat/completions",
+        "path": "/accounts/{account_id}/ai-search/namespaces/{namespace}/instances/{id}/chat/completions",
         "operationId": "ai-search-namespace-instance-chat-completion",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "49e8fc79ce8f3b8989a480cbdaa642b6371de965dd2d05c2b39ffdf7f81cb18e",
+        "operationSha256": "4d87786c8c117f8027ea659cd5f31fb49f97af146da545b8bcaf8310e970e044",
         "requestMediaType": "json"
       },
       {
-        "id": "GET /accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/jobs",
+        "id": "GET /accounts/{account_id}/ai-search/namespaces/{namespace}/instances/{id}/jobs",
         "method": "GET",
-        "path": "/accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/jobs",
+        "path": "/accounts/{account_id}/ai-search/namespaces/{namespace}/instances/{id}/jobs",
         "operationId": "ai-search-namespace-instance-list-jobs",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "4523d3ac8a8375757c73f11e206c49ea139dba1b38efcdc67994c9626b93d3c9",
+        "operationSha256": "d53643f124a7349a864aadd667c7dff81772d4c8e8986b1471833a9d27700a11",
         "requestMediaType": "none"
       },
       {
-        "id": "POST /accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/jobs",
+        "id": "POST /accounts/{account_id}/ai-search/namespaces/{namespace}/instances/{id}/jobs",
         "method": "POST",
-        "path": "/accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/jobs",
+        "path": "/accounts/{account_id}/ai-search/namespaces/{namespace}/instances/{id}/jobs",
         "operationId": "ai-search-namespace-instance-create-job",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "126aff5a25bf7193f4a22ed5ff56c4996b7c25765fd7c1018c8357a436c684f6",
+        "operationSha256": "beecfcaa7a216774ebec1394d36524b7216ff94dc27c00ba6ce1ca7a619af454",
         "requestMediaType": "json"
       },
       {
-        "id": "GET /accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/jobs/{job_id}",
+        "id": "GET /accounts/{account_id}/ai-search/namespaces/{namespace}/instances/{id}/jobs/{job_id}",
         "method": "GET",
-        "path": "/accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/jobs/{job_id}",
+        "path": "/accounts/{account_id}/ai-search/namespaces/{namespace}/instances/{id}/jobs/{job_id}",
         "operationId": "ai-search-namespace-instance-get-job",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "eb97e1b1bf9e66c2cf16f4b5258c30a3ffc3f676e7b3a12dffee422fc697703a",
+        "operationSha256": "dad05cc5ed96c3275355746ede03fcf448def853df7d13e671e707f5fe5e8e0f",
         "requestMediaType": "none"
       },
       {
-        "id": "PATCH /accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/jobs/{job_id}",
+        "id": "PATCH /accounts/{account_id}/ai-search/namespaces/{namespace}/instances/{id}/jobs/{job_id}",
         "method": "PATCH",
-        "path": "/accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/jobs/{job_id}",
+        "path": "/accounts/{account_id}/ai-search/namespaces/{namespace}/instances/{id}/jobs/{job_id}",
         "operationId": "ai-search-namespace-instance-change-job-status",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "68b53b8e6342982e6eee682f098135a3d60f153e9c7896dd72ed23ffeabd39b2",
+        "operationSha256": "b71e10917ec92edf0926f4ac7d2651594fd824faa9bb5d62afeab5f6787b8d24",
         "requestMediaType": "json"
       },
       {
-        "id": "GET /accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/jobs/{job_id}/logs",
+        "id": "GET /accounts/{account_id}/ai-search/namespaces/{namespace}/instances/{id}/jobs/{job_id}/logs",
         "method": "GET",
-        "path": "/accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/jobs/{job_id}/logs",
+        "path": "/accounts/{account_id}/ai-search/namespaces/{namespace}/instances/{id}/jobs/{job_id}/logs",
         "operationId": "ai-search-namespace-instance-list-job-logs",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "a41411adefafd4d4a436a1ead674dc421a8a95a4c3b72d79eb41c60da6b82022",
+        "operationSha256": "a191de983a8eeb161e441ddeb2aab7adfdd8dc7f33e307de8d6eb24a510641e7",
         "requestMediaType": "none"
       },
       {
-        "id": "GET /accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/items",
+        "id": "GET /accounts/{account_id}/ai-search/namespaces/{namespace}/instances/{id}/items",
         "method": "GET",
-        "path": "/accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/items",
+        "path": "/accounts/{account_id}/ai-search/namespaces/{namespace}/instances/{id}/items",
         "operationId": "ai-search-namespace-instance-list-items",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "5f40a3f4794c00a1062f3143f3d1d1f7e9a74b05014e05d9f8811de2715e6244",
+        "operationSha256": "d29770fbe5c5fba356ad7969893f4bba7e4f06e46f70a47afee703a88360fefc",
         "requestMediaType": "none"
       },
       {
-        "id": "POST /accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/items",
+        "id": "POST /accounts/{account_id}/ai-search/namespaces/{namespace}/instances/{id}/items",
         "method": "POST",
-        "path": "/accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/items",
+        "path": "/accounts/{account_id}/ai-search/namespaces/{namespace}/instances/{id}/items",
         "operationId": "ai-search-namespace-instance-upload-item",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "090c18ff2567a26365737abf59becb9105d95e096847b4b8d8e15a8cb09c4827",
+        "operationSha256": "e748c62a74898a5f7be5734576ab8cff2dd760ff911485560f6e5b18280b3063",
         "requestMediaType": "multipart"
       },
       {
-        "id": "PUT /accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/items",
+        "id": "PUT /accounts/{account_id}/ai-search/namespaces/{namespace}/instances/{id}/items",
         "method": "PUT",
-        "path": "/accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/items",
+        "path": "/accounts/{account_id}/ai-search/namespaces/{namespace}/instances/{id}/items",
         "operationId": "ai-search-namespace-instance-create-or-update-item",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "438b3eabbfa192597a09a374e8d3550bd41bf255861e41cbe42b9c0475d61605",
+        "operationSha256": "8da7bff6f6424e1d851c9ba952b26c19cbdae29dd48ddccd931a17b6451849dd",
         "requestMediaType": "json"
       },
       {
-        "id": "GET /accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/items/{item_id}",
+        "id": "GET /accounts/{account_id}/ai-search/namespaces/{namespace}/instances/{id}/items/{item_id}",
         "method": "GET",
-        "path": "/accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/items/{item_id}",
+        "path": "/accounts/{account_id}/ai-search/namespaces/{namespace}/instances/{id}/items/{item_id}",
         "operationId": "ai-search-namespace-instance-get-item",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "c25468f0547ac8d659febc0dcb6594ede076ceb404601d2fb8824a3ca08e0648",
+        "operationSha256": "bf137478e8084dbeb9d2a0b42765cd834dc23fb8e1e1d9e3a8c5846ef99a0526",
         "requestMediaType": "none"
       },
       {
-        "id": "PATCH /accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/items/{item_id}",
+        "id": "PATCH /accounts/{account_id}/ai-search/namespaces/{namespace}/instances/{id}/items/{item_id}",
         "method": "PATCH",
-        "path": "/accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/items/{item_id}",
+        "path": "/accounts/{account_id}/ai-search/namespaces/{namespace}/instances/{id}/items/{item_id}",
         "operationId": "ai-search-namespace-instance-sync-item",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "d66ec66fa38bda6c05d0dd6c61ed32704306bc426d4b783811fd196c49c39940",
+        "operationSha256": "ccdf8431b314be43287f97b77784fc72bee00ab135d8c0a04e3fd3df56ffbee2",
         "requestMediaType": "json"
       },
       {
-        "id": "DELETE /accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/items/{item_id}",
+        "id": "DELETE /accounts/{account_id}/ai-search/namespaces/{namespace}/instances/{id}/items/{item_id}",
         "method": "DELETE",
-        "path": "/accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/items/{item_id}",
+        "path": "/accounts/{account_id}/ai-search/namespaces/{namespace}/instances/{id}/items/{item_id}",
         "operationId": "ai-search-namespace-instance-delete-item",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "a75c874b4e0d8b6aed263b0135ce0b441574edf1b078849f7e0758d9526c8419",
+        "operationSha256": "237437decd73f785d83a605c7d1a7feb21b08fb99bc2c5d45b6bc8107b6fb226",
         "requestMediaType": "none"
       },
       {
-        "id": "GET /accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/items/{item_id}/download",
+        "id": "GET /accounts/{account_id}/ai-search/namespaces/{namespace}/instances/{id}/items/{item_id}/download",
         "method": "GET",
-        "path": "/accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/items/{item_id}/download",
+        "path": "/accounts/{account_id}/ai-search/namespaces/{namespace}/instances/{id}/items/{item_id}/download",
         "operationId": "ai-search-namespace-instance-get-item-content",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "1fcfff80f92c83a51e1d5a73bf659182c4ed77b4dc00ebef0546382f7f15937f",
+        "operationSha256": "643b3421543208a7fb0d64aaeda3463969917fa1c3b015816ae2d1bdf1ccad83",
         "requestMediaType": "none"
       },
       {
-        "id": "GET /accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/items/{item_id}/logs",
+        "id": "GET /accounts/{account_id}/ai-search/namespaces/{namespace}/instances/{id}/items/{item_id}/logs",
         "method": "GET",
-        "path": "/accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/items/{item_id}/logs",
+        "path": "/accounts/{account_id}/ai-search/namespaces/{namespace}/instances/{id}/items/{item_id}/logs",
         "operationId": "ai-search-namespace-instance-logs-item",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "2c7702b9411eb55f912528391d61586096c6968b9ed000e294cc46633b16196e",
+        "operationSha256": "369cea6a5ecff519a25f429c2f194b1642f67b7fb93bc3a5f0dfb3cfaa9c911e",
         "requestMediaType": "none"
       },
       {
-        "id": "GET /accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/items/{item_id}/chunks",
+        "id": "GET /accounts/{account_id}/ai-search/namespaces/{namespace}/instances/{id}/items/{item_id}/chunks",
         "method": "GET",
-        "path": "/accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/items/{item_id}/chunks",
+        "path": "/accounts/{account_id}/ai-search/namespaces/{namespace}/instances/{id}/items/{item_id}/chunks",
         "operationId": "ai-search-namespace-instance-list-item-chunks",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "6c5513bd6498413219bd61d2099a3bc076cca971807623010c5753bdbfc09525",
+        "operationSha256": "cf475301ca002b6daff7ec20dbb26c17d0ea6992bcec98609dd459b64f16a711",
         "requestMediaType": "none"
       },
       {
@@ -1403,7 +1423,7 @@
         "operationId": "wor-create-or-modify-workflow",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "834dfff3d34b49fcd89fb62722b26caae69cf3e97df2f4c306a8e520947c578f",
+        "operationSha256": "21c3904beb435ceabea30201c645f4576dea8ac2831e9da4446b7eae84b8327c",
         "requestMediaType": "json"
       },
       {
@@ -1443,7 +1463,7 @@
         "operationId": "wor-list-workflow-instances",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "7048c017bf5300709794e16953392ec1f91a02eba21531ec0083e0bdcbdf1b2d",
+        "operationSha256": "485bc00d46a58b1d35f21dcbbfce7afdd30a5e659319648381fea6f24e963191",
         "requestMediaType": "none"
       },
       {
@@ -1453,7 +1473,7 @@
         "operationId": "wor-create-new-workflow-instance",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "2925bf9d7d60855f7e7ad29e4258a38df6d8d0cb4ab4ae46e483cd85c8f2f6cc",
+        "operationSha256": "25bb721ae8ee2036aa98f007995522ffcef3406452008f5fe445991f07a5e9fc",
         "requestMediaType": "json"
       },
       {
@@ -1463,7 +1483,7 @@
         "operationId": "wor-batch-create-workflow-instance",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "c58378d379e3ebf896e5ef1cb9ce346454ae07438cad469239551b4f5a264e2e",
+        "operationSha256": "088793cbf72549664142c734d867a22bf574a961650bf9b339258e2b5940c277",
         "requestMediaType": "json"
       },
       {
@@ -1503,7 +1523,7 @@
         "operationId": "deleteWorker",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "55465f1dede51549995cd46be18a9dfa4ebb9ce080c555bf0780937a0c4c7245",
+        "operationSha256": "6ca414029a0377aa0bbe5b4757c0679ae169a15b32ce41e48eea42787b6acbd1",
         "requestMediaType": "none"
       },
       {
@@ -1513,7 +1533,7 @@
         "operationId": "listWorkerVersions",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "89bb76b59bfec49458949f7cf933610ce3a35b1e8ac4f8dbaf5421549564c341",
+        "operationSha256": "2ea629e3baed1d2f6651a67b6d3089c88514953b09e2b5d47842d3ff8c388346",
         "requestMediaType": "none"
       },
       {
@@ -1523,7 +1543,127 @@
         "operationId": "getWorkerVersion",
         "status": "supported",
         "source": "cloudflare-openapi",
-        "operationSha256": "e210e42a96c685d7ecab9405c610b4a764c089a548cfa621bc6e038db1e1950c",
+        "operationSha256": "1ea5e29bc53ab6416b7a10399f6502cf2bc8a2a981e5ac45a03af6c41a437b8d",
+        "requestMediaType": "none"
+      },
+      {
+        "id": "GET /accounts/{account_id}/containers/applications",
+        "method": "GET",
+        "path": "/accounts/{account_id}/containers/applications",
+        "operationId": "listApplications",
+        "status": "supported_with_deviation",
+        "source": "cloudflare-openapi",
+        "constraint": "Single-machine Container management subset; qualified operator-owned Broker required. See OC-CONTAINERS-MGMT-001 for rollout, observability and provider limits.",
+        "deviations": ["OC-CONTAINERS-MGMT-001"],
+        "operationSha256": "9c20e29eddcdf3d1d863c9f571223964d93e43345ab03a8e91d5a65a319f35ad",
+        "requestMediaType": "none"
+      },
+      {
+        "id": "POST /accounts/{account_id}/containers/applications",
+        "method": "POST",
+        "path": "/accounts/{account_id}/containers/applications",
+        "operationId": "createApplication",
+        "status": "supported_with_deviation",
+        "source": "cloudflare-openapi",
+        "constraint": "Single-machine Container management subset; qualified operator-owned Broker required. See OC-CONTAINERS-MGMT-001 for rollout, observability and provider limits.",
+        "deviations": ["OC-CONTAINERS-MGMT-001"],
+        "operationSha256": "37137977ca0e13194336828dd7e6e00e5edca1c2b1bd171edee9b66c71ec0a34",
+        "requestMediaType": "json"
+      },
+      {
+        "id": "POST /accounts/{account_id}/containers/image-preparations",
+        "method": "POST",
+        "path": "/accounts/{account_id}/containers/image-preparations",
+        "operationId": "prepareContainerImage",
+        "status": "supported_with_deviation",
+        "source": "cloudflare-openapi",
+        "constraint": "Single-machine Container management subset; qualified operator-owned Broker required. See OC-CONTAINERS-MGMT-001 for rollout, observability and provider limits.",
+        "deviations": ["OC-CONTAINERS-MGMT-001"],
+        "operationSha256": "763d6a7c47843d2e64e1c44172d4d42727684d965958107a5237dc83b00510ca",
+        "requestMediaType": "json"
+      },
+      {
+        "id": "POST /accounts/{account_id}/containers/registries/{domain}/credentials",
+        "method": "POST",
+        "path": "/accounts/{account_id}/containers/registries/{domain}/credentials",
+        "operationId": "generateImageRegistryCredentials",
+        "status": "supported_with_deviation",
+        "source": "cloudflare-openapi",
+        "constraint": "Single-machine Container management subset; qualified operator-owned Broker required. See OC-CONTAINERS-MGMT-001 for rollout, observability and provider limits.",
+        "deviations": ["OC-CONTAINERS-MGMT-001"],
+        "operationSha256": "f4c6d361f2050230ae20135cc8d9d5ccc2b79e89861c109bbfb120278afd1b10",
+        "requestMediaType": "json"
+      },
+      {
+        "id": "GET /accounts/{account_id}/containers/applications/{application_id}",
+        "method": "GET",
+        "path": "/accounts/{account_id}/containers/applications/{application_id}",
+        "operationId": "getApplication",
+        "status": "supported_with_deviation",
+        "source": "cloudflare-openapi",
+        "constraint": "Single-machine Container management subset; qualified operator-owned Broker required. See OC-CONTAINERS-MGMT-001 for rollout, observability and provider limits.",
+        "deviations": ["OC-CONTAINERS-MGMT-001"],
+        "operationSha256": "59a50a19c76585d76e68e4742b51e115b7e263232bb148bfabd311aac13b5437",
+        "requestMediaType": "none"
+      },
+      {
+        "id": "PATCH /accounts/{account_id}/containers/applications/{application_id}",
+        "method": "PATCH",
+        "path": "/accounts/{account_id}/containers/applications/{application_id}",
+        "operationId": "modifyApplication",
+        "status": "supported_with_deviation",
+        "source": "cloudflare-openapi",
+        "constraint": "Single-machine Container management subset; qualified operator-owned Broker required. See OC-CONTAINERS-MGMT-001 for rollout, observability and provider limits.",
+        "deviations": ["OC-CONTAINERS-MGMT-001"],
+        "operationSha256": "602c0ff73729a55d73e1669252811638db51d123ddd29e2a55ec60702fca9260",
+        "requestMediaType": "json"
+      },
+      {
+        "id": "DELETE /accounts/{account_id}/containers/applications/{application_id}",
+        "method": "DELETE",
+        "path": "/accounts/{account_id}/containers/applications/{application_id}",
+        "operationId": "deleteApplication",
+        "status": "supported_with_deviation",
+        "source": "cloudflare-openapi",
+        "constraint": "Single-machine Container management subset; qualified operator-owned Broker required. See OC-CONTAINERS-MGMT-001 for rollout, observability and provider limits.",
+        "deviations": ["OC-CONTAINERS-MGMT-001"],
+        "operationSha256": "28c0b448735493db3b6d62cdc8d2cd56a8d4c65fd876806355bbb96315141c20",
+        "requestMediaType": "none"
+      },
+      {
+        "id": "POST /accounts/{account_id}/containers/applications/{application_id}/rollouts",
+        "method": "POST",
+        "path": "/accounts/{account_id}/containers/applications/{application_id}/rollouts",
+        "operationId": "createApplicationRollout",
+        "status": "supported_with_deviation",
+        "source": "cloudflare-openapi",
+        "constraint": "Single-machine Container management subset; qualified operator-owned Broker required. See OC-CONTAINERS-MGMT-001 for rollout, observability and provider limits.",
+        "deviations": ["OC-CONTAINERS-MGMT-001"],
+        "operationSha256": "c74fb3768a750758c3a9476ef6cacc40c9e083487e01173ace0b476251cf0e37",
+        "requestMediaType": "json"
+      },
+      {
+        "id": "GET /accounts/{account_id}/containers/applications/{application_id}/instances-v2",
+        "method": "GET",
+        "path": "/accounts/{account_id}/containers/applications/{application_id}/instances-v2",
+        "operationId": "listContainerInstances_v2",
+        "status": "supported_with_deviation",
+        "source": "cloudflare-openapi",
+        "constraint": "Single-machine Container management subset; qualified operator-owned Broker required. See OC-CONTAINERS-MGMT-001 for rollout, observability and provider limits.",
+        "deviations": ["OC-CONTAINERS-MGMT-001"],
+        "operationSha256": "79bad19c5fa5f4ee8c33c0d7ed64841079068dc7dd025d4ee7fdcdb214c2042c",
+        "requestMediaType": "none"
+      },
+      {
+        "id": "GET /accounts/{account_id}/containers/applications/{application_id}/instances/{instance_id}",
+        "method": "GET",
+        "path": "/accounts/{account_id}/containers/applications/{application_id}/instances/{instance_id}",
+        "operationId": "getContainerInstance",
+        "status": "supported_with_deviation",
+        "source": "cloudflare-openapi",
+        "constraint": "Single-machine Container management subset; qualified operator-owned Broker required. See OC-CONTAINERS-MGMT-001 for rollout, observability and provider limits.",
+        "deviations": ["OC-CONTAINERS-MGMT-001"],
+        "operationSha256": "145b4ae040a829f4cd2f8eefe20f0fd95d6d672d468958c4a567c9e0037e5209",
         "requestMediaType": "none"
       },
       {
@@ -1707,79 +1847,9 @@
         "requestMediaType": "none"
       },
       {
-        "id": "GET /accounts/{account_id}/containers/applications",
-        "method": "GET",
-        "path": "/accounts/{account_id}/containers/applications",
-        "status": "supported_with_deviation",
-        "source": "cf-1.0.0-beta.12-containers",
-        "constraint": "Single-machine Container management subset; qualified operator-owned Broker required. See OC-CONTAINERS-MGMT-001 for rollout, observability and provider limits.",
-        "deviations": ["OC-CONTAINERS-MGMT-001"],
-        "requestMediaType": "none"
-      },
-      {
-        "id": "POST /accounts/{account_id}/containers/applications",
-        "method": "POST",
-        "path": "/accounts/{account_id}/containers/applications",
-        "status": "supported_with_deviation",
-        "source": "cf-1.0.0-beta.12-containers",
-        "constraint": "Single-machine Container management subset; qualified operator-owned Broker required. See OC-CONTAINERS-MGMT-001 for rollout, observability and provider limits.",
-        "deviations": ["OC-CONTAINERS-MGMT-001"],
-        "requestMediaType": "json"
-      },
-      {
         "id": "GET /accounts/{account_id}/containers/me",
         "method": "GET",
         "path": "/accounts/{account_id}/containers/me",
-        "status": "supported_with_deviation",
-        "source": "cf-1.0.0-beta.12-containers",
-        "constraint": "Single-machine Container management subset; qualified operator-owned Broker required. See OC-CONTAINERS-MGMT-001 for rollout, observability and provider limits.",
-        "deviations": ["OC-CONTAINERS-MGMT-001"],
-        "requestMediaType": "none"
-      },
-      {
-        "id": "POST /accounts/{account_id}/containers/image-preparations",
-        "method": "POST",
-        "path": "/accounts/{account_id}/containers/image-preparations",
-        "status": "supported_with_deviation",
-        "source": "cf-1.0.0-beta.12-containers",
-        "constraint": "Single-machine Container management subset; qualified operator-owned Broker required. See OC-CONTAINERS-MGMT-001 for rollout, observability and provider limits.",
-        "deviations": ["OC-CONTAINERS-MGMT-001"],
-        "requestMediaType": "json"
-      },
-      {
-        "id": "POST /accounts/{account_id}/containers/registries/{domain}/credentials",
-        "method": "POST",
-        "path": "/accounts/{account_id}/containers/registries/{domain}/credentials",
-        "status": "supported_with_deviation",
-        "source": "cf-1.0.0-beta.12-containers",
-        "constraint": "Single-machine Container management subset; qualified operator-owned Broker required. See OC-CONTAINERS-MGMT-001 for rollout, observability and provider limits.",
-        "deviations": ["OC-CONTAINERS-MGMT-001"],
-        "requestMediaType": "json"
-      },
-      {
-        "id": "GET /accounts/{account_id}/containers/applications/{application_id}",
-        "method": "GET",
-        "path": "/accounts/{account_id}/containers/applications/{application_id}",
-        "status": "supported_with_deviation",
-        "source": "cf-1.0.0-beta.12-containers",
-        "constraint": "Single-machine Container management subset; qualified operator-owned Broker required. See OC-CONTAINERS-MGMT-001 for rollout, observability and provider limits.",
-        "deviations": ["OC-CONTAINERS-MGMT-001"],
-        "requestMediaType": "none"
-      },
-      {
-        "id": "PATCH /accounts/{account_id}/containers/applications/{application_id}",
-        "method": "PATCH",
-        "path": "/accounts/{account_id}/containers/applications/{application_id}",
-        "status": "supported_with_deviation",
-        "source": "cf-1.0.0-beta.12-containers",
-        "constraint": "Single-machine Container management subset; qualified operator-owned Broker required. See OC-CONTAINERS-MGMT-001 for rollout, observability and provider limits.",
-        "deviations": ["OC-CONTAINERS-MGMT-001"],
-        "requestMediaType": "json"
-      },
-      {
-        "id": "DELETE /accounts/{account_id}/containers/applications/{application_id}",
-        "method": "DELETE",
-        "path": "/accounts/{account_id}/containers/applications/{application_id}",
         "status": "supported_with_deviation",
         "source": "cf-1.0.0-beta.12-containers",
         "constraint": "Single-machine Container management subset; qualified operator-owned Broker required. See OC-CONTAINERS-MGMT-001 for rollout, observability and provider limits.",
@@ -1797,39 +1867,9 @@
         "requestMediaType": "none"
       },
       {
-        "id": "POST /accounts/{account_id}/containers/applications/{application_id}/rollouts",
-        "method": "POST",
-        "path": "/accounts/{account_id}/containers/applications/{application_id}/rollouts",
-        "status": "supported_with_deviation",
-        "source": "cf-1.0.0-beta.12-containers",
-        "constraint": "Single-machine Container management subset; qualified operator-owned Broker required. See OC-CONTAINERS-MGMT-001 for rollout, observability and provider limits.",
-        "deviations": ["OC-CONTAINERS-MGMT-001"],
-        "requestMediaType": "json"
-      },
-      {
         "id": "GET /accounts/{account_id}/containers/applications/{application_id}/rollouts/{rollout_id}",
         "method": "GET",
         "path": "/accounts/{account_id}/containers/applications/{application_id}/rollouts/{rollout_id}",
-        "status": "supported_with_deviation",
-        "source": "cf-1.0.0-beta.12-containers",
-        "constraint": "Single-machine Container management subset; qualified operator-owned Broker required. See OC-CONTAINERS-MGMT-001 for rollout, observability and provider limits.",
-        "deviations": ["OC-CONTAINERS-MGMT-001"],
-        "requestMediaType": "none"
-      },
-      {
-        "id": "GET /accounts/{account_id}/containers/applications/{application_id}/instances-v2",
-        "method": "GET",
-        "path": "/accounts/{account_id}/containers/applications/{application_id}/instances-v2",
-        "status": "supported_with_deviation",
-        "source": "cf-1.0.0-beta.12-containers",
-        "constraint": "Single-machine Container management subset; qualified operator-owned Broker required. See OC-CONTAINERS-MGMT-001 for rollout, observability and provider limits.",
-        "deviations": ["OC-CONTAINERS-MGMT-001"],
-        "requestMediaType": "none"
-      },
-      {
-        "id": "GET /accounts/{account_id}/containers/applications/{application_id}/instances/{instance_id}",
-        "method": "GET",
-        "path": "/accounts/{account_id}/containers/applications/{application_id}/instances/{instance_id}",
         "status": "supported_with_deviation",
         "source": "cf-1.0.0-beta.12-containers",
         "constraint": "Single-machine Container management subset; qualified operator-owned Broker required. See OC-CONTAINERS-MGMT-001 for rollout, observability and provider limits.",
@@ -2555,8 +2595,8 @@
     "deviations": ["OC-OBSERVABILITY-001"]
   },
   "cf": {
-    "version": "1.0.0-beta.12",
-    "configSchemaSha256": "ec075764a142b17af1fde221da27ac299c83146264ac976158186bfeb838bce3",
+    "version": "1.0.0-beta.21",
+    "configSchemaSha256": "c6472ccc8b248bc05fc06b27d72b11bd33e60f8a13eab959987859fad0db1cd2",
     "fields": [
       {
         "id": "name",
@@ -2616,6 +2656,11 @@
       {
         "id": "observability",
         "status": "supported",
+        "source": "cf-config-schema"
+      },
+      {
+        "id": "access",
+        "status": "unsupported",
         "source": "cf-config-schema"
       },
       {

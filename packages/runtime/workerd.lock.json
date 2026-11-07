@@ -29,7 +29,7 @@
   },
   "workersSdk": {
     "revision": "52b0dc0e99b5bbdb86c06ed53fb703048efc36cf",
-    "cfVersion": "1.0.0-beta.12",
+    "cfVersion": "1.0.0-beta.21",
     "vitePluginVersion": "2.0.0-beta.sha-52b0dc0e9"
   },
   "targets": {

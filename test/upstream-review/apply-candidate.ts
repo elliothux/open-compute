@@ -207,27 +207,33 @@ lock.cf = {
 writeFileSync(LOCK_PATH, `${JSON.stringify(lock, null, 2)}\n`);
 
 // 5. Regenerate every derived artifact from the candidate inputs.
-run("bun", [
-  "test/conformance/p6-contract.mjs",
-  "generate",
-  "--openapi",
-  schemaPath,
-  "--cf-root",
-  join(REPO_ROOT, "node_modules/cf"),
-]);
-
-for (const [field, path] of [
-  ["subsetSha256", "openapi/cloudflare-v4-subset.json"],
-  ["subsetManifestSha256", "openapi/cloudflare-subset-manifest.json"],
-  ["extensionSha256", "openapi/open-compute-extension.json"],
-  ["observedStandardSha256", "openapi/cloudflare-observed-standard.json"],
-  ["capabilitySha256", "openapi/p6-capability.json"],
-  ["capabilitySchemaSha256", "openapi/capability-manifest.schema.json"],
-] as const) {
-  lock[field] = sha256(readFileSync(join(REPO_ROOT, path)));
+function generateContract(): void {
+  run("bun", [
+    "test/conformance/p6-contract.mjs",
+    "generate",
+    "--openapi",
+    schemaPath,
+    "--cf-root",
+    join(REPO_ROOT, "node_modules/cf"),
+  ]);
+  for (const [field, path] of [
+    ["subsetSha256", "openapi/cloudflare-v4-subset.json"],
+    ["subsetManifestSha256", "openapi/cloudflare-subset-manifest.json"],
+    ["extensionSha256", "openapi/open-compute-extension.json"],
+    ["observedStandardSha256", "openapi/cloudflare-observed-standard.json"],
+    ["capabilitySha256", "openapi/p6-capability.json"],
+    ["capabilitySchemaSha256", "openapi/capability-manifest.schema.json"],
+  ] as const) {
+    lock[field] = sha256(readFileSync(join(REPO_ROOT, path)));
+  }
+  writeFileSync(LOCK_PATH, `${JSON.stringify(lock, null, 2)}\n`);
 }
-writeFileSync(LOCK_PATH, `${JSON.stringify(lock, null, 2)}\n`);
+
+// The SDK surface reads the subset, and the capability projection reads the
+// SDK surface, so the contract is generated again after the SDK.
+generateContract();
 run("bun", ["packages/sdk/scripts/generate.ts"]);
+generateContract();
 run("bun", ["test/conformance/inventory.ts", "generate"]);
 
 console.log(

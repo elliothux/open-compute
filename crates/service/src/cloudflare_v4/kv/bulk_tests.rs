@@ -347,6 +347,32 @@ async fn exercise_catalog_and_backups(app: &axum::Router, public_account: &str, 
     assert_eq!(listed.status(), StatusCode::OK);
     assert_eq!(json(listed).await["result"][0]["title"], "bulk-namespace");
 
+    for (body, status) in [
+        (
+            r#"{"title":"instant-namespace","mode":"instant"}"#,
+            StatusCode::OK,
+        ),
+        (
+            r#"{"title":"eventual-namespace","mode":"eventual"}"#,
+            StatusCode::BAD_REQUEST,
+        ),
+    ] {
+        let created = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri(&catalog_prefix)
+                    .header(header::AUTHORIZATION, "Bearer deployer-token")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(created.status(), status, "{body}");
+    }
+
     let renamed = app
         .clone()
         .oneshot(

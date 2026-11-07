@@ -1,4 +1,4 @@
-//! Official Cloudflare SDK 7.2.0 against one ready production `ocd` process.
+//! Official Cloudflare SDK 7.3.0 against one ready production `ocd` process.
 
 #![cfg(feature = "test-support")]
 
@@ -27,7 +27,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
-const SDK_VERSION: &str = "7.2.0";
+const SDK_VERSION: &str = "7.3.0";
 const TOKEN: &str = platform_process::ADMIN_TOKEN;
 const DEPLOYER_TOKEN: &str = "p6-cloudflare-sdk-deployer-token";
 const READ_ONLY_TOKEN: &str = "p6-cloudflare-sdk-read-only-token";
@@ -233,7 +233,7 @@ fn seed_worker_and_workflow(storage: &PlatformStorage) {
 fn fixed_cloudflare_sdk() -> PathBuf {
     let root = repo_root();
     let lock = fs::read_to_string(root.join("bun.lock")).unwrap();
-    assert!(lock.contains("\"cloudflare\": [\"cloudflare@7.2.0\""));
+    assert!(lock.contains("\"cloudflare\": [\"cloudflare@7.3.0\""));
     let prefix = format!("cloudflare@{SDK_VERSION}");
     let mut installs = fs::read_dir(root.join("node_modules/.bun"))
         .expect("locked Bun dependencies must already be installed")

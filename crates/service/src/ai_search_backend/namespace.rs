@@ -526,6 +526,34 @@ impl AiSearchBindingService {
         }))
     }
 
+    pub(super) async fn instance_move(
+        &self,
+        authority: &Authority,
+        call: JsonCall,
+    ) -> Result<Value, PlatformError> {
+        let instance = self.resolve_instance(authority, call.instance.as_deref())?;
+        let target_name = call
+            .payload
+            .get("new_namespace")
+            .and_then(Value::as_str)
+            .ok_or_else(protocol)?;
+        let generation_lock = self.generation_lock(instance.record.resource.id)?;
+        let _generation_guard = generation_lock.write_owned().await;
+        let target = ResourceRepository::new(self.storage.db())
+            .list(authority.instance_id, Some(BindingKind::AiSearchNamespace))?
+            .into_iter()
+            .find(|resource| resource.name == target_name && resource.state == ResourceState::Ready)
+            .ok_or_else(not_found)?;
+        let _target_pin = self.pins.try_pin(target.id)?;
+        AiSearchCatalog::new(self.storage.db()).move_instance(
+            authority.instance_id,
+            instance.record.resource.id,
+            target.id,
+            unix_ms(),
+        )?;
+        Ok(json!({}))
+    }
+
     pub(super) async fn instance_update(
         &self,
         authority: &Authority,

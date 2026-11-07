@@ -202,3 +202,106 @@ fn r2_source_identity_is_frozen_and_blocks_bucket_deletion() {
         ErrorCode::ResourceReferenced
     );
 }
+
+#[test]
+fn instance_move_relinks_parent_and_rejects_duplicates_and_unready_instances() {
+    let (_temporary, storage) = fixture();
+    let resources = ResourceRepository::new(storage.db());
+    let catalog = AiSearchCatalog::new(storage.db());
+    let mut namespaces = Vec::new();
+    for name in ["source", "target"] {
+        let namespace = reserve(&storage, BindingKind::AiSearchNamespace, name);
+        catalog.ensure_namespace(&namespace).unwrap();
+        resources.mark_ready(namespace.id, 20).unwrap();
+        namespaces.push(namespace);
+    }
+    let (source, target) = (&namespaces[0], &namespaces[1]);
+    let mut instances = Vec::new();
+    for (namespace, key) in [(source, "docs"), (target, "taken"), (source, "taken")] {
+        let name = format!("{}:{key}", namespace.id);
+        let instance = reserve(&storage, BindingKind::AiSearchInstance, &name);
+        catalog
+            .ensure_instance(
+                &instance,
+                namespace.id,
+                key,
+                &format!("ai-search/v1/{}", instance.id),
+                AI_SEARCH_SCHEMA_VERSION,
+                [7; 32],
+            )
+            .unwrap();
+        resources.mark_ready(instance.id, 21).unwrap();
+        instances.push(instance);
+    }
+    let account = source.instance_id;
+    let moved = catalog
+        .move_instance(account, instances[0].id, target.id, 30)
+        .unwrap();
+    assert_eq!(moved.namespace_resource_id, target.id);
+    assert_eq!(moved.resource.name, format!("{}:docs", target.id));
+    assert_eq!(
+        moved.storage_key,
+        format!("ai-search/v1/{}", instances[0].id)
+    );
+    assert_eq!(
+        catalog
+            .get_instance_by_key(account, target.id, "docs")
+            .unwrap(),
+        moved
+    );
+    assert_eq!(
+        catalog
+            .get_instance_by_key(account, source.id, "docs")
+            .unwrap_err()
+            .code(),
+        ErrorCode::ResourceNotFound
+    );
+    assert_eq!(
+        catalog
+            .move_instance(account, instances[0].id, target.id, 31)
+            .unwrap(),
+        moved
+    );
+    assert_eq!(
+        catalog
+            .move_instance(account, instances[2].id, target.id, 32)
+            .unwrap_err()
+            .code(),
+        ErrorCode::ConfigInvalid
+    );
+    assert_eq!(
+        catalog
+            .move_instance(account, instances[0].id, ResourceId::generate(), 33)
+            .unwrap_err()
+            .code(),
+        ErrorCode::ResourceNotFound
+    );
+    resources
+        .begin_delete(account, instances[1].id, 34)
+        .unwrap();
+    assert_eq!(
+        catalog
+            .move_instance(account, instances[1].id, source.id, 35)
+            .unwrap_err()
+            .code(),
+        ErrorCode::ResourceNameConflict
+    );
+    let referrers: Vec<(String, String)> = storage
+        .db()
+        .with_read(|connection| {
+            let mut statement = connection
+                .prepare(
+                    "SELECT resource_id, referrer_id FROM resource_referrers
+                      WHERE referrer_kind='ai_search_instance' ORDER BY referrer_id",
+                )
+                .unwrap();
+            Ok(statement
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect())
+        })
+        .unwrap();
+    assert!(referrers.contains(&(target.id.to_string(), instances[0].id.to_string())));
+    assert!(!referrers.contains(&(source.id.to_string(), instances[0].id.to_string())));
+}

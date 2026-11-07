@@ -77,6 +77,21 @@ struct NamespaceBody {
     title: String,
 }
 
+/// Create body; `mode` admits only `instant`, which single-node SQLite KV already provides.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CreateNamespaceBody {
+    title: String,
+    #[serde(default, rename = "mode")]
+    _mode: Option<InstantMode>,
+}
+
+#[derive(Deserialize)]
+enum InstantMode {
+    #[serde(rename = "instant")]
+    Instant,
+}
+
 #[derive(Serialize)]
 struct Namespace {
     id: String,
@@ -120,13 +135,14 @@ async fn create_namespace(
         Ok(value) => value,
         Err(error) => return error_response(error, context.request_id()),
     };
-    let body = match super::storage::json::<NamespaceBody>(request, context.request_id()).await {
-        Ok(value) if valid_title(&value.title) => value,
-        Ok(_) => {
-            return error_response(V4Error::InvalidField("/title"), context.request_id());
-        }
-        Err(response) => return response.into_response(),
-    };
+    let body =
+        match super::storage::json::<CreateNamespaceBody>(request, context.request_id()).await {
+            Ok(value) if valid_title(&value.title) => value,
+            Ok(_) => {
+                return error_response(V4Error::InvalidField("/title"), context.request_id());
+            }
+            Err(response) => return response.into_response(),
+        };
     let Some(api) = state.kv_api().cloned() else {
         return error_response(V4Error::Unavailable, context.request_id());
     };

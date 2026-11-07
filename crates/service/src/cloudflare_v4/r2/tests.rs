@@ -301,6 +301,9 @@ async fn bucket_routes_cover_create_cursor_filter_headers_and_delete() {
     assert_eq!(first.status(), StatusCode::OK);
     let first = json(first).await;
     assert_eq!(first["result_info"]["count"], 2);
+    assert_eq!(first["result_info"]["per_page"], 2);
+    let total = first["result_info"]["total_count"].as_u64().unwrap();
+    assert!(total > 2);
     let cursor = first["result_info"]["cursor"].as_str().unwrap();
     assert!(!cursor.is_empty());
     let second = app
@@ -317,7 +320,10 @@ async fn bucket_routes_cover_create_cursor_filter_headers_and_delete() {
         .await
         .unwrap();
     assert_eq!(second.status(), StatusCode::OK);
-    assert_eq!(json(second).await["result_info"]["count"], 2);
+    let second = json(second).await;
+    assert_eq!(second["result_info"]["count"], 2);
+    // The total spans every page of the same filter, not only the remaining one.
+    assert_eq!(second["result_info"]["total_count"], total);
 
     let filtered = app
         .clone()

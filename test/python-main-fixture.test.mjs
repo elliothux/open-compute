@@ -319,7 +319,7 @@ test("cf captures a prebuilt Python protocol fixture through its real version up
     await readFile(join(result, "manifest.json"), "utf8"),
   );
   assert.equal(recorded.producer, "cf workers versions create --prebuilt");
-  assert.equal(recorded.cf, "1.0.0-beta.12");
+  assert.equal(recorded.cf, "1.0.0-beta.21");
   assert.equal(recorded.metadata.main_module, "main.py");
   assert.equal(recorded.modules.length, 4);
   const bindings = Object.fromEntries(

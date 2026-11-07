@@ -407,6 +407,7 @@ impl AiSearchCreateInput {
         validate_boosts(&retrieval_options.boost_by, &custom_metadata)?;
         let metadata = self.metadata.unwrap_or_default();
         validate_json(&Value::Object(metadata.clone().into_iter().collect()), 0, 0)?;
+        validate_plugin_origin(&metadata)?;
         let resolved = ResolvedAiSearchConfig {
             id: self.id,
             source_type: source_config.as_ref().map(|_| "r2".to_owned()),
@@ -677,6 +678,20 @@ fn validate_custom_metadata(fields: &[AiSearchMetadataField]) -> Result<(), Plat
         }
     }
     Ok(())
+}
+
+/// Cloudflare types `metadata.created_from_emdash_plugin` as `{type: native|rest, version}`.
+fn validate_plugin_origin(metadata: &BTreeMap<String, Value>) -> Result<(), PlatformError> {
+    let Some(origin) = metadata.get("created_from_emdash_plugin") else {
+        return Ok(());
+    };
+    let valid = origin.as_object().is_some_and(|origin| {
+        matches!(
+            origin.get("type").and_then(Value::as_str),
+            Some("native" | "rest")
+        ) && origin.get("version").is_some_and(Value::is_string)
+    });
+    if valid { Ok(()) } else { Err(input_invalid()) }
 }
 
 fn validate_json(value: &Value, depth: usize, nodes: usize) -> Result<usize, PlatformError> {

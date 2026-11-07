@@ -12,7 +12,7 @@ bun run build
 ocd cf --target staging deploy --prebuilt --mode staging
 ```
 
-`cf dev` uses official local simulations. `ocd cf` selects a real OCD authority, injects target credentials, and preserves argv, output, signals, and exit status. It never installs or upgrades tools. Internal CI pins `cf@1.0.0-beta.12`; users may choose their version. Versions outside `1.0.x` warn and still execute.
+`cf dev` uses official local simulations. `ocd cf` selects a real OCD authority, injects target credentials, and preserves argv, output, signals, and exit status. It never installs or upgrades tools. Internal CI pins `cf@1.0.0-beta.21`; users may choose their version. Versions outside `1.0.x` warn and still execute.
 
 | Concept  | Meaning                                             | Selector                  |
 | -------- | --------------------------------------------------- | ------------------------- |

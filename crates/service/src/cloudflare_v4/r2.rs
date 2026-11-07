@@ -269,6 +269,8 @@ async fn list_buckets(
     if query.direction.as_deref() == Some("desc") {
         records.reverse();
     }
+    // Cloudflare counts every bucket that matches the filter, across all pages.
+    let total_count = records.len();
     if let Some(start) = start_after {
         records.retain(|record| {
             if query.direction.as_deref() == Some("desc") {
@@ -293,7 +295,16 @@ async fn list_buckets(
     };
     let buckets: Result<Vec<_>, _> = records.iter().map(Bucket::from_record).collect();
     match buckets {
-        Ok(buckets) => bucket_list_response(context.request_id(), &buckets, cursor),
+        Ok(buckets) => bucket_list_response(
+            context.request_id(),
+            &buckets,
+            BucketCursorInfo {
+                count: buckets.len(),
+                cursor,
+                per_page: query.per_page,
+                total_count,
+            },
+        ),
         Err(error) => error_response(error, context.request_id()),
     }
 }
@@ -577,14 +588,19 @@ struct BucketListEnvelope {
 struct BucketCursorInfo {
     count: usize,
     cursor: String,
+    per_page: usize,
+    total_count: usize,
 }
 
-fn bucket_list_response(request_id: RequestId, buckets: &[Bucket], cursor: String) -> Response {
-    let count = buckets.len();
+fn bucket_list_response(
+    request_id: RequestId,
+    buckets: &[Bucket],
+    result_info: BucketCursorInfo,
+) -> Response {
     let mut response = Json(BucketListEnvelope {
         success: true,
         result: serde_json::json!({ "buckets": buckets }),
-        result_info: BucketCursorInfo { count, cursor },
+        result_info,
         errors: [],
         messages: [],
     })

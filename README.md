@@ -79,7 +79,7 @@ Write standard module workers (`export default { fetch }`) with the bindings you
 | Version Metadata, WebSocket Hibernation                       |                                                                                                                                                                    | mTLS certificates             |
 | Vectorize, Markdown Conversion, AI Search                     |                                                                                                                                                                    | Tail Workers, traces, Logpush |
 | Artifacts, Dynamic Workers                                    |                                                                                                                                                                    |                               |
-| cf `1.0.0-beta.12` deploys and manages the supported products |                                                                                                                                                                    |                               |
+| cf `1.0.0-beta.21` deploys and manages the supported products |                                                                                                                                                                    |                               |
 
 Uploads or configuration that need a "Not yet" capability are rejected.
 
@@ -115,10 +115,10 @@ curl -fsSL https://open-compute.dev/install.sh | sudo sh
 sudo ocd setup --system --yes
 ```
 
-Use `cloudflare.config.ts` and the official cf + Vite plugin v2 workflow. Node.js 22.18+ runs cf; `ocd cf` selects the deployment target. CI pins cf 1.0.0-beta.12; user versions outside 1.0.x only warn:
+Use `cloudflare.config.ts` and the official cf + Vite plugin v2 workflow. Node.js 22.18+ runs cf; `ocd cf` selects the deployment target. CI pins cf 1.0.0-beta.21; user versions outside 1.0.x only warn:
 
 ```sh
-npm install --save-dev cf@1.0.0-beta.12 @cloudflare/vite-plugin@beta vite typescript
+npm install --save-dev cf@1.0.0-beta.21 @cloudflare/vite-plugin@beta vite typescript
 npm run dev
 npm run build
 ocd cf deploy --prebuilt --mode production

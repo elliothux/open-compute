@@ -9,8 +9,8 @@ mod tokens;
 
 use super::storage::{account, context, strict_query};
 use super::{
-    HttpError, V4Error, V4Permission, V4RequestContext, error_response, result_info_response,
-    success_response,
+    HttpError, V4Error, V4OfficialError, V4Permission, V4RequestContext, error_response,
+    result_info_response, success_response,
 };
 use crate::http::HttpState;
 use crate::search_api::SearchApiState;
@@ -57,7 +57,12 @@ pub(super) fn router() -> Router<HttpState> {
             "/accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}",
             get(instances::get)
                 .put(instances::update)
+                .patch(instances::move_to_namespace)
                 .delete(instances::delete),
+        )
+        .route(
+            "/accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/purge_cache",
+            post(instances::purge_cache),
         )
         .route(
             "/accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/stats",
@@ -138,7 +143,23 @@ async fn call(
     service
         .official_call(account, namespace, request_id, operation, instance, payload)
         .await
-        .map_err(|error| V4Error::from(&error))
+        .map_err(|error| official_error(operation, V4Error::from(&error)))
+}
+
+/// Project local failures onto the AI Search error codes that Cloudflare declares.
+///
+/// Queries declare 429 capacity and 502 upstream failures; management routes declare
+/// a retryable 503.
+fn official_error(operation: &str, error: V4Error) -> V4Error {
+    let query = operation.ends_with("search") || operation.ends_with("chatCompletions");
+    match (error, query) {
+        (V4Error::RateLimited, true) => {
+            V4Error::Official(V4OfficialError::AiSearchCapacityExceeded)
+        }
+        (V4Error::Unavailable, true) => V4Error::Official(V4OfficialError::AiSearchUpstreamError),
+        (V4Error::Unavailable, false) => V4Error::Official(V4OfficialError::AiSearchUnavailable),
+        (error, _) => error,
+    }
 }
 
 async fn stream(
@@ -154,7 +175,7 @@ async fn stream(
     let mut response = service
         .official_stream(account, namespace, request_id, operation, instance, payload)
         .await
-        .map_err(|error| V4Error::from(&error))?;
+        .map_err(|error| official_error(operation, V4Error::from(&error)))?;
     let request_id = axum::http::HeaderValue::from_str(&request_id.to_string())
         .map_err(|_| V4Error::Internal)?;
     response
@@ -277,5 +298,38 @@ fn item_namespace(value: &mut Value, namespace: &str) {
             }
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::{StatusCode, header};
+
+    #[tokio::test]
+    async fn local_failures_use_the_declared_ai_search_error_codes() {
+        for (operation, error, status, code, retry) in [
+            ("instance.search", V4Error::RateLimited, 429, 7_119, true),
+            (
+                "namespace.chatCompletions",
+                V4Error::Unavailable,
+                502,
+                7_120,
+                false,
+            ),
+            ("namespace.create", V4Error::Unavailable, 503, 7_125, true),
+            ("instance.search", V4Error::NotFound, 404, 9_100_004, false),
+        ] {
+            let response = error_response(official_error(operation, error), RequestId::generate());
+            assert_eq!(response.status(), StatusCode::from_u16(status).unwrap());
+            assert_eq!(response.headers().contains_key(header::RETRY_AFTER), retry);
+            let body: Value = serde_json::from_slice(
+                &axum::body::to_bytes(response.into_body(), 4096)
+                    .await
+                    .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(body["errors"][0]["code"], code, "{operation}");
+        }
     }
 }

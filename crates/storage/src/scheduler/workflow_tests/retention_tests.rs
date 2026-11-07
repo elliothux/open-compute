@@ -63,7 +63,8 @@ fn retention_migration_preserves_active_history_and_removes_the_old_minimum() {
         .unwrap()
         .query_row(guards_query, [], |row| row.get(0))
         .unwrap();
-    schema_migrations::migrate(&mut store.lock().unwrap(), DatabaseKind::Control).unwrap();
+    // Apply only V24, so later guard migrations do not change this comparison.
+    schema_migrations::migrate_to_for_test(&mut store.lock().unwrap(), DatabaseKind::Control, 24);
     let after = store
         .workflow_instance(identity.instance_id)
         .unwrap()

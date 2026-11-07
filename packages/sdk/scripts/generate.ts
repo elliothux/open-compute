@@ -649,7 +649,7 @@ function renderRuntimeTree(node: TreeNode, indent: string): string {
       );
     } else if (
       method.operation ===
-      "POST /accounts/{account_id}/ai-search/namespaces/{name}/instances/{id}/items"
+      "POST /accounts/{account_id}/ai-search/namespaces/{namespace}/instances/{id}/items"
     ) {
       lines.push(
         `${inner}upload: (id, params, options) => uploadAiSearchItem(transport, ${method.variable}, id, params, options),`,

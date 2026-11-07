@@ -430,7 +430,7 @@ workerd fork 的其他 22 个 GitHub workflow 已在 repository settings 禁用�
 `Open Compute binaries` 的 `workflow_dispatch` 手动发布入口；当前没有待取消的其他 run。
 上游 workflow 源码与历史 run 保留，不执行其自动/其他手动 CI。
 
-正式 lock 唯一 CLI 字段为 `cfVersion`，固定 cf `1.0.0-beta.12`；Vite plugin 为 `2.0.0-beta.sha-52b0dc0e9`，
+正式 lock 唯一 CLI 字段为 `cfVersion`，固定 cf `1.0.0-beta.21`；Vite plugin 为 `2.0.0-beta.sha-52b0dc0e9`，
 匹配 workers-sdk revision `52b0dc0e99b5bbdb86c06ed53fb703048efc36cf`。该 SDK revision 是开发工具来源，
 不替代 Python `workers-runtime-sdk` 版本。新正式 binary 的 Runtime/PythonPreparation 两 profile 真实编译和 SDK scheduled prepare/restore 组件通过。
 此前 R3 和开发候选的报告作为历史证据保留；P21 各 ordinary case 已有正式 pin 的 development pass，完整 workspace coverage 与最终单轮 Gate 仍需通过。

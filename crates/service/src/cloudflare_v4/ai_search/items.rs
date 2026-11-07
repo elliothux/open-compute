@@ -247,9 +247,7 @@ async fn read_field(
             .checked_add(chunk.len())
             .ok_or(V4Error::InvalidRequest)?;
         if length > limit {
-            return Err(V4Error::Official(
-                crate::cloudflare_v4::wire::V4OfficialError::RequestTooLarge,
-            ));
+            return Err(V4Error::Official(V4OfficialError::RequestTooLarge));
         }
         output.extend_from_slice(&chunk);
     }

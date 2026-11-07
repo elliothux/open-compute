@@ -63,7 +63,7 @@ test("surface report, combined OpenAPI, and extension authority agree", async ()
   assert.equal(surface.schemaVersion, 1);
   assert.equal(surface.package, "@open-compute/sdk");
   assert.equal(surface.packageVersion, packageJson.version);
-  assert.equal(surface.operations.length, 148);
+  assert.equal(surface.operations.length, 158);
   assert.equal(surface.observedStandardOperations.length, 18);
   const selection = JSON.parse(
     await readFile(
@@ -78,7 +78,8 @@ test("surface report, combined OpenAPI, and extension authority agree", async ()
   const containerRoutes = selection.clientObservedOperations.filter((entry) =>
     entry.operation.includes("/containers/"),
   );
-  assert.equal(containerRoutes.length, 13);
+  // Only cf-observed Container routes without an official SDK method stay excluded.
+  assert.equal(containerRoutes.length, 3);
   assert.ok(
     containerRoutes.every((entry) =>
       surface.excludedOperations.some(
@@ -86,8 +87,10 @@ test("surface report, combined OpenAPI, and extension authority agree", async ()
       ),
     ),
   );
-  assert.ok(
-    !Object.keys(combined.paths).some((path) => path.includes("/containers/")),
+  assert.equal(
+    surface.operations.filter((entry) => entry.path.includes("/containers/"))
+      .length,
+    10,
   );
   const byNode = (list) =>
     [...list].sort((left, right) => left.node.localeCompare(right.node));

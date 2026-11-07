@@ -7,6 +7,11 @@ import { BaseItems } from "cloudflare/resources/aisearch/namespaces/instances/it
 import { BaseJobs } from "cloudflare/resources/aisearch/namespaces/instances/jobs";
 import { BaseNamespaces } from "cloudflare/resources/aisearch/namespaces/namespaces";
 import { BaseTokens } from "cloudflare/resources/aisearch/tokens";
+import { BaseApplications } from "cloudflare/resources/containers/applications/applications";
+import { BaseInstances as BaseInstances2 } from "cloudflare/resources/containers/applications/instances";
+import { BaseRollouts } from "cloudflare/resources/containers/applications/rollouts";
+import { BaseImages } from "cloudflare/resources/containers/images";
+import { BaseCredentials } from "cloudflare/resources/containers/registries/credentials";
 import { BaseDatabase } from "cloudflare/resources/d1/database/database";
 import { BaseTimeTravel } from "cloudflare/resources/d1/database/time-travel";
 import { BaseKeys } from "cloudflare/resources/kv/namespaces/keys";
@@ -57,7 +62,7 @@ import {
 } from "cloudflare/resources/workers/scripts/versions";
 import { BaseSubdomains } from "cloudflare/resources/workers/subdomains";
 import { BaseEvents } from "cloudflare/resources/workflows/instances/events";
-import { BaseInstances as BaseInstances2 } from "cloudflare/resources/workflows/instances/instances";
+import { BaseInstances as BaseInstances3 } from "cloudflare/resources/workflows/instances/instances";
 import { BaseStatus } from "cloudflare/resources/workflows/instances/status";
 import { BaseVersions as BaseVersions3 } from "cloudflare/resources/workflows/versions";
 import { BaseWorkflows } from "cloudflare/resources/workflows/workflows";
@@ -282,7 +287,7 @@ export type CacheStatus = {
 
 export type Capabilities = {
   readonly release: string;
-  readonly cf_version: "1.0.0-beta.12";
+  readonly cf_version: "1.0.0-beta.21";
   readonly compatibility: {
     readonly validation: "workerd_code_version";
     readonly binary_maximum_date: string;
@@ -1083,6 +1088,7 @@ function buildOpenCompute(transport: BaseCloudflare): OpenComputeVendorNode {
 export interface OpenComputeNode {
   readonly accounts: OpenComputeAccountsNode;
   readonly aiSearch: OpenComputeAiSearchNode;
+  readonly containers: OpenComputeContainersNode;
   readonly d1: OpenComputeD1Node;
   readonly kv: OpenComputeKvNode;
   readonly memberships: OpenComputeMembershipsNode;
@@ -1150,6 +1156,43 @@ export interface OpenComputeAiSearchNamespacesInstancesJobsNode {
 
 export interface OpenComputeAiSearchTokensNode {
   readonly list: BaseTokens["list"];
+}
+
+export interface OpenComputeContainersNode {
+  readonly applications: OpenComputeContainersApplicationsNode;
+  readonly images: OpenComputeContainersImagesNode;
+  readonly registries: OpenComputeContainersRegistriesNode;
+}
+
+export interface OpenComputeContainersApplicationsNode {
+  readonly instances: OpenComputeContainersApplicationsInstancesNode;
+  readonly rollouts: OpenComputeContainersApplicationsRolloutsNode;
+  readonly create: BaseApplications["create"];
+  readonly delete: BaseApplications["delete"];
+  readonly edit: BaseApplications["edit"];
+  readonly get: BaseApplications["get"];
+  readonly list: BaseApplications["list"];
+}
+
+export interface OpenComputeContainersApplicationsInstancesNode {
+  readonly get: BaseInstances2["get"];
+  readonly list: BaseInstances2["list"];
+}
+
+export interface OpenComputeContainersApplicationsRolloutsNode {
+  readonly create: BaseRollouts["create"];
+}
+
+export interface OpenComputeContainersImagesNode {
+  readonly prepare: BaseImages["prepare"];
+}
+
+export interface OpenComputeContainersRegistriesNode {
+  readonly credentials: OpenComputeContainersRegistriesCredentialsNode;
+}
+
+export interface OpenComputeContainersRegistriesCredentialsNode {
+  readonly generate: BaseCredentials["generate"];
 }
 
 export interface OpenComputeD1Node {
@@ -1439,10 +1482,10 @@ export interface OpenComputeWorkflowsNode {
 export interface OpenComputeWorkflowsInstancesNode {
   readonly events: OpenComputeWorkflowsInstancesEventsNode;
   readonly status: OpenComputeWorkflowsInstancesStatusNode;
-  readonly bulk: BaseInstances2["bulk"];
-  readonly create: BaseInstances2["create"];
-  readonly get: BaseInstances2["get"];
-  readonly list: BaseInstances2["list"];
+  readonly bulk: BaseInstances3["bulk"];
+  readonly create: BaseInstances3["create"];
+  readonly get: BaseInstances3["get"];
+  readonly list: BaseInstances3["list"];
 }
 
 export interface OpenComputeWorkflowsInstancesEventsNode {
@@ -1768,6 +1811,7 @@ export interface OpenComputeVendorNode {
 export interface OpenComputeSurface {
   readonly accounts: OpenComputeAccountsNode;
   readonly aiSearch: OpenComputeAiSearchNode;
+  readonly containers: OpenComputeContainersNode;
   readonly d1: OpenComputeD1Node;
   readonly kv: OpenComputeKvNode;
   readonly memberships: OpenComputeMembershipsNode;
@@ -1793,6 +1837,11 @@ export function buildFacade(transport: BaseCloudflare): OpenComputeSurface {
   const aiSearchnamespacesinstancesitems = new BaseItems(transport);
   const aiSearchnamespacesinstancesjobs = new BaseJobs(transport);
   const aiSearchtokens = new BaseTokens(transport);
+  const containersapplications = new BaseApplications(transport);
+  const containersapplicationsinstances = new BaseInstances2(transport);
+  const containersapplicationsrollouts = new BaseRollouts(transport);
+  const containersimages = new BaseImages(transport);
+  const containersregistriescredentials = new BaseCredentials(transport);
   const d1database = new BaseDatabase(transport);
   const d1databasetimeTravel = new BaseTimeTravel(transport);
   const kvnamespaces = new BaseNamespaces2(transport);
@@ -1826,7 +1875,7 @@ export function buildFacade(transport: BaseCloudflare): OpenComputeSurface {
   const workersscriptsversions = new BaseVersions2(transport);
   const workerssubdomains = new BaseSubdomains(transport);
   const workflows = new BaseWorkflows(transport);
-  const workflowsinstances = new BaseInstances2(transport);
+  const workflowsinstances = new BaseInstances3(transport);
   const workflowsinstancesevents = new BaseEvents(transport);
   const workflowsinstancesstatus = new BaseStatus(transport);
   const workflowsversions = new BaseVersions3(transport);
@@ -1926,6 +1975,38 @@ export function buildFacade(transport: BaseCloudflare): OpenComputeSurface {
       },
       tokens: {
         list: aiSearchtokens.list.bind(aiSearchtokens),
+      },
+    },
+    containers: {
+      applications: {
+        instances: {
+          get: containersapplicationsinstances.get.bind(
+            containersapplicationsinstances,
+          ),
+          list: containersapplicationsinstances.list.bind(
+            containersapplicationsinstances,
+          ),
+        },
+        rollouts: {
+          create: containersapplicationsrollouts.create.bind(
+            containersapplicationsrollouts,
+          ),
+        },
+        create: containersapplications.create.bind(containersapplications),
+        delete: containersapplications.delete.bind(containersapplications),
+        edit: containersapplications.edit.bind(containersapplications),
+        get: containersapplications.get.bind(containersapplications),
+        list: containersapplications.list.bind(containersapplications),
+      },
+      images: {
+        prepare: containersimages.prepare.bind(containersimages),
+      },
+      registries: {
+        credentials: {
+          generate: containersregistriescredentials.generate.bind(
+            containersregistriescredentials,
+          ),
+        },
       },
     },
     d1: {
@@ -2261,6 +2342,38 @@ export type {
   TokenListResponsesV4PagePaginationArray,
 } from "cloudflare/resources/aisearch/tokens";
 export type {
+  ApplicationCreateParams,
+  ApplicationCreateResponse,
+  ApplicationDeleteParams,
+  ApplicationDeleteResponse,
+  ApplicationEditParams,
+  ApplicationEditResponse,
+  ApplicationGetParams,
+  ApplicationGetResponse,
+  ApplicationListParams,
+  ApplicationListResponse,
+  ApplicationListResponsesPageTokenPagination,
+} from "cloudflare/resources/containers/applications/applications";
+export type {
+  InstanceGetParams as ContainersApplicationsInstancesInstanceGetParams,
+  InstanceGetResponse as ContainersApplicationsInstancesInstanceGetResponse,
+  InstanceListParams as ContainersApplicationsInstancesInstanceListParams,
+  InstanceListResponse as ContainersApplicationsInstancesInstanceListResponse,
+  InstanceListResponsesPageTokenPagination,
+} from "cloudflare/resources/containers/applications/instances";
+export type {
+  RolloutCreateParams,
+  RolloutCreateResponse,
+} from "cloudflare/resources/containers/applications/rollouts";
+export type {
+  ImagePrepareParams,
+  ImagePrepareResponse,
+} from "cloudflare/resources/containers/images";
+export type {
+  CredentialGenerateParams,
+  CredentialGenerateResponse,
+} from "cloudflare/resources/containers/registries/credentials";
+export type {
   DatabaseCreateParams,
   DatabaseDeleteParams,
   DatabaseDeleteResponse,
@@ -2381,7 +2494,6 @@ export type {
   IndexDeleteByIDsResponse,
   IndexDeleteParams,
   IndexDeleteResponse,
-  IndexDimensionConfiguration,
   IndexDimensionConfigurationParam,
   IndexGetByIDsParams,
   IndexGetByIDsResponse,
@@ -2528,10 +2640,10 @@ export type {
   InstanceBulkParams,
   InstanceBulkResponse,
   InstanceBulkResponsesSinglePage,
-  InstanceGetParams,
-  InstanceGetResponse,
   InstanceCreateParams as WorkflowsInstancesInstancesInstanceCreateParams,
   InstanceCreateResponse as WorkflowsInstancesInstancesInstanceCreateResponse,
+  InstanceGetParams as WorkflowsInstancesInstancesInstanceGetParams,
+  InstanceGetResponse as WorkflowsInstancesInstancesInstanceGetResponse,
   InstanceListParams as WorkflowsInstancesInstancesInstanceListParams,
   InstanceListResponse as WorkflowsInstancesInstancesInstanceListResponse,
   InstanceListResponsesV4PagePaginationArray as WorkflowsInstancesInstancesInstanceListResponsesV4PagePaginationArray,

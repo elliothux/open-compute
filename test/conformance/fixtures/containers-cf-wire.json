@@ -1,6 +1,6 @@
 {
-  "cfVersion": "1.0.0-beta.12",
-  "deployModuleSha256": "23e9f03824f33155e17976fc9cca66c8c14a4ffa85d05d5042c93bb6c15b8ac3",
+  "cfVersion": "1.0.0-beta.21",
+  "deployModuleSha256": "078851d1a1559868e470743643738cd4f5607dbb9e832622daea7e27b982b11b",
   "application": {
     "name": "container-app",
     "scheduling_policy": "default",

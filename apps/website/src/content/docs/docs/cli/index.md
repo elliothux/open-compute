@@ -27,7 +27,7 @@ For example, `ocd restart` restarts the scoped daemon and all of its instances, 
 - `target add|list|show|test|remove`
 - `cf [--target <name>] [--project <dir>] <cf-command> ...`
 
-`ocd cf` resolves the project-local cf and passes every argument from the cf command onward unchanged. It never downloads, repairs, or silently replaces the dependency. Versions outside `1.0.x` warn but still execute; internal CI pins `1.0.0-beta.12`.
+`ocd cf` resolves the project-local cf and passes every argument from the cf command onward unchanged. It never downloads, repairs, or silently replaces the dependency. Versions outside `1.0.x` warn but still execute; internal CI pins `1.0.0-beta.21`.
 
 The target registry is stored at `<OCD_DIR>/targets.toml` for the selected user or explicit system scope. Update-check metadata is a disposable cache at `<OCD_DIR>/cache/update-check.json`.
 `ocd target add <name> --api-base-url <url> --instance-id <id> --token-file <path>` records the remote open-compute InstanceId. The same value appears as `account_id` only on Cloudflare-compatible API and cf surfaces.
