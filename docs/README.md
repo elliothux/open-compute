@@ -21,3 +21,4 @@
 | [P24 macOS Developer ID 签名与 Apple 公证](p24-macos-code-signing-notarization.md) | 方案完成；待配置 Apple/GitHub 凭据、签署 `ocd`、取得 Notary `Accepted` 并完成真实 tag 验收                                   |
 | [P25 平台后续能力](p25-platform-follow-ups.md)                                     | planned：instance `.env`、operator logger、lazy Worker startup、移除 Python 构建桥接、Flask SDK 流式问题、Container 日志采集 |
 | [P26 外部反向代理下的 Worker 自定义域名](p26-external-proxy-worker-origins.md)     | planned：tenant-only external ingress、exact-host 授权、显式对外 origin；关联 #148                                           |
+| [I139–I196 小缺陷、AI Search 上游与 glibc 基线](i139-196-github-issues.md)         | planned：8 个小缺陷分三批修复；AI Search 上游刷新（#139）；Linux glibc 基线（#194）                                          |
