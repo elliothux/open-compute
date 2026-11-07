@@ -132,7 +132,8 @@ fn admin_routes(state: &HttpState) -> Router<HttpState> {
         )
         .route(
             "/operator/session",
-            post(operator_session::mint_session_from_admin),
+            post(operator_session::mint_session_from_admin)
+                .delete(operator_session::revoke_session),
         )
         .route("/operator", any(operator_surface))
         .route("/operator/", any(operator_surface))

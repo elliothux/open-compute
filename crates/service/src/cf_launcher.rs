@@ -17,7 +17,7 @@ use std::ffi::OsString;
 use std::fs;
 use std::io::Write;
 use std::net::{IpAddr, SocketAddr};
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
+use std::os::unix::fs::MetadataExt;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -42,8 +42,10 @@ const REMOVED_ENVIRONMENT: &[&str] = &[
 /// Complete secret-safe launch plan except for the redacted token wrapper.
 #[derive(Clone, Debug)]
 pub struct CfLaunch {
-    /// Exact project-local executable.
+    /// Canonical JavaScript entry declared by the project-local `cf` package.
     pub executable: PathBuf,
+    /// Project `node_modules/.bin`, prepended to the child PATH.
+    tool_directory: PathBuf,
     /// Child working directory.
     pub cwd: PathBuf,
     /// Opaque Cf argv passed byte-for-byte.
@@ -127,7 +129,7 @@ pub async fn prepare_cf_launch(
     }
     let cwd = resolve_project_directory(project, startup_cwd)?;
     crate::cf_project::preflight(&cwd, arguments, diagnostic)?;
-    let executable = resolve_project_cf(&cwd)?;
+    let (executable, tool_directory) = resolve_project_cf(&cwd)?;
     let detected_version = detect_cf_version(&executable, &cwd)?;
     let execution = match target {
         Some(name) => remote_execution(name, targets)?,
@@ -154,6 +156,7 @@ pub async fn prepare_cf_launch(
     }
     Ok(CfLaunch {
         executable,
+        tool_directory,
         cwd,
         arguments: arguments.to_vec(),
         api_base_url: execution.api_base_url,
@@ -325,21 +328,23 @@ fn resolve_project_directory(
     Ok(canonical)
 }
 
-fn resolve_project_cf(project: &Path) -> Result<PathBuf, PlatformError> {
+/// Find the nearest `node_modules/cf` and resolve the JavaScript entry its `bin` declares.
+///
+/// `node_modules/.bin/cf` can be a POSIX shell shim, so node never runs it directly.
+fn resolve_project_cf(project: &Path) -> Result<(PathBuf, PathBuf), PlatformError> {
     let mut directory = project.to_path_buf();
     let device = fs::metadata(&directory)
         .map_err(|_| cf_invalid("Cf project directory could not be inspected"))?
         .dev();
     loop {
-        let candidate = directory.join("node_modules/.bin/cf");
-        match fs::metadata(&candidate) {
+        let modules = directory.join("node_modules");
+        let manifest = modules.join("cf/package.json");
+        match fs::metadata(&manifest) {
             Ok(meta) => {
-                if !meta.is_file() || meta.permissions().mode() & 0o111 == 0 {
-                    return Err(cf_invalid(
-                        "nearest project-local Cf is not an executable file",
-                    ));
+                if !meta.is_file() || meta.len() > MAX_CF_MANIFEST_BYTES {
+                    return Err(cf_invalid("project-local Cf package.json is invalid"));
                 }
-                return Ok(candidate);
+                return Ok((cf_package_entry(&modules.join("cf"))?, modules.join(".bin")));
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(_) => {
@@ -359,6 +364,47 @@ fn resolve_project_cf(project: &Path) -> Result<PathBuf, PlatformError> {
     Err(cf_invalid(
         "project-local Cf is missing; install Cf in the project",
     ))
+}
+
+const MAX_CF_MANIFEST_BYTES: u64 = 1024 * 1024;
+
+/// Resolve `bin` (a string or the `cf` key) to a regular file inside the package.
+fn cf_package_entry(package: &Path) -> Result<PathBuf, PlatformError> {
+    #[derive(serde::Deserialize)]
+    #[serde(untagged)]
+    enum Bin {
+        Single(String),
+        Named(std::collections::BTreeMap<String, String>),
+    }
+    #[derive(serde::Deserialize)]
+    struct Manifest {
+        name: String,
+        bin: Bin,
+    }
+    let invalid = || cf_invalid("project-local Cf package.json does not declare a cf entry");
+    let bytes = fs::read(package.join("package.json")).map_err(|_| invalid())?;
+    let manifest: Manifest = serde_json::from_slice(&bytes).map_err(|_| invalid())?;
+    let relative = match manifest.bin {
+        Bin::Single(path) => path,
+        Bin::Named(mut entries) => entries.remove("cf").ok_or_else(invalid)?,
+    };
+    if manifest.name != "cf" || Path::new(&relative).is_absolute() {
+        return Err(invalid());
+    }
+    let root = package
+        .canonicalize()
+        .map_err(|_| cf_invalid("project-local Cf package could not be inspected"))?;
+    let entry = root
+        .join(&relative)
+        .canonicalize()
+        .map_err(|_| cf_invalid("project-local Cf entry is missing"))?;
+    if !entry.starts_with(&root) {
+        return Err(cf_invalid("project-local Cf entry escapes its package"));
+    }
+    if !fs::metadata(&entry).is_ok_and(|meta| meta.is_file()) {
+        return Err(cf_invalid("project-local Cf entry is not a regular file"));
+    }
+    Ok(entry)
 }
 
 fn detect_cf_version(executable: &Path, cwd: &Path) -> Result<String, PlatformError> {
@@ -399,13 +445,7 @@ fn detect_cf_version(executable: &Path, cwd: &Path) -> Result<String, PlatformEr
 }
 
 fn apply_child_environment(command: &mut Command, launch: &CfLaunch) -> Result<(), PlatformError> {
-    let mut paths = vec![
-        launch
-            .executable
-            .parent()
-            .ok_or_else(|| cf_invalid("cf executable has no directory"))?
-            .to_path_buf(),
-    ];
+    let mut paths = vec![launch.tool_directory.clone()];
     paths.extend(std::env::split_paths(
         &std::env::var_os("PATH").unwrap_or_default(),
     ));

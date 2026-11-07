@@ -186,6 +186,7 @@ async fn serve(composed: composition::ComposedPlatform) -> Result<(), PlatformEr
         control_descriptor.clone(),
         shutdown_tx.clone(),
         dashboard_auth,
+        loaded.config.dashboard.enabled,
     )?;
     let state = match (&loaded.config.public_gateway, &opts.gateway_pids) {
         (Some(_), Some((child_pid, qualified_pid))) => {

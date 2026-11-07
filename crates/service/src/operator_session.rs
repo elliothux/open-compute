@@ -102,6 +102,42 @@ pub(crate) async fn mint_session_from_admin(
     }
 }
 
+/// `DELETE /operator/session` — revoke the presented browser session.
+///
+/// It stops a copied session token after sign-out. Unknown or expired tokens
+/// also succeed, so the response does not reveal session state.
+pub(crate) async fn revoke_session(State(state): State<HttpState>, request: Request) -> Response {
+    let request_id = request_id_from(&request);
+    if !same_origin_csrf(&request) {
+        return csrf_rejected(request_id);
+    }
+    let Some(auth) = state.dashboard_auth() else {
+        return platform_error_response(
+            &PlatformError::new(
+                ErrorCode::PlatformUnavailable,
+                "dashboard sessions are not enabled",
+            ),
+            request_id,
+        );
+    };
+    let token = bearer_token(
+        request
+            .headers()
+            .get(header::AUTHORIZATION)
+            .and_then(|value| value.to_str().ok()),
+    );
+    if let Some(token) = token
+        && let Err(err) = auth.revoke_session(token)
+    {
+        return platform_error_response(&err, request_id);
+    }
+    let mut response = StatusCode::NO_CONTENT.into_response();
+    if let Ok(value) = HeaderValue::from_str(&request_id.to_string()) {
+        response.headers_mut().insert(REQUEST_ID_HEADER, value);
+    }
+    response
+}
+
 fn session_response(session: &SessionIssue, request_id: RequestId) -> Response {
     let mut response = (
         StatusCode::OK,
@@ -361,6 +397,65 @@ mod tests {
             .unwrap();
         assert!(dashboard_session_authorized(&with_session, &authorized));
         assert!(!dashboard_session_authorized(&bare, &authorized));
+    }
+
+    #[tokio::test]
+    async fn revoke_session_rejects_cross_origin_and_invalidates_the_token() {
+        let auth = Arc::new(DashboardAuth::new(StartupId::generate()));
+        let state = HttpState::for_test(HealthCoordinator::new(), metrics(), false, None)
+            .with_dashboard_auth(auth.clone());
+        let session = auth.issue_session_from_admin(SystemTime::now()).unwrap();
+        let bearer = format!("Bearer {}", session.session_token);
+        let revoke = |origin: Option<&str>, authorization: Option<&str>| {
+            let mut request = Request::builder()
+                .method(Method::DELETE)
+                .uri("/operator/session")
+                .header(header::HOST, "127.0.0.1:8787");
+            if let Some(origin) = origin {
+                request = request.header(header::ORIGIN, origin);
+            }
+            if let Some(authorization) = authorization {
+                request = request.header(header::AUTHORIZATION, authorization);
+            }
+            request.body(Body::empty()).unwrap()
+        };
+
+        let cross = revoke(Some("http://evil.example"), Some(&bearer));
+        assert_eq!(
+            revoke_session(State(state.clone()), cross).await.status(),
+            StatusCode::UNAUTHORIZED
+        );
+        let missing_origin = revoke(None, Some(&bearer));
+        assert_eq!(
+            revoke_session(State(state.clone()), missing_origin)
+                .await
+                .status(),
+            StatusCode::UNAUTHORIZED
+        );
+        assert!(auth.session_valid(&session.session_token, SystemTime::now()));
+
+        let same = Some("http://127.0.0.1:8787");
+        assert_eq!(
+            revoke_session(State(state.clone()), revoke(same, Some(&bearer)))
+                .await
+                .status(),
+            StatusCode::NO_CONTENT
+        );
+        assert!(!auth.session_valid(&session.session_token, SystemTime::now()));
+        let authorized = Request::builder()
+            .uri("/operator/")
+            .header(header::AUTHORIZATION, &bearer)
+            .body(Body::empty())
+            .unwrap();
+        assert!(!dashboard_session_authorized(&state, &authorized));
+        for authorization in [Some(bearer.as_str()), Some("Bearer unknown"), None] {
+            assert_eq!(
+                revoke_session(State(state.clone()), revoke(same, authorization))
+                    .await
+                    .status(),
+                StatusCode::NO_CONTENT
+            );
+        }
     }
 
     #[tokio::test]

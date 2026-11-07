@@ -710,6 +710,7 @@ async fn operator_session_exchange_requires_same_origin_and_accepts_login_code()
     assert_eq!(rejected.status(), StatusCode::UNAUTHORIZED);
 
     let accepted = router
+        .clone()
         .oneshot(
             Request::builder()
                 .method(Method::POST)
@@ -727,6 +728,22 @@ async fn operator_session_exchange_requires_same_origin_and_accepts_login_code()
     let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
     let token = payload["session_token"].as_str().unwrap();
     assert!(auth.session_valid(token, std::time::SystemTime::now()));
+
+    let revoked = router
+        .oneshot(
+            Request::builder()
+                .method(Method::DELETE)
+                .uri("/operator/session")
+                .header(header::HOST, "127.0.0.1:8787")
+                .header(header::ORIGIN, "http://127.0.0.1:8787")
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(revoked.status(), StatusCode::NO_CONTENT);
+    assert!(!auth.session_valid(token, std::time::SystemTime::now()));
 }
 
 #[tokio::test]

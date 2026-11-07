@@ -8,6 +8,7 @@ import {
   clearAuthSession,
   exchangeLoginCode,
   readAuthSession,
+  revokeSession,
   takeLoginCodeFromHash,
   writeAuthSession,
 } from "./auth-session";
@@ -34,6 +35,13 @@ export const authClientAtom = atom<ManagementClient | null>((get) => {
 export const clearAuthAtom = atom(null, (_get, set) => {
   clearAuthSession();
   set(authStateAtom, { token: null, instanceId: null });
+});
+
+/** Revoke the server session best-effort, then drop all local auth state. */
+export const signOutAtom = atom(null, async (get, set) => {
+  const token = get(authTokenAtom);
+  if (token !== null) await revokeSession(token).catch(() => undefined);
+  set(clearAuthAtom);
 });
 
 export const setAuthTokenAtom = atom(null, (get, set, token: string | null) => {
@@ -96,6 +104,7 @@ export function useAuth() {
   const setToken = useSetAtom(setAuthTokenAtom);
   const setInstanceId = useSetAtom(setAuthInstanceIdAtom);
   const clearAuth = useSetAtom(clearAuthAtom);
+  const signOut = useSetAtom(signOutAtom);
   return useMemo(
     () => ({
       token,
@@ -105,7 +114,17 @@ export function useAuth() {
       setToken,
       setInstanceId,
       clearAuth,
+      signOut,
     }),
-    [token, instanceId, client, ready, setToken, setInstanceId, clearAuth],
+    [
+      token,
+      instanceId,
+      client,
+      ready,
+      setToken,
+      setInstanceId,
+      clearAuth,
+      signOut,
+    ],
   );
 }

@@ -53,6 +53,19 @@ export function clearAuthSession(): void {
   sessionStorage.removeItem(AUTH_SESSION_KEY);
 }
 
+/** Revoke the browser session on the server so a copied token stops working. */
+export async function revokeSession(token: string): Promise<void> {
+  const response = await fetch("/operator/session", {
+    method: "DELETE",
+    credentials: "same-origin",
+    headers: { authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(3_000),
+  });
+  if (!response.ok) {
+    throw new Error("session revocation failed");
+  }
+}
+
 /** Take `#login=<code>` from the URL hash and clear it immediately. */
 export function takeLoginCodeFromHash(): string | null {
   if (typeof window === "undefined") return null;

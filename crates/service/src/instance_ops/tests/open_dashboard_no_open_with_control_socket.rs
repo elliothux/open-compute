@@ -31,7 +31,7 @@ fn open_dashboard_no_open_with_control_socket() {
         SystemTime::UNIX_EPOCH,
     )
     .unwrap();
-    let mut control = InstanceControl::publish(&runtime, descriptor, tx, auth).unwrap();
+    let mut control = InstanceControl::publish(&runtime, descriptor, tx, auth, true).unwrap();
     let selector: InstanceSelector = record.instance_id.parse().unwrap();
     let runtime_root = runtime_parent.clone();
     let issued = std::thread::spawn(move || {

@@ -117,7 +117,7 @@ fn publish_ready_control(runtime: &Path, id: &InstanceId, canonical: &Path) -> I
         SystemTime::UNIX_EPOCH,
     )
     .unwrap();
-    InstanceControl::publish(runtime, descriptor, tx, auth).unwrap()
+    InstanceControl::publish(runtime, descriptor, tx, auth, true).unwrap()
 }
 
 fn serve_controls_until_finished<T>(

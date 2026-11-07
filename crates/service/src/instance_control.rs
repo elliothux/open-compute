@@ -16,6 +16,9 @@ use std::time::{Duration, SystemTime};
 /// Current control-socket protocol schema.
 pub const CONTROL_SCHEMA_VERSION: u32 = 1;
 
+/// Control error token for a login-code request to an instance without Dashboard.
+const DASHBOARD_DISABLED: &str = "DASHBOARD_DISABLED";
+
 /// On-disk generation descriptor published by a running instance.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct GenerationDescriptor {
@@ -84,6 +87,7 @@ pub struct InstanceControl {
     descriptor: GenerationDescriptor,
     shutdown: tokio::sync::watch::Sender<bool>,
     dashboard_auth: Arc<DashboardAuth>,
+    dashboard_enabled: bool,
 }
 
 impl std::fmt::Debug for InstanceControl {
@@ -102,6 +106,7 @@ impl InstanceControl {
         descriptor: GenerationDescriptor,
         shutdown: tokio::sync::watch::Sender<bool>,
         dashboard_auth: Arc<DashboardAuth>,
+        dashboard_enabled: bool,
     ) -> Result<Self, PlatformError> {
         ensure_runtime_root(runtime_root)?;
         let descriptor_path = runtime_root.join("descriptor.json");
@@ -134,6 +139,7 @@ impl InstanceControl {
             descriptor,
             shutdown,
             dashboard_auth,
+            dashboard_enabled,
         })
     }
 
@@ -234,6 +240,16 @@ impl InstanceControl {
                     login_expires_at: None,
                 }
             }
+            // A disabled Dashboard rejects every session exchange, so issue no code.
+            ControlRequest::DashboardLoginCode if !self.dashboard_enabled => ControlResponse {
+                schema_version: CONTROL_SCHEMA_VERSION,
+                ok: false,
+                error: Some(DASHBOARD_DISABLED.to_owned()),
+                message: Some("Dashboard is disabled for this instance".to_owned()),
+                descriptor: None,
+                login_code: None,
+                login_expires_at: None,
+            },
             ControlRequest::DashboardLoginCode => {
                 match self.dashboard_auth.issue_login_code(SystemTime::now()) {
                     Ok(issued) => ControlResponse {
@@ -414,6 +430,12 @@ pub fn request_login_code(runtime_dir: &Path) -> Result<(String, u64), PlatformE
         runtime_dir,
         &serde_json::json!({"op":"dashboard_login_code"}),
     )?;
+    if response.error.as_deref() == Some(DASHBOARD_DISABLED) {
+        return Err(PlatformError::new(
+            ErrorCode::PlatformUnavailable,
+            "Dashboard is disabled for this instance; set `[dashboard] enabled = true` in its compute.toml, then run `ocd instance restart <id-or-name>`",
+        ));
+    }
     if !response.ok {
         return Err(PlatformError::new(
             ErrorCode::PlatformUnavailable,

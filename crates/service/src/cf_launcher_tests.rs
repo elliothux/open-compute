@@ -48,14 +48,28 @@ impl TargetHttp for FixtureHttp {
     }
 }
 
-fn write_fake_cf(path: &Path, version: &str) {
-    fs::create_dir_all(path.parent().unwrap()).unwrap();
+/// Install a fake `cf` package whose `.bin/cf` is a POSIX shell shim, as some package managers write.
+fn write_fake_cf(node_modules: &Path, version: &str) {
+    let package = node_modules.join("cf");
+    fs::create_dir_all(package.join("bin")).unwrap();
     fs::write(
-        path,
+        package.join("package.json"),
+        r#"{"name":"cf","bin":{"cf":"./bin/cf","cloudflare":"./bin/cf"}}"#,
+    )
+    .unwrap();
+    fs::write(
+        package.join("bin/cf"),
         format!("if (process.argv[2] === '--version') {{ console.log('{version}'); console.error('runtime diagnostic'); }}\n"),
     )
     .unwrap();
-    fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+    let shim = node_modules.join(".bin/cf");
+    fs::create_dir_all(shim.parent().unwrap()).unwrap();
+    fs::write(
+        &shim,
+        "#!/bin/sh\nexec node \"$(dirname \"$0\")/../cf/bin/cf\" \"$@\"\n",
+    )
+    .unwrap();
+    fs::set_permissions(&shim, fs::Permissions::from_mode(0o755)).unwrap();
 }
 
 fn remote_fixture(version: &str) -> (TempDir, TargetRegistry, FixtureHttp, PathBuf, TargetName) {
@@ -81,7 +95,7 @@ fn remote_fixture(version: &str) -> (TempDir, TargetRegistry, FixtureHttp, PathB
     let project = workspace.join("packages/worker");
     fs::create_dir_all(&project).unwrap();
     fs::write(project.join("cloudflare.config.ts"), "export default {};\n").unwrap();
-    write_fake_cf(&workspace.join("node_modules/.bin/cf"), version);
+    write_fake_cf(&workspace.join("node_modules"), version);
     let http = FixtureHttp::default();
     http.capabilities("https://compute.example/client/v4", "1.0.0-beta.12");
     (temp, registry, http, project, name)
@@ -176,7 +190,7 @@ async fn remote_launch_preserves_opaque_args_and_uses_nearest_hoisted_binary() {
             .join("workspace")
             .canonicalize()
             .unwrap()
-            .join("node_modules/.bin/cf")
+            .join("node_modules/cf/bin/cf")
     );
     assert_eq!(launch.target_kind, "target");
     assert_eq!(launch.cf_version, "1.0.0-beta.12");
@@ -290,9 +304,8 @@ async fn other_release_families_warn_but_still_launch() {
 #[tokio::test]
 async fn failed_version_process_remains_a_hard_failure() {
     let (temp, registry, http, project, name) = remote_fixture("1.0.0-beta.12");
-    let executable = temp.path().join("workspace/node_modules/.bin/cf");
+    let executable = temp.path().join("workspace/node_modules/cf/bin/cf");
     fs::write(&executable, "process.exit(23);\n").unwrap();
-    fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
     let instances = InstanceRegistry::with_roots(
         temp.path().join("instances/system"),
         temp.path().join("instances/user"),
@@ -321,8 +334,8 @@ async fn failed_version_process_remains_a_hard_failure() {
 #[tokio::test]
 async fn unusable_binary_empty_arguments_and_selector_conflicts_fail_closed() {
     let (temp, registry, http, project, name) = remote_fixture("1.0.0-beta.12");
-    let executable = temp.path().join("workspace/node_modules/.bin/cf");
-    fs::set_permissions(&executable, fs::Permissions::from_mode(0o600)).unwrap();
+    let package = temp.path().join("workspace/node_modules/cf");
+    fs::remove_file(package.join("bin/cf")).unwrap();
     let instances = InstanceRegistry::with_roots(
         temp.path().join("instances/system"),
         temp.path().join("instances/user"),
@@ -438,7 +451,7 @@ async fn unique_running_local_instance_supplies_config_token_listener_and_accoun
     .unwrap();
     let (shutdown, _shutdown_rx) = tokio::sync::watch::channel(false);
     let auth = Arc::new(DashboardAuth::new(startup_id));
-    let mut control = InstanceControl::publish(&runtime, descriptor, shutdown, auth).unwrap();
+    let mut control = InstanceControl::publish(&runtime, descriptor, shutdown, auth, true).unwrap();
     let polling = Arc::new(AtomicBool::new(true));
     let poll_flag = polling.clone();
     let control_thread = std::thread::spawn(move || {
@@ -451,7 +464,7 @@ async fn unique_running_local_instance_supplies_config_token_listener_and_accoun
     let project = temp.path().join("project");
     fs::create_dir(&project).unwrap();
     fs::write(project.join("cloudflare.config.ts"), "export default {};\n").unwrap();
-    write_fake_cf(&project.join("node_modules/.bin/cf"), "1.0.0-beta.12");
+    write_fake_cf(&project.join("node_modules"), "1.0.0-beta.12");
     let targets = TargetRegistry::at(temp.path().join("targets/targets.toml"));
     let http = FixtureHttp::default();
     http.capabilities("http://127.0.0.1:8787/client/v4", "1.0.0-beta.12");
@@ -518,5 +531,51 @@ fn local_api_origin_uses_only_the_configured_admin_surface() {
     assert_eq!(
         instance_api_base_url(&descriptor, true).unwrap(),
         "http://[::1]:8788/client/v4"
+    );
+}
+
+#[test]
+fn project_cf_resolves_the_package_entry_through_symlinks_and_rejects_escapes() {
+    let temp = TempDir::new().unwrap();
+    let project = temp.path().join("project");
+    let store = project.join("node_modules/.store/cf@1/node_modules");
+    write_fake_cf(&store, "1.0.0-beta.12");
+    fs::create_dir_all(project.join("node_modules/.bin")).unwrap();
+    std::os::unix::fs::symlink(store.join("cf"), project.join("node_modules/cf")).unwrap();
+    std::os::unix::fs::symlink("../cf/bin/cf", project.join("node_modules/.bin/cf")).unwrap();
+    let nested = project.join("packages/worker");
+    fs::create_dir_all(&nested).unwrap();
+    let (entry, tools) = resolve_project_cf(&nested).unwrap();
+    assert_eq!(entry, store.join("cf/bin/cf").canonicalize().unwrap());
+    assert_eq!(tools, project.join("node_modules/.bin"));
+
+    let package = store.join("cf");
+    for (manifest, expected) in [
+        (r#"{"name":"cf","bin":"./bin/cf"}"#, true),
+        (r#"{"name":"cf","bin":{"cloudflare":"./bin/cf"}}"#, false),
+        (r#"{"name":"cf","bin":{"cf":"../../../outside.js"}}"#, false),
+        (r#"{"name":"cf","bin":{"cf":"/etc/hosts"}}"#, false),
+        (r#"{"name":"other","bin":"./bin/cf"}"#, false),
+        (r#"{"name":"cf"}"#, false),
+    ] {
+        fs::write(project.join("node_modules/.store/cf@1/outside.js"), "").unwrap();
+        fs::write(package.join("package.json"), manifest).unwrap();
+        let resolved = resolve_project_cf(&nested);
+        assert_eq!(resolved.is_ok(), expected, "{manifest}");
+        if let Err(error) = resolved {
+            assert_eq!(error.code(), ErrorCode::CfInvalid);
+        }
+    }
+
+    fs::write(
+        package.join("package.json"),
+        r#"{"name":"cf","bin":"./bin/link"}"#,
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(temp.path().join("escape.js"), package.join("bin/link")).unwrap();
+    fs::write(temp.path().join("escape.js"), "").unwrap();
+    assert_eq!(
+        resolve_project_cf(&nested).unwrap_err().code(),
+        ErrorCode::CfInvalid
     );
 }

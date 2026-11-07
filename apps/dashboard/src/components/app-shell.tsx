@@ -97,7 +97,7 @@ function SidebarSearch({
 }
 
 export function AppShell({ children }: { children: React.ReactNode }) {
-  const { client, instanceId, setInstanceId, clearAuth } = useAuth();
+  const { client, instanceId, setInstanceId, signOut: endSession } = useAuth();
   const queryClient = useQueryClient();
   const { mode, setMode } = useTheme();
   const pathname = useRouterState({
@@ -133,8 +133,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     document.title = documentTitle;
   }, [documentTitle]);
 
-  function signOut() {
-    clearAuth();
+  async function signOut() {
+    await endSession();
     queryClient.clear();
     window.location.replace(`${import.meta.env.BASE_URL}login`);
   }

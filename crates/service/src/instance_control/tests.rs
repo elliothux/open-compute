@@ -59,6 +59,7 @@ fn publish_status_and_shutdown_round_trip() {
         descriptor.clone(),
         tx,
         Arc::new(DashboardAuth::new(StartupId::generate())),
+        true,
     )
     .unwrap();
     assert_eq!(
@@ -97,48 +98,60 @@ fn publish_status_and_shutdown_round_trip() {
 
 #[test]
 fn login_code_round_trip_via_control_socket() {
-    let dir = scratch();
-    let config = dir.join("c.toml");
-    fs::write(&config, "x=1\n").unwrap();
-    let canonical = config.canonicalize().unwrap();
-    let id = InstanceId::generate();
-    let runtime = socket_dir("oc-login");
-    let _ = fs::remove_dir_all(&runtime);
-    let (tx, _rx) = tokio::sync::watch::channel(false);
-    let auth = Arc::new(DashboardAuth::new(StartupId::generate()));
-    let descriptor = build_descriptor(
-        &id,
-        &canonical,
-        StartupId::generate(),
-        "0.1.1",
-        ServiceScope::User,
-        Some("127.0.0.1:8787".to_owned()),
-        None,
-        "ready",
-        SystemTime::UNIX_EPOCH,
-    )
-    .unwrap();
-    let mut control = InstanceControl::publish(&runtime, descriptor, tx, auth.clone()).unwrap();
-    let runtime_for_code = runtime.clone();
-    let issued = std::thread::spawn(move || request_login_code(&runtime_for_code));
-    // The workspace Gate runs several real-process targets concurrently;
-    // keep serving the nonblocking socket until the client has actually
-    // received its response instead of assuming it will be scheduled in
-    // the first 500 ms.
-    for _ in 0..500 {
-        control.poll_once().unwrap();
-        if issued.is_finished() {
-            break;
+    for dashboard_enabled in [true, false] {
+        let dir = scratch();
+        let config = dir.join("c.toml");
+        fs::write(&config, "x=1\n").unwrap();
+        let canonical = config.canonicalize().unwrap();
+        let id = InstanceId::generate();
+        let runtime = socket_dir("oc-login");
+        let _ = fs::remove_dir_all(&runtime);
+        let (tx, _rx) = tokio::sync::watch::channel(false);
+        let auth = Arc::new(DashboardAuth::new(StartupId::generate()));
+        let descriptor = build_descriptor(
+            &id,
+            &canonical,
+            StartupId::generate(),
+            "0.1.1",
+            ServiceScope::User,
+            Some("127.0.0.1:8787".to_owned()),
+            None,
+            "ready",
+            SystemTime::UNIX_EPOCH,
+        )
+        .unwrap();
+        let mut control =
+            InstanceControl::publish(&runtime, descriptor, tx, auth.clone(), dashboard_enabled)
+                .unwrap();
+        let runtime_for_code = runtime.clone();
+        let issued = std::thread::spawn(move || request_login_code(&runtime_for_code));
+        // The workspace Gate runs several real-process targets concurrently;
+        // keep serving the nonblocking socket until the client has actually
+        // received its response instead of assuming it will be scheduled in
+        // the first 500 ms.
+        for _ in 0..500 {
+            control.poll_once().unwrap();
+            if issued.is_finished() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
         }
-        std::thread::sleep(Duration::from_millis(10));
+        assert!(issued.is_finished(), "login-code client did not complete");
+        let issued = issued.join().unwrap();
+        if dashboard_enabled {
+            let (code, _expires) = issued.unwrap();
+            let session = auth.exchange_login_code(&code, SystemTime::now()).unwrap();
+            assert!(auth.session_valid(&session.session_token, SystemTime::now()));
+        } else {
+            let error = issued.unwrap_err();
+            assert_eq!(error.code(), ErrorCode::PlatformUnavailable);
+            assert!(error.message().contains("Dashboard is disabled"));
+            assert!(error.message().contains("[dashboard] enabled = true"));
+        }
+        drop(control);
+        let _ = fs::remove_dir_all(&runtime);
+        let _ = fs::remove_dir_all(dir);
     }
-    assert!(issued.is_finished(), "login-code client did not complete");
-    let (code, _expires) = issued.join().unwrap().unwrap();
-    let session = auth.exchange_login_code(&code, SystemTime::now()).unwrap();
-    assert!(auth.session_valid(&session.session_token, SystemTime::now()));
-    drop(control);
-    let _ = fs::remove_dir_all(&runtime);
-    let _ = fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -217,6 +230,7 @@ fn update_descriptor_and_debug() {
         descriptor.clone(),
         tx,
         Arc::new(DashboardAuth::new(StartupId::generate())),
+        true,
     )
     .unwrap();
     assert_eq!(control.descriptor().readiness, "starting");
@@ -257,6 +271,7 @@ fn invalid_control_json_and_empty_poll_are_fail_closed() {
         descriptor,
         tx,
         Arc::new(DashboardAuth::new(StartupId::generate())),
+        true,
     )
     .unwrap();
     control.poll_once().unwrap(); // WouldBlock idle accept
