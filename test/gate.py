@@ -161,18 +161,16 @@ GROUPS['products'] = ['contract', 'recorded', *GROUPS['core'], *GROUPS['platform
                       *GROUPS['scheduling'], *PRODUCT_SCENARIOS]
 
 
-# Balanced from release 42344896562 with --jobs 2: independent targets share two slots,
+# Balanced from releases 42344896562 and 42355843101 with --jobs 2: independent targets share two slots,
 # then exclusive targets run one at a time.
 COVERAGE_SHARDS = (
     (
-        'browser',
         'cf-resources',
         'open-compute-service.lib.open_compute_service',
         'open-compute-service.test.msrv_audit',
         'open-compute-storage.lib.open_compute_storage',
         'python-frameworks',
         'python-queues',
-        'python-services',
         'service-process-lifecycle',
     ),
     (
@@ -182,6 +180,7 @@ COVERAGE_SHARDS = (
         'kv',
         'open-compute-runtime.bin.open-compute-supervisor-fixture',
         'open-compute-service.bin.host-extension-test-provider',
+        'python-services',
         'queue-workflow-recovery',
         'search',
         'service-library-part-2',
@@ -191,6 +190,7 @@ COVERAGE_SHARDS = (
     ),
     (
         'bindings',
+        'browser',
         'cache-images',
         'cloudflare-sdk',
         'd1',
