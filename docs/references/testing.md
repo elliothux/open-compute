@@ -149,6 +149,14 @@ python3 -B -m unittest discover -s test/install-lifecycle
 
 真实场景只在一次性主机设置 `OPEN_COMPUTE_INSTALL_TEST_DISPOSABLE=1` 后运行；见 runner 的 `--help`。不兼容的 pre-1.0 升级须设置 `UPGRADE_REJECT_CODE`/`UPGRADE_REJECT_REASON` 并写入版本说明。
 
+`test/distro-smoke/run.py` 检查一个 Linux ocd 在 glibc 基线发行版上可用：在 Rocky Linux 9 和 Ubuntu 22.04 容器中
+用 `install.sh` 从 `file://` release fixture 安装，以非 root 用户启动 daemon 并部署 Worker；Rocky Linux 8 必须在下载前被拒绝。
+需要本机 Docker；目标架构取自 binary：
+
+```sh
+python3 -I -B test/distro-smoke/run.py --binary /abs/ocd-vX.Y.Z-linux-arm64 --evidence /abs/report.json
+```
+
 ## 完整检查与最终验收
 
 Rust 命令直接使用 `cargo`。
