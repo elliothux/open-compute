@@ -41,7 +41,8 @@ publish credential。常规构建和 `ocd` 启动继续完全离线，不调用�
 scanner 输出 machine-readable `upstream-review.json` 与人类可读摘要，至少包含：
 
 - 当前和候选的 immutable identities 与获取时间；
-- selected OpenAPI operation 的新增、删除和语义变化；
+- selected OpenAPI operation 的新增、删除和语义变化。scanner 按“方法 + 参数名归一化后的路径”匹配，唯一匹配的只改路径参数名的
+  operation 记入 `renamedOperations` 并计为 changed，不计为删除；多个候选归一化后相同时仍按删除处理；
 - official SDK resource/method/type closure 的增删改和无法唯一映射项；
 - cf config schema、binding 与命令面的变化；
 - 受影响的 capability、deviation、fixture、实现 owner 与资格 Gate；

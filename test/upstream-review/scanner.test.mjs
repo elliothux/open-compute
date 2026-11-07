@@ -250,3 +250,80 @@ test("manifest-excluded operations do not force blocked or breaking", () => {
   );
   assert.equal(report.classification, "ready");
 });
+
+// The candidate renames `{account_id}` to `{account}`; the wire route is unchanged.
+const RENAMED = "GET /accounts/{account}/queues";
+
+function renamedSchema(paths = ["/accounts/{account}/queues"]) {
+  return {
+    revision: REVISION_B,
+    bytes: Buffer.from(`${JSON.stringify(schemaDocument(paths))}\n`),
+  };
+}
+
+const SDK_7_3 = {
+  version: "7.3.0",
+  npmShasum: "0".repeat(40),
+  npmIntegrity: "sha512-",
+};
+
+test("a path-parameter rename covered by a moved official SDK is ready", () => {
+  const report = classify(
+    fixtureInput({
+      candidateSchema: renamedSchema(),
+      candidateCloudflare: SDK_7_3,
+    }),
+  );
+  assert.equal(report.classification, "ready");
+  assert.deepEqual(report.removedOperations, []);
+  assert.deepEqual(report.renamedOperations, [
+    { from: "GET /accounts/{account_id}/queues", to: RENAMED },
+  ]);
+  assert.deepEqual(report.changedOperations, [RENAMED]);
+  assert.match(report.reasons.join(" "), /renamed path parameters/);
+});
+
+test("a path-parameter rename without a published SDK move stays blocked", () => {
+  const report = classify(fixtureInput({ candidateSchema: renamedSchema() }));
+  assert.equal(report.classification, "blocked");
+  assert.deepEqual(report.removedOperations, []);
+  assert.deepEqual(report.changedOperations, [RENAMED]);
+  assert.deepEqual(report.waitingOn, [
+    "official cloudflare SDK stable release",
+  ]);
+});
+
+test("a renamed operation the candidate SDK no longer implements is breaking", () => {
+  const report = classify(
+    fixtureInput({
+      candidateSchema: renamedSchema(),
+      candidateCloudflare: SDK_7_3,
+      candidateSdkRoutes: new Map(),
+    }),
+  );
+  assert.equal(report.classification, "breaking");
+  assert.deepEqual(report.renamedOperations, [
+    { from: "GET /accounts/{account_id}/queues", to: RENAMED },
+  ]);
+  assert.match(
+    report.reasons.join(" "),
+    /no longer implements mapped operations: GET \/accounts\/\{account\}\/queues/,
+  );
+});
+
+test("an ambiguous normalized match is a removal, not a rename", () => {
+  const report = classify(
+    fixtureInput({
+      candidateSchema: renamedSchema([
+        "/accounts/{account}/queues",
+        "/accounts/{id}/queues",
+      ]),
+      candidateCloudflare: SDK_7_3,
+    }),
+  );
+  assert.equal(report.classification, "breaking");
+  assert.deepEqual(report.renamedOperations, []);
+  assert.deepEqual(report.removedOperations, [
+    "GET /accounts/{account_id}/queues",
+  ]);
+});

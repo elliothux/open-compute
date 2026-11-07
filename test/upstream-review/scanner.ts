@@ -78,6 +78,8 @@ export interface UpstreamReport {
   };
   selectedOperations: number;
   changedOperations: string[];
+  /** Selected operations whose path only renamed parameters, by baseline id. */
+  renamedOperations: Array<{ from: string; to: string }>;
   removedOperations: string[];
   unmappedOperations: string[];
   waitingOn: string[];
@@ -120,6 +122,70 @@ function normalize(path: string): string {
   return path.replaceAll(/\{[^}]*\}/g, "{}");
 }
 
+const HTTP_METHODS = new Set([
+  "get",
+  "put",
+  "post",
+  "delete",
+  "options",
+  "head",
+  "patch",
+  "trace",
+]);
+
+/**
+ * Match each selected operation to the candidate by method and
+ * parameter-normalized path. Path parameter names are not on the wire, so a
+ * unique normalized match is a rename, not a removal.
+ */
+function matchSelectedOperations(
+  selected: string[],
+  candidatePaths: Record<string, Record<string, unknown>>,
+): { renamed: Map<string, string>; removed: string[] } {
+  const byShape = new Map<string, string[]>();
+  for (const [path, item] of Object.entries(candidatePaths)) {
+    for (const method of Object.keys(item)) {
+      if (!HTTP_METHODS.has(method)) continue;
+      const shape = `${method.toUpperCase()} ${normalize(path)}`;
+      byShape.set(shape, [
+        ...(byShape.get(shape) ?? []),
+        `${method.toUpperCase()} ${path}`,
+      ]);
+    }
+  }
+  const renamed = new Map<string, string>();
+  const removed: string[] = [];
+  for (const id of selected) {
+    const separator = id.indexOf(" ");
+    const method = id.slice(0, separator);
+    const path = id.slice(separator + 1);
+    if (candidatePaths[path]?.[method.toLowerCase()] !== undefined) continue;
+    const matches = byShape.get(`${method} ${normalize(path)}`) ?? [];
+    if (matches.length === 1 && matches[0] !== undefined)
+      renamed.set(id, matches[0]);
+    else removed.push(id);
+  }
+  return { renamed, removed };
+}
+
+/** Replace every exact operation-id string in the manifest with its renamed id. */
+function renameManifestOperations(
+  value: unknown,
+  renamed: Map<string, string>,
+): unknown {
+  if (typeof value === "string") return renamed.get(value) ?? value;
+  if (Array.isArray(value))
+    return value.map((item) => renameManifestOperations(item, renamed));
+  if (value !== null && typeof value === "object")
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [
+        key,
+        renameManifestOperations(item, renamed),
+      ]),
+    );
+  return value;
+}
+
 export function classify(input: ScanInput): UpstreamReport {
   const reasons: string[] = [];
   const waitingOn: string[] = [];
@@ -130,19 +196,22 @@ export function classify(input: ScanInput): UpstreamReport {
     string,
     Record<string, unknown>
   >;
-  const baselineMapped = new Set(input.baselineMappedOperations);
   const lostOperations: string[] = [];
-  const removedOperations = input.selectedOperations.filter((id) => {
-    const separator = id.indexOf(" ");
-    const method = id.slice(0, separator).toLowerCase();
-    const path = id.slice(separator + 1);
-    return candidatePaths[path]?.[method] === undefined;
-  });
+  const { renamed, removed: removedOperations } = matchSelectedOperations(
+    input.selectedOperations,
+    candidatePaths,
+  );
+  const renamedOperations = [...renamed]
+    .map(([from, to]) => ({ from, to }))
+    .sort((left, right) => left.from.localeCompare(right.from));
+  const sdkExcluded = new Set(
+    input.sdkExcludedOperations.map((id) => renamed.get(id) ?? id),
+  );
   const changedOperations: string[] = [];
   if (removedOperations.length === 0) {
     const candidate = buildSubset(
       candidateSchema,
-      input.manifest,
+      renameManifestOperations(input.manifest, renamed),
       input.candidateSchema.revision,
       sha256Hex(input.candidateSchema.bytes),
     );
@@ -158,9 +227,11 @@ export function classify(input: ScanInput): UpstreamReport {
       input.baselineInventory.map((entry) => [entry.id, entry.operationSha256]),
     );
     for (const id of input.selectedOperations) {
-      const digest = candidateDigests.get(id);
+      const candidateId = renamed.get(id) ?? id;
+      const digest = candidateDigests.get(candidateId);
       if (digest === undefined) continue;
-      if (baselineDigests.get(id) !== digest) changedOperations.push(id);
+      if (baselineDigests.get(id) !== digest || candidateId !== id)
+        changedOperations.push(candidateId);
     }
     for (const entry of candidate[
       "x-open-compute-operation-inventory"
@@ -175,7 +246,7 @@ export function classify(input: ScanInput): UpstreamReport {
         entry.status !== "supported_with_deviation"
       )
         continue;
-      if (input.sdkExcludedOperations.includes(entry.id)) continue;
+      if (sdkExcluded.has(entry.id)) continue;
       const route = `${entry.method} ${normalize(entry.path)}`;
       if (!input.candidateSdkRoutes.has(route)) lostOperations.push(entry.id);
     }
@@ -214,6 +285,10 @@ export function classify(input: ScanInput): UpstreamReport {
   ) {
     classification = "unchanged";
   } else if (removedOperations.length > 0) {
+    if (renamedOperations.length > 0)
+      reasons.push(
+        `selected operations renamed path parameters: ${renamedOperations.map(({ from, to }) => `${from} -> ${to}`).join(", ")}`,
+      );
     reasons.push(
       `selected operations disappeared from the upstream snapshot: ${removedOperations.join(", ")}`,
     );
@@ -231,6 +306,10 @@ export function classify(input: ScanInput): UpstreamReport {
     );
     classification = "breaking";
   } else {
+    if (renamedOperations.length > 0)
+      reasons.push(
+        `selected operations renamed path parameters: ${renamedOperations.map(({ from, to }) => `${from} -> ${to}`).join(", ")}`,
+      );
     if (unmappedOperations.length > 0) {
       reasons.push(
         "manifest-excluded operations remain unimplemented by the candidate official SDK; the exclusion stays authoritative",
@@ -287,6 +366,7 @@ export function classify(input: ScanInput): UpstreamReport {
     },
     selectedOperations: input.selectedOperations.length,
     changedOperations,
+    renamedOperations,
     removedOperations,
     unmappedOperations,
     waitingOn,
@@ -505,6 +585,7 @@ function summarize(report: UpstreamReport): string {
     `candidate openapi ${report.candidate.openapiRevision?.slice(0, 12) ?? "-"} sdk ${report.candidate.cloudflareSdk?.version ?? "-"} cf ${report.candidate.cf?.version ?? "-"}`,
     `selected operations: ${report.selectedOperations}`,
     `changed operations (${report.changedOperations.length}): ${report.changedOperations.slice(0, 20).join(", ")}`,
+    `renamed operations (${report.renamedOperations.length})`,
     `removed operations (${report.removedOperations.length})`,
     `unmapped operations (${report.unmappedOperations.length})`,
     ...report.reasons.map((reason) => `reason: ${reason}`),
