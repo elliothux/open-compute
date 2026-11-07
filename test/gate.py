@@ -156,7 +156,7 @@ GROUPS['products'] = ['contract', 'recorded', *GROUPS['core'], *GROUPS['platform
                       *GROUPS['scheduling'], *PRODUCT_SCENARIOS]
 
 
-# Balanced from release 42243289682 with --jobs 2 and exclusive barriers.
+# Balanced from release 42324455717 (warm rust-cache) with --jobs 2 and exclusive barriers.
 COVERAGE_SHARDS = (
     (
         'cf-resources',
@@ -164,6 +164,7 @@ COVERAGE_SHARDS = (
         'open-compute-service.test.msrv_audit',
         'open-compute-storage.lib.open_compute_storage',
         'python-frameworks',
+        'python-queues',
         'service-process-lifecycle',
     ),
     (
@@ -195,6 +196,7 @@ COVERAGE_SHARDS = (
         'open-compute-service.test.p1_reliability',
         'open-compute-service.test.p5_snapshot_restore',
         'open-compute-workers.lib.open_compute_workers',
+        'python-durable-objects',
         'python-main',
         'python-runtime',
         'python-services',
@@ -221,8 +223,6 @@ COVERAGE_SHARDS = (
         'open-compute-runtime.lib.open_compute_runtime',
         'open-compute-search.lib.open_compute_search',
         'open-compute-vendor-schema.bin.open-compute-vendor-schema',
-        'python-durable-objects',
-        'python-queues',
         'queues',
         'r2',
         'recorded',
