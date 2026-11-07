@@ -31,6 +31,8 @@ The first-host workflow creates the daemon scope and its first instance:
 ocd setup --yes
 ```
 
+Setup always writes the local object backend. To use S3, run the interactive `ocd setup` and decline the service start, edit `[storage]` in the generated `compute.toml`, then run `ocd start`. See [object storage configuration](/docs/ocd/configuration/#storage-object-bytes). There is no migration from local to S3 after the instance has stored objects.
+
 Create another instance through the running daemon:
 
 ```sh

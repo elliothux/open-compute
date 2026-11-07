@@ -14,6 +14,8 @@ ocd logs --follow
 ocd restart
 ```
 
+`ocd logs` prints the last 100 daemon log lines, and `--follow` keeps streaming new lines. On Linux it reads the systemd journal of the scope's unit. On macOS, launchd writes daemon output to `ocd.log` in the scope root (`~/.open-compute` or `/var/lib/open-compute`); rotation is not configured yet.
+
 `ocd status` reports the selected user or system daemon's liveness. `ocd instances` reads live instance states from its control socket; when the daemon is offline, it lists explicit manifest entries as stopped. A held scope lock with an unavailable control socket is an error, not a stopped result.
 
 Use `ocd instance start|stop|restart <id-or-name>` to change one registered instance without changing its `autostart` intent. `status` and `instances` select only the current user or explicit `--system` scope; they do not accept `--instance` or `--config`.

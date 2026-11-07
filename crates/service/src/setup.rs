@@ -173,18 +173,10 @@ fn plan_interactive(
         "Public/admin listener [127.0.0.1:8787]",
         "127.0.0.1:8787",
     )?;
-    let backend = prompt_line(
-        input,
+    writeln_prompt(
         prompt_out,
-        "Object backend (local/s3) [local]",
-        "local",
+        "Object storage: local. To use S3, edit [storage] in compute.toml after setup.",
     )?;
-    if backend != "local" {
-        return Err(PlatformError::new(
-            ErrorCode::ConfigInvalid,
-            "interactive setup currently supports only the local object backend; pass `--yes` for local defaults or write a config manually for S3",
-        ));
-    }
     let dashboard_enabled = prompt_bool(input, prompt_out, "Enable Dashboard? [Y/n]", true)?;
     let start_service = prompt_bool(
         input,

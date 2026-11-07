@@ -31,6 +31,8 @@ daemon 不扫描 `instances/`。身份和数据位置来自精确登记的配置
 ocd setup --yes
 ```
 
+setup 总是写入 local 对象后端。要使用 S3，运行交互式 `ocd setup` 并拒绝启动服务，编辑生成的 `compute.toml` 中的 `[storage]`，再运行 `ocd start`。见[对象存储配置](/zh/docs/ocd/configuration/#storage对象正文)。实例存入对象后，不能从 local 迁移到 S3。
+
 通过运行中的 daemon 创建另一个实例：
 
 ```sh

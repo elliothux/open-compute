@@ -9,9 +9,15 @@ fn one_unit_per_scope_runs_the_manifest_daemon() {
     assert!(system.contains("User=operator\nExecStart=/usr/local/bin/ocd --system run\n"));
     assert!(!user.contains("--config"));
     assert!(!system.contains("--config"));
-    let user = render_launchd_plist(ServiceScope::User, None, binary).unwrap();
-    let system = render_launchd_plist(ServiceScope::System, Some("operator"), binary).unwrap();
+    let log = Path::new("/var/lib/open-compute/ocd.log");
+    let user = render_launchd_plist(ServiceScope::User, None, binary, log).unwrap();
+    let system = render_launchd_plist(ServiceScope::System, Some("operator"), binary, log).unwrap();
     assert!(user.contains("<string>dev.open-compute.ocd</string>"));
+    for key in ["StandardOutPath", "StandardErrorPath"] {
+        assert!(system.contains(&format!(
+            "<key>{key}</key>\n  <string>/var/lib/open-compute/ocd.log</string>"
+        )));
+    }
     assert!(system.contains("<string>--system</string>"));
     assert!(!user.contains("--config"));
     assert!(!system.contains("--config"));
@@ -21,7 +27,15 @@ fn one_unit_per_scope_runs_the_manifest_daemon() {
 fn system_unit_rejects_missing_or_root_runtime_user() {
     for user in [None, Some(""), Some("root")] {
         assert!(render_systemd_unit(ServiceScope::System, user, Path::new("/opt/ocd")).is_err());
-        assert!(render_launchd_plist(ServiceScope::System, user, Path::new("/opt/ocd")).is_err());
+        assert!(
+            render_launchd_plist(
+                ServiceScope::System,
+                user,
+                Path::new("/opt/ocd"),
+                Path::new("/opt/ocd.log")
+            )
+            .is_err()
+        );
     }
 }
 
@@ -30,7 +44,7 @@ fn service_definitions_escape_paths_and_refuse_unsafe_replacement() {
     let path = Path::new("/opt/O'Compute & <test>/ocd");
     let systemd = render_systemd_unit(ServiceScope::User, None, path).unwrap();
     assert!(systemd.contains("'\\''"));
-    let launchd = render_launchd_plist(ServiceScope::User, None, path).unwrap();
+    let launchd = render_launchd_plist(ServiceScope::User, None, path, path).unwrap();
     assert!(launchd.contains("&amp; &lt;test&gt;"));
     let temp = tempfile::tempdir().unwrap();
     let definition = temp.path().join("unit");
@@ -246,9 +260,60 @@ fn scoped_managers_drive_only_their_own_definition() {
         fs::read_dir(temp.path().join("launchd")).unwrap().count(),
         0
     );
+    assert_eq!(launchd.logs(ServiceScope::User, false).unwrap(), "");
+    let lines: Vec<String> = (0..150).map(|line| format!("line {line}")).collect();
+    fs::write(temp.path().join("launchd/ocd.log"), lines.join("\n") + "\n").unwrap();
     assert_eq!(
-        launchd.logs(ServiceScope::User, false).unwrap_err().code(),
-        ErrorCode::PlatformUnavailable
+        launchd.logs(ServiceScope::User, false).unwrap(),
+        lines[50..].join("\n") + "\n"
+    );
+}
+
+#[test]
+fn log_tail_reads_a_bounded_window_and_follow_commands_inherit_stdio() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("ocd.log");
+    let long = "x".repeat(usize::try_from(MAX_LOG_TAIL_BYTES).unwrap());
+    fs::write(&path, format!("{long}\nlast\n")).unwrap();
+    assert_eq!(last_log_lines(&path).unwrap(), "last\n");
+    let args = |command: &Command| {
+        command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+    };
+    let user = journalctl_command(ServiceScope::User, true);
+    assert_eq!(user.get_program(), "journalctl");
+    assert_eq!(
+        args(&user),
+        [
+            "--user",
+            "--no-pager",
+            "-u",
+            "dev.open-compute.ocd.service",
+            "-f"
+        ]
+    );
+    assert_eq!(
+        args(&journalctl_command(ServiceScope::System, false)),
+        [
+            "--no-pager",
+            "-u",
+            "dev.open-compute.ocd.service",
+            "-n",
+            "100"
+        ]
+    );
+    let tail = tail_follow_command(&path);
+    assert_eq!(tail.get_program(), "/usr/bin/tail");
+    assert_eq!(
+        args(&tail),
+        [
+            "-n".to_owned(),
+            "100".to_owned(),
+            "-F".to_owned(),
+            path.display().to_string()
+        ]
     );
 }
 
@@ -286,10 +351,6 @@ fn scoped_managers_report_command_results_without_touching_host_services() {
             systemd.stop(scope).unwrap();
             assert!(systemd.is_active(scope).unwrap());
             assert!(systemd.logs(scope, false).unwrap().contains("fixture log"));
-            assert_eq!(
-                systemd.logs(scope, true).unwrap_err().code(),
-                ErrorCode::PlatformUnavailable
-            );
         }
         let launchd = LaunchdManager::default();
         for scope in [ServiceScope::User, ServiceScope::System] {

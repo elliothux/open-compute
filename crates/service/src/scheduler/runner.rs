@@ -146,7 +146,9 @@ impl SchedulerService {
                         "Workflow reconciliation failed"
                     );
                 }
-                if let Err(error) = self.repair_once().await {
+                // Operator repair stays available; only the periodic scan honors pause.
+                let alarm_paused = self.is_paused() || self.alarm_paused.load(Ordering::Acquire);
+                if !alarm_paused && let Err(error) = self.repair_once().await {
                     tracing::warn!(
                         code = error.code().as_str(),
                         "scheduler alarm repair pass failed"

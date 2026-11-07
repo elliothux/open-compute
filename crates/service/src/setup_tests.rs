@@ -531,9 +531,12 @@ fn setup_without_yes_requires_tty() {
 fn interactive_plan_accepts_defaults_without_start() {
     let temp = TempDir::new().unwrap();
     let (options, _) = test_options(&temp);
-    let mut input = Cursor::new(b"\n\n\n\n\nn\n".to_vec());
+    let mut input = Cursor::new(b"\n\n\n\nn\n".to_vec());
     let mut prompts = Vec::new();
     let plan = plan_interactive(&options, temp.path(), &mut input, &mut prompts).unwrap();
+    let prompts = String::from_utf8(prompts).unwrap();
+    assert!(prompts.contains("Object storage: local. To use S3, edit [storage]"));
+    assert!(!prompts.contains("local/s3"));
     assert_eq!(plan.scope, ServiceScope::User);
     assert!(!plan.start_service);
     assert!(plan.dashboard_enabled);
@@ -572,27 +575,13 @@ fn setup_refuses_nonempty_unknown_data_without_chown_or_mutation() {
 }
 
 #[test]
-fn interactive_plan_rejects_s3() {
-    let temp = TempDir::new().unwrap();
-    let (options, _) = test_options(&temp);
-    let err = plan_interactive(
-        &options,
-        temp.path(),
-        &mut Cursor::new(b"\n\n\ns3\n".to_vec()),
-        &mut Vec::new(),
-    )
-    .unwrap_err();
-    assert!(err.message().contains("local object backend"));
-}
-
-#[test]
 fn interactive_plan_rejects_bad_bool() {
     let temp = TempDir::new().unwrap();
     let (options, _) = test_options(&temp);
     let err = plan_interactive(
         &options,
         temp.path(),
-        &mut Cursor::new(b"\n\n\n\nmaybe\n".to_vec()),
+        &mut Cursor::new(b"\n\n\nmaybe\n".to_vec()),
         &mut Vec::new(),
     )
     .unwrap_err();
@@ -655,7 +644,7 @@ fn interactive_system_scope_with_start_and_disabled_dashboard() {
     let config = temp.path().join("etc/open-compute/config.toml");
     let data = temp.path().join("var/lib/open-compute");
     let input = format!(
-        "{}\n{}\n127.0.0.1:9797\nlocal\nn\ny\n",
+        "{}\n{}\n127.0.0.1:9797\nn\ny\n",
         config.display(),
         data.display()
     );
@@ -698,7 +687,7 @@ fn interactive_system_scope_with_start_and_disabled_dashboard() {
 fn interactive_user_defaults_with_start_service() {
     let temp = TempDir::new().unwrap();
     let (options, _) = test_options(&temp);
-    let mut input = Cursor::new(b"\n\n\n\n\ny\n".to_vec());
+    let mut input = Cursor::new(b"\n\n\n\ny\n".to_vec());
     let plan = plan_interactive(&options, temp.path(), &mut input, &mut Vec::new()).unwrap();
     assert_eq!(plan.scope, ServiceScope::User);
     assert!(plan.start_service);

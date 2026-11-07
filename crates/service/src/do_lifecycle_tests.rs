@@ -36,9 +36,20 @@ fn object_id(namespace: ResourceId) -> DurableObjectId {
     DurableObjectId::for_namespace(bytes, namespace).unwrap()
 }
 
-#[tokio::test]
-async fn reconciliation_finishes_creating_and_deleting_object_generations() {
-    let (_temp, _mock, state, account, storage) =
+/// One registered Durable Object generation in a fully authorized namespace.
+pub(crate) struct LiveObject {
+    _temp: tempfile::TempDir,
+    _mock: open_compute_artifacts::MockS3,
+    pub(crate) state: crate::http::HttpState,
+    pub(crate) account: InstanceId,
+    pub(crate) storage: Arc<PlatformStorage>,
+    pub(crate) namespace: ResourceId,
+    pub(crate) object: DurableObjectId,
+    pub(crate) dispatch_generation: u64,
+}
+
+pub(crate) async fn live_object_fixture() -> LiveObject {
+    let (temp, mock, state, account, storage) =
         crate::tests::initialized_worker_http_fixture().await;
     let workers = WorkerRepository::new(storage.db());
     let worker = workers
@@ -135,6 +146,30 @@ async fn reconciliation_finishes_creating_and_deleting_object_generations() {
     let dispatch = durable
         .authorize_dispatch(binding, version, &descriptor, object, 7, true)
         .unwrap();
+    LiveObject {
+        _temp: temp,
+        _mock: mock,
+        state,
+        account,
+        storage,
+        namespace,
+        object,
+        dispatch_generation: dispatch.object_generation,
+    }
+}
+
+#[tokio::test]
+async fn reconciliation_finishes_creating_and_deleting_object_generations() {
+    let LiveObject {
+        state,
+        account,
+        storage,
+        namespace,
+        object,
+        dispatch_generation,
+        ..
+    } = live_object_fixture().await;
+    let durable = DurableObjectRepository::new(&storage);
     let transport = Arc::new(DeleteTransport::default());
     let service = DurableObjectLifecycleService {
         storage: storage.clone(),
@@ -171,5 +206,5 @@ async fn reconciliation_finishes_creating_and_deleting_object_generations() {
             .state,
         DurableObjectState::Tombstoned
     );
-    assert_eq!(dispatch.object_generation, 1);
+    assert_eq!(dispatch_generation, 1);
 }

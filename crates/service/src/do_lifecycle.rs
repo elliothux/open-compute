@@ -166,4 +166,4 @@ fn now_ms() -> i64 {
 
 #[cfg(test)]
 #[path = "do_lifecycle_tests.rs"]
-mod tests;
+pub(crate) mod tests;

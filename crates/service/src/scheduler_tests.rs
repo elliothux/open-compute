@@ -504,6 +504,76 @@ async fn queue_retention_adapter_observes_pause_metrics_and_successful_sweeps() 
     kernel.await.unwrap().unwrap();
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn periodic_alarm_repair_scan_stops_while_paused_and_resumes() {
+    let live = crate::do_lifecycle::tests::live_object_fixture().await;
+    let scheduler_path = live.storage.data_dir().ensure_scheduler_db().unwrap();
+    let store = Arc::new(
+        SchedulerStore::open(
+            &scheduler_path,
+            100,
+            10,
+            live.storage.identity().instance_id,
+        )
+        .unwrap(),
+    );
+    let clock = Arc::new(DeterministicSchedulerClock::new(10));
+    let config = SchedulerConfig::default();
+    let interval = Duration::from_millis(config.repair_interval_ms);
+    let scheduler = Arc::new(SchedulerService::new(
+        store,
+        live.storage.clone(),
+        WorkerdTransport::new(Arc::new(Mutex::new(None))),
+        config,
+        open_compute_core::WorkflowsConfig::default(),
+        clock.clone(),
+    ));
+    // The scan advances this cursor past every object it sends to the transport.
+    let scanned = || scheduler.repair_cursor.lock().unwrap().is_some();
+    let idle = || async {
+        for _ in 0..1_000 {
+            tokio::task::yield_now().await;
+        }
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while clock.pending_timer_count() == 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+    };
+    scheduler.pause();
+    let (shutdown, shutdown_rx) = watch::channel(false);
+    let kernel = tokio::spawn(scheduler.clone().run(shutdown_rx));
+    idle().await;
+    assert!(!scanned());
+    clock.advance_monotonic(interval);
+    idle().await;
+    assert!(!scanned());
+
+    scheduler.resume();
+    scheduler.pause_kind(SchedulerKind::Alarm).unwrap();
+    clock.advance_monotonic(interval);
+    idle().await;
+    assert!(!scanned());
+
+    scheduler.resume_kind(SchedulerKind::Alarm).unwrap();
+    clock.advance_monotonic(interval);
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !scanned() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        *scheduler.repair_cursor.lock().unwrap(),
+        Some((live.namespace, live.object, live.dispatch_generation))
+    );
+    shutdown.send(true).unwrap();
+    kernel.await.unwrap().unwrap();
+}
+
 fn storage_config(root: &Path) -> DataConfig {
     DataConfig {
         path: root.join("data"),

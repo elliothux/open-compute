@@ -165,11 +165,12 @@ pub fn render_systemd_unit(
     ))
 }
 
-/// Render the one launchd plist for a scope.
+/// Render the one launchd plist for a scope; stdout and stderr append to `log_path`.
 pub fn render_launchd_plist(
     scope: ServiceScope,
     service_user: Option<&str>,
     ocd_path: &Path,
+    log_path: &Path,
 ) -> Result<String, PlatformError> {
     let user = match scope {
         ServiceScope::System => format!(
@@ -207,11 +208,16 @@ pub fn render_launchd_plist(
   <integer>2</integer>
   <key>ExitTimeOut</key>
   <integer>30</integer>
+  <key>StandardOutPath</key>
+  <string>{log}</string>
+  <key>StandardErrorPath</key>
+  <string>{log}</string>
 </dict>
 </plist>
 "#,
         label = SERVICE_LABEL,
         ocd = xml_escape(&ocd_path.to_string_lossy()),
+        log = xml_escape(&log_path.to_string_lossy()),
     ))
 }
 
@@ -304,26 +310,16 @@ impl ServiceManager for SystemdManager {
     }
 
     fn logs(&self, scope: ServiceScope, follow: bool) -> Result<String, PlatformError> {
+        let mut command = journalctl_command(scope, follow);
         if follow {
-            return Err(PlatformError::new(
+            return Err(exec_failed(&mut command, "failed to invoke journalctl"));
+        }
+        let output = command.output().map_err(|_| {
+            PlatformError::new(
                 ErrorCode::PlatformUnavailable,
-                "log follow is not supported in this build path",
-            ));
-        }
-        let unit = unit_name();
-        let mut command = Command::new("journalctl");
-        if matches!(scope, ServiceScope::User) {
-            command.arg("--user");
-        }
-        let output = command
-            .args(["--no-pager", "-u", unit, "-n", "100"])
-            .output()
-            .map_err(|_| {
-                PlatformError::new(
-                    ErrorCode::PlatformUnavailable,
-                    "failed to invoke journalctl",
-                )
-            })?;
+                "failed to invoke journalctl",
+            )
+        })?;
         if !output.status.success() {
             return Err(PlatformError::new(
                 ErrorCode::PlatformUnavailable,
@@ -364,7 +360,7 @@ impl ServiceManager for LaunchdManager {
         ocd_path: &Path,
     ) -> Result<(), PlatformError> {
         let path = self.plist_path(scope)?;
-        let body = render_launchd_plist(scope, service_user, ocd_path)?;
+        let body = render_launchd_plist(scope, service_user, ocd_path, &self.log_path(scope)?)?;
         install_definition(&path, body.as_bytes())
     }
 
@@ -448,16 +444,30 @@ impl ServiceManager for LaunchdManager {
             && String::from_utf8_lossy(&output.stdout).contains("state = running"))
     }
 
-    fn logs(&self, _scope: ServiceScope, follow: bool) -> Result<String, PlatformError> {
-        let _ = follow;
-        Err(PlatformError::new(
-            ErrorCode::PlatformUnavailable,
-            "launchd log capture is not wired yet; use the plist StandardOutPath",
-        ))
+    fn logs(&self, scope: ServiceScope, follow: bool) -> Result<String, PlatformError> {
+        let path = self.log_path(scope)?;
+        if follow {
+            return Err(exec_failed(
+                &mut tail_follow_command(&path),
+                "failed to follow the launchd log file",
+            ));
+        }
+        last_log_lines(&path)
     }
 }
 
 impl LaunchdManager {
+    /// Fixed daemon log file in the scope's OCD root.
+    fn log_path(&self, scope: ServiceScope) -> Result<PathBuf, PlatformError> {
+        let name = "ocd.log";
+        if let Some(root) = &self.plist_root {
+            return Ok(root.join(name));
+        }
+        Ok(crate::instance_registry::InstanceRegistry::production()?
+            .root_for(scope)
+            .join(name))
+    }
+
     fn plist_path(&self, scope: ServiceScope) -> Result<PathBuf, PlatformError> {
         let name = format!("{SERVICE_LABEL}.plist");
         if let Some(root) = &self.plist_root {
@@ -487,6 +497,66 @@ fn launch_domain(scope: ServiceScope) -> String {
         ServiceScope::System => "system".to_owned(),
         ServiceScope::User => format!("gui/{}", rustix::process::getuid().as_raw()),
     }
+}
+
+const LOG_LINES: usize = 100;
+const MAX_LOG_TAIL_BYTES: u64 = 1024 * 1024;
+
+fn journalctl_command(scope: ServiceScope, follow: bool) -> Command {
+    let mut command = Command::new("journalctl");
+    if matches!(scope, ServiceScope::User) {
+        command.arg("--user");
+    }
+    command.args(["--no-pager", "-u", unit_name()]);
+    if follow {
+        command.arg("-f");
+    } else {
+        command.args(["-n", &LOG_LINES.to_string()]);
+    }
+    command
+}
+
+fn tail_follow_command(path: &Path) -> Command {
+    let mut command = Command::new("/usr/bin/tail");
+    command.args(["-n", &LOG_LINES.to_string(), "-F"]).arg(path);
+    command
+}
+
+/// Replace this process with `command`, inheriting stdio; returns only on failure.
+fn exec_failed(command: &mut Command, message: &'static str) -> PlatformError {
+    use std::os::unix::process::CommandExt as _;
+    let _ = command.exec();
+    PlatformError::new(ErrorCode::PlatformUnavailable, message)
+}
+
+/// Read the last lines of a daemon log file from a bounded tail window.
+fn last_log_lines(path: &Path) -> Result<String, PlatformError> {
+    use std::io::{Read as _, Seek as _, SeekFrom};
+    let unreadable = || {
+        PlatformError::new(
+            ErrorCode::PlatformUnavailable,
+            "failed to read the daemon log",
+        )
+    };
+    let mut file = match fs::File::open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(String::new()),
+        Err(_) => return Err(unreadable()),
+    };
+    let size = file.metadata().map_err(|_| unreadable())?.len();
+    let start = size.saturating_sub(MAX_LOG_TAIL_BYTES);
+    file.seek(SeekFrom::Start(start))
+        .map_err(|_| unreadable())?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes).map_err(|_| unreadable())?;
+    let text = String::from_utf8_lossy(&bytes);
+    // A window that starts mid-file drops its first, possibly partial, line.
+    let lines: Vec<&str> = text.lines().skip(usize::from(start > 0)).collect();
+    let mut tail = lines[lines.len().saturating_sub(LOG_LINES)..].join("\n");
+    if !tail.is_empty() {
+        tail.push('\n');
+    }
+    Ok(tail)
 }
 
 fn systemctl(scope: ServiceScope, args: &[&str]) -> Result<(), PlatformError> {

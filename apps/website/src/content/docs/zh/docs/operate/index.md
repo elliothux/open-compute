@@ -14,6 +14,8 @@ ocd logs --follow
 ocd restart
 ```
 
+`ocd logs` 输出 daemon 最后 100 行日志，`--follow` 持续输出新行。Linux 读取作用域 unit 的 systemd journal。macOS 上 launchd 把 daemon 输出写入作用域根目录（`~/.open-compute` 或 `/var/lib/open-compute`）下的 `ocd.log`，目前不配置轮转。
+
 `ocd status` 报告所选 user/system 作用域的 daemon 存活状态。`ocd instances` 从控制 socket 读取实时实例状态；daemon 离线时才把显式清单项显示为 stopped。作用域锁仍被占用而控制 socket 不可用时会报错，不会误报 stopped。
 
 使用 `ocd instance start|stop|restart <id-or-name>` 独立管理已登记实例，不改变其 `autostart` 意图。`status` 与 `instances` 只选择当前用户或显式 `--system` 作用域，不接受 `--instance` 或 `--config`。
