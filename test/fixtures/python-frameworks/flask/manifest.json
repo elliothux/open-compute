@@ -1,11 +1,11 @@
 {
-  "cf": "1.0.0-beta.12",
+  "cf": "1.0.0-beta.21",
   "cliSha256": "48b44ab41bc56054f64db01fdbb6f46b91bed9cb065edee229d8732ed8ef0d9d",
   "buildOutputConfigSha256": "269076d49158e8268afd4fb8ec2da334700f72afab4618e5af38bfc1de974d80",
   "producer": "cf workers versions create --prebuilt",
-  "contentType": "multipart/form-data; boundary=----formdata-undici-054826286777",
+  "contentType": "multipart/form-data; boundary=----formdata-undici-058437733054",
   "size": 2320557,
-  "sha256": "b54439bd440c25b9e96a4761d1801276a93b84742850caeb7c48c67fb4818f4e",
+  "sha256": "f78e2a28d31ce821f65331496579aec054d1b6a70840a2d9f8c1026c96e9a27a",
   "metadata": {
     "main_module": "main.py",
     "bindings": [
@@ -367,7 +367,7 @@
       "uploadName": "./python_modules/flask-3.1.3.dist-info/RECORD",
       "mime": "application/octet-stream",
       "size": 2574,
-      "sha256": "24e0946895154e0aa1d0a0eee9ec996817dea999076333e471377d190d597525"
+      "sha256": "fbe8f7663788e70d6ada9db8093246ac067b7a0fe6f942d0d34ec99db8e85743"
     },
     {
       "name": "python_modules/flask-3.1.3.dist-info/REQUESTED",

@@ -9,9 +9,9 @@ authenticated loopback fixture; no Cloudflare resources were changed.
 
 | Input   | Modules | Original multipart SHA-256                                         |
 | ------- | ------: | ------------------------------------------------------------------ |
-| Django  |   3,776 | `d194508542532d64ebc76180a99e5465da4f93b17cd89ec0b0f770f4498efd6f` |
-| Flask   |     224 | `b54439bd440c25b9e96a4761d1801276a93b84742850caeb7c48c67fb4818f4e` |
-| FastAPI |     424 | `38db798ad318a8b1624581a1a51d4142c200bfdcd17d3c855826d77429788484` |
+| Django  |   3,776 | `a4ff8f0b0ba24bdff19a4ccc3eb64345e7e0ea6d5d82a13dc4ffa355a166dc58` |
+| Flask   |     224 | `f78e2a28d31ce821f65331496579aec054d1b6a70840a2d9f8c1026c96e9a27a` |
+| FastAPI |     424 | `c762bb2917b2fe3d70c3dc6aa37bdceef8e53ce8ce444923d49d8237ac03bf61` |
 
 All 19 SDK runtime source MIME/size/digests match the shared
 [`sdk-inventory.json`](../python-main/sdk-inventory.json), and each dependency lock
@@ -52,3 +52,7 @@ application host for the ordinary daemon Gate. The prior capture is retained und
 `.temp/p21-framework-gates/previous-django-input/`. The reviewed fresh capture
 uses the same unmodified dependency versions; no SDK or production host policy
 was changed. See `django-input-qualification-01.json` in that evidence directory.
+
+## cf 1.0.0-beta.21 recapture (2026-11-08)
+
+The pinned cf moved to 1.0.0-beta.21, so these captures were rebuilt from fresh maintained project copies under `.temp/p21-recapture-beta21/` with PyWrangler 1.17.6, uv 0.12.3 and the official build bridge, then captured with `prepare-python-main.ts`. Each rebuilt `pylock.toml` is byte-identical to the reviewed lock, and executable modules match the previous capture. Only `dist-info/RECORD` files differ, in the hash of a host console-script launcher.

@@ -1,11 +1,11 @@
 {
-  "cf": "1.0.0-beta.12",
+  "cf": "1.0.0-beta.21",
   "cliSha256": "48b44ab41bc56054f64db01fdbb6f46b91bed9cb065edee229d8732ed8ef0d9d",
   "buildOutputConfigSha256": "269076d49158e8268afd4fb8ec2da334700f72afab4618e5af38bfc1de974d80",
   "producer": "cf workers versions create --prebuilt",
-  "contentType": "multipart/form-data; boundary=----formdata-undici-014531337554",
-  "size": 2222107,
-  "sha256": "0c640ab580508e57763ee871712b50066741caada9fc223bb651eba8785090b6",
+  "contentType": "multipart/form-data; boundary=----formdata-undici-032964542957",
+  "size": 2222002,
+  "sha256": "3e906f47fff9415c7d956bca5752e9364057bd02d07911e3372324b220decf3b",
   "metadata": {
     "main_module": "main.py",
     "bindings": [
@@ -100,14 +100,7 @@
         "not_found_handling": "none",
         "run_worker_first": true
       }
-    },
-    "package_dependencies": [
-      {
-        "name": "wrangler",
-        "packageJsonVersion": "4.143.0",
-        "installedVersion": "4.143.0"
-      }
-    ]
+    }
   },
   "modules": [
     {
@@ -339,7 +332,7 @@
       "uploadName": "./python_modules/charset_normalizer-3.5.2.dist-info/RECORD",
       "mime": "application/octet-stream",
       "size": 2170,
-      "sha256": "fc3d1fec675294687f802ce72a1d9139e04b3ddb1db3c53c646f5cfe516c7d4f"
+      "sha256": "c58e649287484c56107516c8f7a5c4ba661f5887b7bb8035793b49a13a091b61"
     },
     {
       "name": "python_modules/charset_normalizer-3.5.2.dist-info/REQUESTED",
@@ -500,7 +493,7 @@
       "uploadName": "./python_modules/httpx-0.28.1.dist-info/RECORD",
       "mime": "application/octet-stream",
       "size": 2556,
-      "sha256": "ed0cea16bd6d9411c96c422a6a09d19f45f0e5fbae68a7f052af0f487e51b7cd"
+      "sha256": "4bb881e1cdded63953d636d48b2b7f578ee572ea0237efea6431cd5e8bba7e90"
     },
     {
       "name": "python_modules/httpx-0.28.1.dist-info/REQUESTED",
@@ -724,7 +717,7 @@
       "uploadName": "./python_modules/idna-3.20.dist-info/RECORD",
       "mime": "application/octet-stream",
       "size": 1408,
-      "sha256": "de53f7b1f6bdf4ac4e3dbd8fc3640ed54e911de3da0352dc1cbcb79606f18ee1"
+      "sha256": "3de7aff11a67cdf457618795e5e7e6bca44b02761823206fb7ae77e338ebc867"
     },
     {
       "name": "python_modules/idna-3.20.dist-info/REQUESTED",

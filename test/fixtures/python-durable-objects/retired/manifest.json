@@ -1,11 +1,11 @@
 {
-  "cf": "1.0.0-beta.12",
+  "cf": "1.0.0-beta.21",
   "cliSha256": "48b44ab41bc56054f64db01fdbb6f46b91bed9cb065edee229d8732ed8ef0d9d",
   "buildOutputConfigSha256": "b50b1a518aea6c8fff00773125e0b39625dee47f886addb430c6e11dc4b583c9",
   "producer": "cf workers versions create --prebuilt",
-  "contentType": "multipart/form-data; boundary=----formdata-undici-097087528603",
+  "contentType": "multipart/form-data; boundary=----formdata-undici-030527201711",
   "size": 116133,
-  "sha256": "aa6cb977f2f1780469241f7ea43a9598c20abe8e21fd045e5eed01f6f2af5048",
+  "sha256": "1aa6ad969774a9b9a99709b08aef7268289a3f88279d1f31226701f31bc267d9",
   "metadata": {
     "main_module": "main.py",
     "bindings": [

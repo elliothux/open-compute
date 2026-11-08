@@ -1,11 +1,11 @@
 {
-  "cf": "1.0.0-beta.12",
+  "cf": "1.0.0-beta.21",
   "cliSha256": "48b44ab41bc56054f64db01fdbb6f46b91bed9cb065edee229d8732ed8ef0d9d",
   "buildOutputConfigSha256": "269076d49158e8268afd4fb8ec2da334700f72afab4618e5af38bfc1de974d80",
   "producer": "cf workers versions create --prebuilt",
-  "contentType": "multipart/form-data; boundary=----formdata-undici-014048949808",
-  "size": 122058,
-  "sha256": "ec7199dede0714a804c207673303bbddf9caa9b93d8eb62fa7d56b915909017a",
+  "contentType": "multipart/form-data; boundary=----formdata-undici-047630310464",
+  "size": 122011,
+  "sha256": "67ddde8bb098a391d68dd25a65d002f1648963e7eb7149dd03f5ea12e50a073a",
   "metadata": {
     "main_module": "main.py",
     "bindings": [
@@ -22,8 +22,7 @@
       {
         "name": "OBJECTS",
         "type": "durable_object_namespace",
-        "class_name": "Counter",
-        "script_name": "python-durable-objects-fixture"
+        "class_name": "Counter"
       }
     ],
     "compatibility_date": "2026-09-08",

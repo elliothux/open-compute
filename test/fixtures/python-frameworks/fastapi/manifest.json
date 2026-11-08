@@ -1,11 +1,11 @@
 {
-  "cf": "1.0.0-beta.12",
+  "cf": "1.0.0-beta.21",
   "cliSha256": "48b44ab41bc56054f64db01fdbb6f46b91bed9cb065edee229d8732ed8ef0d9d",
   "buildOutputConfigSha256": "269076d49158e8268afd4fb8ec2da334700f72afab4618e5af38bfc1de974d80",
   "producer": "cf workers versions create --prebuilt",
-  "contentType": "multipart/form-data; boundary=----formdata-undici-079408344743",
+  "contentType": "multipart/form-data; boundary=----formdata-undici-022876812704",
   "size": 9148207,
-  "sha256": "38db798ad318a8b1624581a1a51d4142c200bfdcd17d3c855826d77429788484",
+  "sha256": "c762bb2917b2fe3d70c3dc6aa37bdceef8e53ce8ce444923d49d8237ac03bf61",
   "metadata": {
     "main_module": "main.py",
     "bindings": [
@@ -647,7 +647,7 @@
       "uploadName": "./python_modules/fastapi-0.142.2.dist-info/RECORD",
       "mime": "application/octet-stream",
       "size": 5715,
-      "sha256": "0416cdcad04f66fea48f25295a7866e65d9132ee42b708833ebb7cbfa005e93a"
+      "sha256": "ff2139ce21277d7e7bcdd476a3dac75d0b780b40874145e59c62af1ed26399f2"
     },
     {
       "name": "python_modules/fastapi-0.142.2.dist-info/REQUESTED",
@@ -1116,7 +1116,7 @@
       "uploadName": "./python_modules/idna-3.20.dist-info/RECORD",
       "mime": "application/octet-stream",
       "size": 1408,
-      "sha256": "be188b0f2d3cd8e70b0377773e6615d05767783d24eda3e7075ea0f3a37ad980"
+      "sha256": "11eda8713dd0fd3d1849395c5b8db791519e6f261c22cfcfb39916a68fc5e9dc"
     },
     {
       "name": "python_modules/idna-3.20.dist-info/REQUESTED",

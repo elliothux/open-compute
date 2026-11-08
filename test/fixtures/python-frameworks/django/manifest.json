@@ -1,11 +1,11 @@
 {
-  "cf": "1.0.0-beta.12",
+  "cf": "1.0.0-beta.21",
   "cliSha256": "48b44ab41bc56054f64db01fdbb6f46b91bed9cb065edee229d8732ed8ef0d9d",
   "buildOutputConfigSha256": "269076d49158e8268afd4fb8ec2da334700f72afab4618e5af38bfc1de974d80",
   "producer": "cf workers versions create --prebuilt",
-  "contentType": "multipart/form-data; boundary=----formdata-undici-082659155716",
+  "contentType": "multipart/form-data; boundary=----formdata-undici-069060341488",
   "size": 25123016,
-  "sha256": "d194508542532d64ebc76180a99e5465da4f93b17cd89ec0b0f770f4498efd6f",
+  "sha256": "a4ff8f0b0ba24bdff19a4ccc3eb64345e7e0ea6d5d82a13dc4ffa355a166dc58",
   "metadata": {
     "main_module": "main.py",
     "bindings": [
@@ -276,7 +276,7 @@
       "uploadName": "./python_modules/django-6.1.1.dist-info/RECORD",
       "mime": "application/octet-stream",
       "size": 392391,
-      "sha256": "0483c9d5d4bd9b46385fbb9469b0655bfd876aa6ab84c9352776afea2aff2387"
+      "sha256": "9f6ea59b44192f0ce4ba3be8d0447143d120b25eef083d6b71c9973cca33b7d0"
     },
     {
       "name": "python_modules/django-6.1.1.dist-info/REQUESTED",
@@ -26155,7 +26155,7 @@
       "uploadName": "./python_modules/sqlparse-0.6.0.dist-info/RECORD",
       "mime": "application/octet-stream",
       "size": 2531,
-      "sha256": "5eb07a285ed7fcc2222033d3fd2f68abff882029935982d27bca4059876d38f1"
+      "sha256": "11c07bfb12fb1cb7bcb7ac5cf196562c4ef877ccf674445a0fcd14aade65c4e8"
     },
     {
       "name": "python_modules/sqlparse-0.6.0.dist-info/REQUESTED",

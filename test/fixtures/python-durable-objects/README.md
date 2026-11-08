@@ -6,9 +6,9 @@ PyWrangler. Each manifest records the full request digest, metadata and module
 MIME/size/digest; `pylock.toml` records the unchanged official SDK wheel input.
 
 The active upload SHA-256 is
-`ec7199dede0714a804c207673303bbddf9caa9b93d8eb62fa7d56b915909017a`;
+`67ddde8bb098a391d68dd25a65d002f1648963e7eb7149dd03f5ea12e50a073a`;
 the retired upload SHA-256 is
-`aa6cb977f2f1780469241f7ea43a9598c20abe8e21fd045e5eed01f6f2af5048`.
+`1aa6ad969774a9b9a99709b08aef7268289a3f88279d1f31226701f31bc267d9`.
 Both have 30 modules. All 19 official SDK sources match
 `../python-main/sdk-inventory.json`, and each main module matches its maintained
 source under `../../applications/python-durable-objects/` exactly.
@@ -35,3 +35,7 @@ retirement. It does not prove hibernation eviction, survival of live connections
 across daemon death or the complete DO/PITR matrix. The later Workflow failure
 in that aggregate is retained separately. This scoped pass does not constitute
 workspace coverage or final P21 acceptance. No workerd rebuild was performed.
+
+## cf 1.0.0-beta.21 recapture (2026-11-08)
+
+The pinned cf moved to 1.0.0-beta.21, so these captures were rebuilt from fresh maintained project copies under `.temp/p21-recapture-beta21/` with PyWrangler 1.17.6, uv 0.12.3 and the official build bridge, then captured with `prepare-python-main.ts`. Each rebuilt `pylock.toml` is byte-identical to the reviewed lock, and executable modules match the previous capture. The active capture's same-Worker `OBJECTS` binding no longer carries `script_name`; that is the repository `@cloudflare/config` 0.28.0 patch.

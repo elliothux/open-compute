@@ -1,8 +1,8 @@
-------formdata-undici-050066013062
+------formdata-undici-008285666887
 Content-Disposition: form-data; name="metadata"
 
 {"main_module":"main.py","bindings":[{"name":"REVISION","type":"plain_text","text":"first"},{"name":"TOKEN","type":"secret_text","text":"python-capture-fixture-token"},{"name":"TARGET","type":"service","service":"python-services-js-target"},{"name":"NAMED","type":"service","service":"python-services-js-target","entrypoint":"NamedApi"}],"compatibility_date":"2026-09-08","compatibility_flags":["python_workers","enable_python_external_sdk","python_dedicated_snapshot"],"exports":{"default":{"type":"worker"},"NamedApi":{"type":"worker"}},"keep_bindings":["secret_text","secret_key"],"annotations":{}}
-------formdata-undici-050066013062
+------formdata-undici-008285666887
 Content-Disposition: form-data; name="main.py"; filename="main.py"
 Content-Type: text/x-python
 
@@ -64,12 +64,12 @@ class NamedApi(WorkerEntrypoint):
     def echo(self, value):
         return {"value": value, "revision": self.env.REVISION}
 
-------formdata-undici-050066013062
+------formdata-undici-008285666887
 Content-Disposition: form-data; name="./python_modules/.synced"; filename="./python_modules/.synced"
 Content-Type: application/octet-stream
 
 1.17.6
-------formdata-undici-050066013062
+------formdata-undici-008285666887
 Content-Disposition: form-data; name="./python_modules/_cloudflare_compat_flags.pyi"; filename="./python_modules/_cloudflare_compat_flags.pyi"
 Content-Type: application/octet-stream
 
@@ -78,7 +78,7 @@ python_request_headers_preserve_commas: bool
 
 def __getattr__(name: str) -> bool: ...
 
-------formdata-undici-050066013062
+------formdata-undici-008285666887
 Content-Disposition: form-data; name="./python_modules/_pyodide_entrypoint_helper.pyi"; filename="./python_modules/_pyodide_entrypoint_helper.pyi"
 Content-Type: application/octet-stream
 
@@ -92,7 +92,7 @@ def doAnImport(module_name: str) -> Any: ...
 def patch_env_helper(kwds: Any) -> Generator[None]: ...
 def patchWaitUntil(ctx: Any) -> None: ...
 
-------formdata-undici-050066013062
+------formdata-undici-008285666887
 Content-Disposition: form-data; name="./python_modules/_workers_sdk_entropy_import_context.py"; filename="./python_modules/_workers_sdk_entropy_import_context.py"
 Content-Type: application/octet-stream
 
@@ -346,7 +346,7 @@ def litestar_context(module):
     with allow_bad_entropy_calls(1):
         yield
 
-------formdata-undici-050066013062
+------formdata-undici-008285666887
 Content-Disposition: form-data; name="./python_modules/_workers_sdk_package_patches.py"; filename="./python_modules/_workers_sdk_package_patches.py"
 Content-Type: application/octet-stream
 
@@ -396,13 +396,13 @@ def anyio_to_thread_context(module):
 
     module.run_sync = run_sync
 
-------formdata-undici-050066013062
+------formdata-undici-008285666887
 Content-Disposition: form-data; name="./python_modules/_workers_sdk_patch_loader.pth"; filename="./python_modules/_workers_sdk_patch_loader.pth"
 Content-Type: application/octet-stream
 
 import _workers_sdk_patch_loader
 
-------formdata-undici-050066013062
+------formdata-undici-008285666887
 Content-Disposition: form-data; name="./python_modules/_workers_sdk_patch_loader.py"; filename="./python_modules/_workers_sdk_patch_loader.py"
 Content-Type: application/octet-stream
 
@@ -423,7 +423,7 @@ if importlib.util.find_spec("_cloudflare") is not None:
     import _workers_sdk_entropy_import_context  # noqa: F401
     import _workers_sdk_package_patches  # noqa: F401
 
-------formdata-undici-050066013062
+------formdata-undici-008285666887
 Content-Disposition: form-data; name="./python_modules/asgi.py"; filename="./python_modules/asgi.py"
 Content-Type: application/octet-stream
 
@@ -434,12 +434,12 @@ from workers import asgi as _asgi
 
 sys.modules[__name__] = _asgi
 
-------formdata-undici-050066013062
+------formdata-undici-008285666887
 Content-Disposition: form-data; name="./python_modules/pyvenv.cfg"; filename="./python_modules/pyvenv.cfg"
 Content-Type: application/octet-stream
 
 
-------formdata-undici-050066013062
+------formdata-undici-008285666887
 Content-Disposition: form-data; name="./python_modules/workers/__init__.py"; filename="./python_modules/workers/__init__.py"
 Content-Type: application/octet-stream
 
@@ -505,7 +505,7 @@ def __getattr__(key):
         return cloudflare_workers.waitUntil
     raise AttributeError(f"module {__name__!r} has no attribute {key!r}")
 
-------formdata-undici-050066013062
+------formdata-undici-008285666887
 Content-Disposition: form-data; name="./python_modules/workers/asgi.py"; filename="./python_modules/workers/asgi.py"
 Content-Type: application/octet-stream
 
@@ -1004,7 +1004,7 @@ def __getattr__(name):
 
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
-------formdata-undici-050066013062
+------formdata-undici-008285666887
 Content-Disposition: form-data; name="./python_modules/workers/blob.py"; filename="./python_modules/workers/blob.py"
 Content-Type: application/octet-stream
 
@@ -1163,7 +1163,7 @@ def _make_blob_entry(e):
             px.destroy()
     raise TypeError(f"Don't know how to handle {type(e)} for Blob()")
 
-------formdata-undici-050066013062
+------formdata-undici-008285666887
 Content-Disposition: form-data; name="./python_modules/workers/entrypoints.py"; filename="./python_modules/workers/entrypoints.py"
 Content-Type: application/octet-stream
 
@@ -1578,7 +1578,7 @@ class WorkflowEntrypoint:
         _wrap_class(cls)
         _wrap_workflow_step(cls)
 
-------formdata-undici-050066013062
+------formdata-undici-008285666887
 Content-Disposition: form-data; name="./python_modules/workers/fetch.py"; filename="./python_modules/workers/fetch.py"
 Content-Type: application/octet-stream
 
@@ -1627,7 +1627,7 @@ async def fetch(
     resp = await _pyfetch_patched(resource, **other_options)
     return Response(resp.js_response)
 
-------formdata-undici-050066013062
+------formdata-undici-008285666887
 Content-Disposition: form-data; name="./python_modules/workers/formdata.py"; filename="./python_modules/workers/formdata.py"
 Content-Type: application/octet-stream
 
@@ -1729,12 +1729,12 @@ class FormData(MutableMapping[str, FormDataValue]):
     def js_object(self) -> "js.FormData":
         return self._js_form_data
 
-------formdata-undici-050066013062
+------formdata-undici-008285666887
 Content-Disposition: form-data; name="./python_modules/workers/py.typed"; filename="./python_modules/workers/py.typed"
 Content-Type: application/octet-stream
 
 
-------formdata-undici-050066013062
+------formdata-undici-008285666887
 Content-Disposition: form-data; name="./python_modules/workers/request.py"; filename="./python_modules/workers/request.py"
 Content-Type: application/octet-stream
 
@@ -1920,7 +1920,7 @@ class Request:
         self._raise_if_failed()
         return await self.js_object.text()
 
-------formdata-undici-050066013062
+------formdata-undici-008285666887
 Content-Disposition: form-data; name="./python_modules/workers/response.py"; filename="./python_modules/workers/response.py"
 Content-Type: application/octet-stream
 
@@ -2124,7 +2124,7 @@ class Response(FetchResponse):
             options["webSocket"] = web_socket
         return options
 
-------formdata-undici-050066013062
+------formdata-undici-008285666887
 Content-Disposition: form-data; name="./python_modules/workers/rpc.py"; filename="./python_modules/workers/rpc.py"
 Content-Type: application/octet-stream
 
@@ -2578,7 +2578,7 @@ class _EnvWrapper:
         setattr(self, name, result)
         return result
 
-------formdata-undici-050066013062
+------formdata-undici-008285666887
 Content-Disposition: form-data; name="./python_modules/workers/types.py"; filename="./python_modules/workers/types.py"
 Content-Type: application/octet-stream
 
@@ -2632,7 +2632,7 @@ class FetchKwargs(TypedDict, total=False):
     cf: RequestInitCfProperties | None
     fetcher: type[pyfetch] | None
 
-------formdata-undici-050066013062
+------formdata-undici-008285666887
 Content-Disposition: form-data; name="./python_modules/workers/utils.py"; filename="./python_modules/workers/utils.py"
 Content-Type: application/octet-stream
 
@@ -2948,7 +2948,7 @@ def _is_iterable(obj):
     else:
         return True
 
-------formdata-undici-050066013062
+------formdata-undici-008285666887
 Content-Disposition: form-data; name="./python_modules/workers/workflows.js"; filename="./python_modules/workers/workflows.js"
 Content-Type: application/javascript+module
 
@@ -3044,7 +3044,7 @@ export function wrapWorkflowStep(step) {
   });
 }
 
-------formdata-undici-050066013062
+------formdata-undici-008285666887
 Content-Disposition: form-data; name="./python_modules/workers/workflows.py"; filename="./python_modules/workers/workflows.py"
 Content-Type: application/octet-stream
 
@@ -3061,7 +3061,7 @@ class NonRetryableError(Exception):
 
     pass
 
-------formdata-undici-050066013062
+------formdata-undici-008285666887
 Content-Disposition: form-data; name="./python_modules/workers/wsgi.py"; filename="./python_modules/workers/wsgi.py"
 Content-Type: application/octet-stream
 
@@ -3457,12 +3457,12 @@ def entrypoint(app: Any) -> type[WorkerEntrypoint]:
 
     return Default
 
-------formdata-undici-050066013062
+------formdata-undici-008285666887
 Content-Disposition: form-data; name="./python_modules/workers_runtime_sdk-1.9.2.dist-info/INSTALLER"; filename="./python_modules/workers_runtime_sdk-1.9.2.dist-info/INSTALLER"
 Content-Type: application/octet-stream
 
 uv
-------formdata-undici-050066013062
+------formdata-undici-008285666887
 Content-Disposition: form-data; name="./python_modules/workers_runtime_sdk-1.9.2.dist-info/METADATA"; filename="./python_modules/workers_runtime_sdk-1.9.2.dist-info/METADATA"
 Content-Type: application/octet-stream
 
@@ -3482,7 +3482,7 @@ Description-Content-Type: text/markdown
 
 Runtime SDK for Python Cloudflare Workers.
 
-------formdata-undici-050066013062
+------formdata-undici-008285666887
 Content-Disposition: form-data; name="./python_modules/workers_runtime_sdk-1.9.2.dist-info/RECORD"; filename="./python_modules/workers_runtime_sdk-1.9.2.dist-info/RECORD"
 Content-Type: application/octet-stream
 
@@ -3514,12 +3514,12 @@ workers_runtime_sdk-1.9.2.dist-info/RECORD,,
 workers_runtime_sdk-1.9.2.dist-info/REQUESTED,sha256=47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU,0
 workers_runtime_sdk-1.9.2.dist-info/WHEEL,sha256=W3fkpkm7-wf9vBI5Z-7s0eWkeM-spu78I8Neb98DeEg,87
 
-------formdata-undici-050066013062
+------formdata-undici-008285666887
 Content-Disposition: form-data; name="./python_modules/workers_runtime_sdk-1.9.2.dist-info/REQUESTED"; filename="./python_modules/workers_runtime_sdk-1.9.2.dist-info/REQUESTED"
 Content-Type: application/octet-stream
 
 
-------formdata-undici-050066013062
+------formdata-undici-008285666887
 Content-Disposition: form-data; name="./python_modules/workers_runtime_sdk-1.9.2.dist-info/WHEEL"; filename="./python_modules/workers_runtime_sdk-1.9.2.dist-info/WHEEL"
 Content-Type: application/octet-stream
 
@@ -3528,4 +3528,4 @@ Generator: hatchling 1.32.4
 Root-Is-Purelib: true
 Tag: py3-none-any
 
-------formdata-undici-050066013062--
+------formdata-undici-008285666887--

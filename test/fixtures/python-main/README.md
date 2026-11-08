@@ -13,7 +13,7 @@ produced Build Output. Pinned cf uploaded the prebuilt result to an authenticate
 loopback fixture: 32 modules, including all 19 SDK runtime sources whose MIME,
 size and digests match `sdk-inventory.json`. `pylock.toml` confirms the published
 wheel digest. Capture SHA-256 is
-`98c94ee85d76afbff05c416d089ce4b0dd02626a55e9833db6b8eae332b4607e`.
+`36104a730abecfbe4b6f087684a4778297cd8039434f712e85f23c59e90f8663`.
 The previous input is retained under
 `.temp/p21-python-prepared-integrity/previous-main-input-01/`. The new main adds
 an HMAC proof of the active secret; all 19 official SDK sources and local package
@@ -63,3 +63,7 @@ the required cf Python capture. These assertions passed against the formal runti
 The ordinary daemon case passed in complete workspace coverage. Final
 uninstrumented acceptance is recorded separately; compilation, capture and the
 formal workerd release alone do not prove product acceptance.
+
+## cf 1.0.0-beta.21 recapture (2026-11-08)
+
+The pinned cf moved to 1.0.0-beta.21, so these captures were rebuilt from fresh maintained project copies under `.temp/p21-recapture-beta21/` with PyWrangler 1.17.6, uv 0.12.3 and the official build bridge, then captured with `prepare-python-main.ts`. Each rebuilt `pylock.toml` is byte-identical to the reviewed lock, and executable modules match the previous capture.

@@ -128,3 +128,7 @@ The complete ordinary case passed in `20261005T025346-81a3b2a3` (473.78 seconds,
 1 pass, 0 ignored), including promotion, fresh restart, rollback and cleanup.
 The registered case also passed in complete workspace coverage. Final
 uninstrumented acceptance is recorded separately.
+
+## cf 1.0.0-beta.21 recapture (2026-11-08)
+
+The pinned cf moved to 1.0.0-beta.21, so these captures were rebuilt from fresh maintained project copies under `.temp/p21-recapture-beta21/` with PyWrangler 1.17.6, uv 0.12.3 and the official build bridge, then captured with `prepare-python-main.ts`. Each rebuilt `pylock.toml` is byte-identical to the reviewed lock, and executable modules match the previous capture. The fresh resolution selected certifi 2026.10.23, so the build copy's `pyproject.toml` constrained certifi to the reviewed 2026.7.22. Only three `dist-info/RECORD` files differ, in the hash of a host console-script launcher.
