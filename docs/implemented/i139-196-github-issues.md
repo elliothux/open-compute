@@ -76,9 +76,15 @@
   `test/distro-smoke/run.py` 用两个 ocd 分别执行安装、daemon、setup 和 Worker 部署：
   - Rocky Linux 9（glibc 2.34）与 Ubuntu 22.04（glibc 2.35）返回 `distro-smoke-ok`；
   - Rocky Linux 8（glibc 2.28）被 `install.sh` 明确拒绝。
-- 未执行：
-  - `release-dry-run.sh` 与 CI package job；
-  - Containers fixture 的 `cf build`（需要预先准备的 P23 镜像输入）。
+- 用本机 Docker Engine 构建的 P23 arm64 镜像输入后，完整 `bun run build`（含 Containers fixture）与
+  `bun run check:generated` 通过。
+- `release-dry-run.sh` 在 `bf2af2f87` 通过：package-release、`single-binary` Gate 与 Dashboard smoke（2 项）。
+  首次运行发现并修复了三个问题：
+  - `465fb3b53`：glibc 检查从共享的 `verifyPackageArtifact` 移到 `assembleRelease`。原位置在 Linux 主机上也检查
+    release-tools 测试的替身 binary；dry-run 镜像同时补上测试使用的 `jq`。
+  - `fe340fddd`：dry-run 把 `OPEN_COMPUTE_TEST_CONTAINERS_INPUT` 只读传入容器。根构建自 2026-10-18 起需要它。
+  - `bf2af2f87`：dry-run 初始化 `third_party/workerd` submodule，与 tag workflow 一致。
+- 未执行：tag workflow 的 CI package job，它在下一次 release 中运行。
 
 ## 已接受的限制
 
