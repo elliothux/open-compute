@@ -131,7 +131,9 @@ GitHub Release，上传七个公开 assets，再全部下载回来逐字节比�
 它只接受干净的当前 `HEAD`，在保留的 detached worktree 中准备锁定依赖，然后断网执行 source/release-tool
 fail-fast、正式 `package-release.sh`、一次 `single-binary` Gate 和与正式 Linux ARM64 package job 相同的
 Dashboard smoke。工具链镜像固定 Rust 1.98.0、Bun 1.3.14、Node 26.8.1、Playwright 1.63.0、zig 0.14.1 和 cargo-zigbuild 0.24.1；容器不挂载
-宿主 HOME、凭据、SSH agent 或 Docker socket。候选二进制、package report、runtime 和 Dashboard server
+宿主 HOME、凭据、SSH agent 或 Docker socket。
+根构建包含 Containers fixture，所以运行前须把 `OPEN_COMPUTE_TEST_CONTAINERS_INPUT` 设为已准备的 P23 镜像输入；
+输入文件所在目录须包含它引用的 OCI 镜像，脚本把该目录只读挂载到同一路径。准备方法见 [Containers 运维](containers.md#ci-夹具输入)。候选二进制、package report、runtime 和 Dashboard server
 日志保留在 `.temp/release-dry-run/output/`；Gate 与 Playwright 的详细失败树保留在 retained
 worktree 的 `.temp/release-dry-run/source/.temp/` 和 `apps/dashboard/test-results/`。
 

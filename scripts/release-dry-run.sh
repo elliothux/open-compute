@@ -176,6 +176,12 @@ host_gid=$(id -g)
 [ "$host_uid" -ne 0 ] || fail "run as the owning non-root user, not through sudo"
 status=$(git -C "$root" status --porcelain --untracked-files=all)
 [ -z "$status" ] || fail "the current checkout must be clean so HEAD is the candidate"
+# The root build packages the Containers fixture, which reads prepared P23 OCI images.
+containers_input=${OPEN_COMPUTE_TEST_CONTAINERS_INPUT:-}
+[ -n "$containers_input" ] || fail "set OPEN_COMPUTE_TEST_CONTAINERS_INPUT to the prepared P23 image input"
+case "$containers_input" in /*) ;; *) fail "OPEN_COMPUTE_TEST_CONTAINERS_INPUT must be absolute" ;; esac
+[ -f "$containers_input" ] && [ ! -L "$containers_input" ] || fail "Containers input must be a regular file"
+containers_dir=$(dirname "$containers_input")
 revision=$(git -C "$root" rev-parse --verify HEAD)
 git -C "$root" lfs fsck
 
@@ -233,12 +239,14 @@ container_args=(
   --mount "type=bind,src=$common_git,dst=$common_git,readonly"
   --mount "type=bind,src=$host_output,dst=$container_output"
   --mount "type=bind,src=$passwd_file,dst=/etc/passwd,readonly"
+  --mount "type=bind,src=$containers_dir,dst=$containers_dir,readonly"
   --tmpfs "$common_git/lfs/tmp:rw,nosuid,nodev,size=512m,mode=1777"
   --tmpfs /tmp:rw,exec,nosuid,nodev,size=8g,mode=1777
   --tmpfs "/home/pwuser:rw,exec,nosuid,nodev,size=4g,mode=0700,uid=$host_uid,gid=$host_gid"
   --env HOME=/home/pwuser
   --env "OPEN_COMPUTE_RELEASE_DRY_RUN_OUTPUT=$container_output"
   --env "OPEN_COMPUTE_RELEASE_DRY_RUN_REVISION=$revision"
+  --env "OPEN_COMPUTE_TEST_CONTAINERS_INPUT=$containers_input"
 )
 
 echo "release dry-run: hydrating locked dependencies"
