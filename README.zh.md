@@ -128,6 +128,10 @@ ocd cf deploy --prebuilt --mode production
 
 完整安装流程以及 remote target、CI、environment、tail 和 rollback 见[快速开始](https://open-compute.dev/zh/docs/get-started/)与[开发应用](https://open-compute.dev/zh/docs/develop/)。
 
+## 一键部署
+
+[![Deploy on RepoCloud](https://d16t0pc4846x52.cloudfront.net/deploylobe.svg)](https://repocloud.io/details/Open%20Compute/)
+
 ## 架构
 
 <p align="center">
