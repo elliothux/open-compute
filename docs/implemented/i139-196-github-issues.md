@@ -72,12 +72,11 @@
   - `cargo fmt --all --check` 与 `./test/check-rust-clippy.sh`。
 - workerd fork 发布 run [42421490269](https://github.com/elliothux/workerd/actions/runs/42421490269) 的四个构建和 publish
   均通过。两个 Linux workerd 引用的最高版本为 `GLIBC_2.34`，且不依赖 libstdc++。
-- cargo-zigbuild 构建的 linux-arm64 ocd 内嵌 R26 workerd，最高引用 `GLIBC_2.34`，且不依赖 libstdc++。
-  `test/distro-smoke/run.py` 用该 ocd 执行安装、daemon、setup 和 Worker 部署：
+- cargo-zigbuild 构建的 linux-arm64 与 linux-x64 ocd 内嵌 R26 workerd，最高引用 `GLIBC_2.34`，且不依赖 libstdc++。
+  `test/distro-smoke/run.py` 用两个 ocd 分别执行安装、daemon、setup 和 Worker 部署：
   - Rocky Linux 9（glibc 2.34）与 Ubuntu 22.04（glibc 2.35）返回 `distro-smoke-ok`；
   - Rocky Linux 8（glibc 2.28）被 `install.sh` 明确拒绝。
 - 未执行：
-  - linux-x64 ocd 的发行版冒烟（需要 CI 或模拟环境）；
   - `release-dry-run.sh` 与 CI package job；
   - Containers fixture 的 `cf build`（需要预先准备的 P23 镜像输入）。
 
