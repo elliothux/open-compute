@@ -197,7 +197,7 @@ elif [ -e "$source" ]; then
 else
   git -C "$root" worktree add --detach "$source" "$revision"
 fi
-git -C "$source" submodule update --init --depth 1 third_party/gitserver
+git -C "$source" submodule update --init --depth 1 third_party/gitserver third_party/workerd
 git -C "$source" lfs checkout
 git -C "$source" lfs fsck
 
