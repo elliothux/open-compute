@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "sourceDigest": "566ce096d9654f351b5219b6abba149736852b6556cc248634b01a1e7ec29636",
+  "sourceDigest": "2789cbd7e031555e7fc6bee0fbc243aff6b771c8dd5c5ecc38327edfea14d4f0",
   "sourceDigestScope": "tracked production, test, toolchain, manifest, and embedded runbook inputs; excludes rule files, .agents/**, .claude/**, other docs, generated Python caches, and test/conformance/baseline.json",
   "workerdLockSha256": "640179283aac2e47343ad20a116bcf372731f8fc71864f9bc4f7c47609f1589f",
   "workerd": {
@@ -21,7 +21,7 @@
     "gitHead": "d99bc6b777e35d72d71c2f1fe2fd1db53284528a",
     "packageSha256": "0488b340017b706e19e521b96cf28efe3732206acc322344c74c7e4cc3823250",
     "astSha256": "c49a9c138ef23712f324432807840b7eec7cbcd696487ad9c42217015482be5b",
-    "lockSha256": "5c0bcef67657ab258e94db1cba7432edbef3d9f2dd0623d466754872dddedba6",
+    "lockSha256": "d7e5d650a833b02e963c5f1e81a2e7dc08432897091f9bfa3ef47219f816a1ee",
     "indexSha256": "5cba0df0ed430c5ba6bdf249221c2be24f4344e539e29f2113a042a5e5d23a6f"
   },
   "workersSdk": {

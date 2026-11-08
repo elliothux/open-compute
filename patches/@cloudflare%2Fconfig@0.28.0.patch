@@ -1,0 +1,13 @@
+diff --git a/dist/index.mjs b/dist/index.mjs
+index 2c33b13f00b50a1a55b8ab8b3d47cd75322edf40..deefe7243df5648b7e8878298cd7b4c4aa67f6b2 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -1094,7 +1094,7 @@ function convertBindingsAndAssets(config, result) {
+ 				durableObjectBindings.push({
+ 					name,
+ 					class_name: binding.exportName,
+-					script_name: binding.worker
++					...binding.worker === config.name ? {} : { script_name: binding.worker }
+ 				});
+ 				break;
+ 			case "flagship":

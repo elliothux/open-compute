@@ -547,7 +547,7 @@ P20 的应用 Env 由官方 cf 生成（其 runtime types 输入为 workerd 1.20
 ### cf/Vite 构建配置声明补丁
 
 本仓库用 Bun 补丁修正官方构建工具的声明入口。
-2026-10-12 的输入版本为 `@cloudflare/config` 0.22.0/0.23.0、
+输入版本为 `@cloudflare/config` 0.22.0（官方 Vite 插件的依赖）、
 `@cloudflare/vite-plugin` 2.0.0-beta.sha-52b0dc0e9 和 `@cloudflare/workers-types` 5.20260930.2。
 上游源码见 [workers-sdk](https://github.com/cloudflare/workers-sdk/tree/main/packages/config)
 和 [workers-types](https://github.com/cloudflare/workers-types)。
@@ -566,11 +566,11 @@ root 的 `workers-utils` 0.46.0 依赖供官方声明 leaf 使用。
 Knip 的 root `ignoreDependencies` 记录这个声明依赖，不添加功能代码导入。
 
 再生成补丁时，应使用未修改的官方包输入。
-输入目录应包含 `config-0.22.0`、`config-0.23.0`、`vite-plugin` 和 `workers-types` 四个包根。
+输入目录应包含 `config-0.22.0`、`vite-plugin` 和 `workers-types` 三个包根。
 
 1. 执行 `bun scripts/patch-cloudflare-declarations.ts --self-check`。
 2. 执行 `bun scripts/patch-cloudflare-declarations.ts <originals> <output>`。
-3. 对四个固定版本分别执行 `bun patch <package>@<version>`。
+3. 对三个固定版本分别执行 `bun patch <package>@<version>`。
 4. 将 output 中的文件复制到 Bun 指定的包目录。
 5. 执行 `bun patch --commit <package-directory>`。
 6. 执行两个 Container fixture 的 `typecheck`，再重建 runtime assets。

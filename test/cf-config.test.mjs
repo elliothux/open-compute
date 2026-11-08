@@ -11,7 +11,7 @@ const configRoot = resolve(cfRoot, "../@cloudflare/config");
 const configPackage = JSON.parse(
   await readFile(resolve(configRoot, "package.json"), "utf8"),
 );
-assert.equal(configPackage.version, "0.23.0");
+assert.equal(configPackage.version, "0.28.0");
 const { bindings, convertToWranglerConfig, resolveAndParseConfig } =
   await import(pathToFileURL(resolve(configRoot, "dist/index.mjs")).href);
 

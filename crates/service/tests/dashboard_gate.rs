@@ -183,7 +183,7 @@ async fn dashboard_serves_embedded_spa_assets_and_cloudflare_v4_api() {
     let meta_body = to_bytes(meta.into_body(), 64 * 1024).await.unwrap();
     let meta_json: serde_json::Value = serde_json::from_slice(&meta_body).unwrap();
     assert_eq!(meta_json["success"], true);
-    assert_eq!(meta_json["result"]["cf_version"], "1.0.0-beta.12");
+    assert_eq!(meta_json["result"]["cf_version"], "1.0.0-beta.21");
     assert_dashboard_surface_excludes_admin_token(&meta_body, "dashboard-gate-admin");
 
     let unauthorized = router

@@ -20,7 +20,7 @@ async fn vendor_capabilities_and_system_status_use_the_canonical_envelope() {
     assert_eq!(capabilities.status(), StatusCode::OK);
     let capabilities = json(capabilities).await;
     assert_eq!(capabilities["success"], true);
-    assert_eq!(capabilities["result"]["cf_version"], "1.0.0-beta.12");
+    assert_eq!(capabilities["result"]["cf_version"], "1.0.0-beta.21");
     assert_eq!(
         capabilities["result"]["compatibility"]["validation"],
         "workerd_code_version"

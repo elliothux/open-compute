@@ -6,10 +6,6 @@
     "config-0.22.0/package.json": "cf63b434d78dfdb917103f052fdc5a098b3ec7fe3e69316b52637cb8cc0044d6",
     "config-0.22.0/dist/public-DFY8wDEh.d.mts": "f5fb45b0abf43f31ff7f8a40f228034281aa79ba2f54e1b68edbe01fc48b20e7",
     "config-0.22.0/dist/public.d.mts": "5c43b00be69e45150796011f273ab079fedfdcb97e23bbad16bc37a3d52b4850",
-    "config-0.23.0/dist/index.d.mts": "fbdfe584644c400f8a75312f53e7a886fc299fe86617bc52ad25e45666ee6b0d",
-    "config-0.23.0/package.json": "f210e1a8b0983c8a079600c1e67a5f4d77577a4370d99df6e3633a5d1bf2ffe1",
-    "config-0.23.0/dist/public-Cf9CrRAi.d.mts": "a4083d35dbf33a06589a438f1b5d7820bff7dc01872c41cef2510966b0823e3a",
-    "config-0.23.0/dist/public.d.mts": "2c98b3cfe155394444be307b51993f5906c38a2b18f539ea91a20807bd09b338",
     "vite-plugin/dist/index.d.mts": "49b7316e1d73f6f414ea09c97d976a4b7c0f97181184822d5a178d1f268b95dd"
   },
   "outputs": {
@@ -17,16 +13,11 @@
     "config-0.22.0/dist/schema.d.mts": "6e072ff45601513bc998b4c1aa1fe3c02fae9e24f153871695bf0766d35e6189",
     "config-0.22.0/package.json": "25e11f4abeca6c46179105c8a8a342bdda2eec76e0cc029b9b02da05a196ab8c",
     "config-0.22.0/dist/public-DFY8wDEh.d.mts": "d158de93ff8a29871a09786d306c681e13ce5c630829bf66b61afde8c25c87a3",
-    "config-0.23.0/dist/index.d.mts": "24fb80a691879931a2171b8d4c53b4a226ce75796ed3fc1d31fb2917f1f68562",
-    "config-0.23.0/dist/schema.d.mts": "f6003dd94e8feb3f5dc6901c82b4e3d174aa8a50dce9cabae495469bdf2c4790",
-    "config-0.23.0/package.json": "ef07efc6768575f3b6d68f254fbb3cc44650a1e6447ab7ce0a370f7897f19194",
-    "config-0.23.0/dist/public-Cf9CrRAi.d.mts": "e53519b88ec5de317aeae76afc67671329c6216e094ead0113fdcbf3ee98f46f",
     "vite-plugin/dist/index.d.mts": "86d04c62dee10a2972c25ddb8137c514ad806919c90e3e9901797f54b1ef3779",
     "workers-types/build-tools-pipelines.d.ts": "11fa5fbb0e221c2265af3539a44c283aebc98b0bc4852de9ffb3988a9b30e88b"
   },
   "schemaHashes": {
-    "0.22.0": "2f3a609cabb47abddcd6cb80b0ddc09dbe243e1ca49b8d550a26596fb2a2c8f5",
-    "0.23.0": "424a8851815b2c12e597d9c047cf9f3d19d03f71d716ea80064e5245564744da"
+    "0.22.0": "2f3a609cabb47abddcd6cb80b0ddc09dbe243e1ca49b8d550a26596fb2a2c8f5"
   },
   "pipelineBlockSha256": "d0555b5c83dcb464353a0dea0f50e47675b90aee9d166b72bed853feb7576d47",
   "workerGlobals": [

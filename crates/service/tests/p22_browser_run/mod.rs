@@ -39,7 +39,7 @@ async fn cf(project: &Path, state: &Path, address: &str, account: &str, args: &[
     let package: Value =
         serde_json::from_slice(&fs::read(root.join("node_modules/cf/package.json")).unwrap())
             .unwrap();
-    assert_eq!(package["version"], "1.0.0-beta.12");
+    assert_eq!(package["version"], "1.0.0-beta.21");
     let output = tokio::time::timeout(
         Duration::from_secs(60),
         tokio::process::Command::new("node")

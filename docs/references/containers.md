@@ -229,7 +229,7 @@ openFiles = 1024
 前者限制快照数量，范围为 1–100000；后者限制保留字节，范围为 1–9223372036854775807。
 
 应用使用固定 cf、官方 Vite 插件和 `@cloudflare/containers`，配置方式见 [P23 标准配置](../implemented/p23-cloudflare-containers.md#51-标准配置)。
-2026-10-13，固定 `@cloudflare/config@0.23.0` 的绑定类型要求 `worker` 字段。
+固定 cf `1.0.0-beta.21` 使用的 `@cloudflare/config@0.28.0` 的绑定类型要求 `worker` 字段。
 仓库补丁按该 [官方配置转换器](https://github.com/cloudflare/workers-sdk/tree/main/packages/config) 的 `config.name` 比较目标 Worker。
 同 Worker 绑定省略 `script_name`；跨 Worker 绑定保留该字段，仍受官方跨 Worker 容器校验限制。
 转换回归见 `test/cf-config.test.mjs`；该补丁不增加跨 Worker 容器能力。

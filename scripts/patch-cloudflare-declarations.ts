@@ -40,7 +40,7 @@ function pipeline(ambient: string): string {
   return `${copyright}import type { ExecutionContext } from "@cloudflare/workers-types/index.ts";\n\n${inner}\n`;
 }
 
-function config(version: "0.22.0" | "0.23.0", original: string): void {
+function config(version: "0.22.0", original: string): void {
   const start = original.indexOf("//#region src/schema.d.ts");
   assert.ok(start >= 0);
   const end = original.indexOf("//#endregion", start) + "//#endregion".length;
@@ -97,7 +97,7 @@ async function generate(source: string, destination: string): Promise<void> {
     "workers-types/build-tools-pipelines.d.ts",
     pipeline(get("workers-types/index.d.ts")),
   );
-  for (const version of ["0.22.0", "0.23.0"] as const) {
+  for (const version of ["0.22.0"] as const) {
     const prefix = `config-${version}`;
     config(version, get(`${prefix}/dist/index.d.mts`));
     // Add only the types export; retain all existing package metadata values.
@@ -121,8 +121,7 @@ async function generate(source: string, destination: string): Promise<void> {
           `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`,
       ),
     );
-    const chunk =
-      version === "0.22.0" ? "public-DFY8wDEh.d.mts" : "public-Cf9CrRAi.d.mts";
+    const chunk = "public-DFY8wDEh.d.mts";
     output.set(
       `${prefix}/dist/${chunk}`,
       `import type { ${specification.workerGlobals.join(", ")} } from "@cloudflare/workers-types/index.ts";\n${get(`${prefix}/dist/${chunk}`).replace('from "cloudflare:pipelines"', 'from "@cloudflare/workers-types/build-tools-pipelines"')}`,
