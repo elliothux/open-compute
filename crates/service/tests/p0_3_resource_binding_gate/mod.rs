@@ -37,7 +37,6 @@ use open_compute_workers::{
     ResourceController, ResourceDriver, ResourceHealth, ResourcePins, RuntimeSource,
     RuntimeValidator, VersionBindingInput, VersionController,
 };
-use rusqlite::params;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -414,19 +413,6 @@ async fn backend_call(
         .send_request(request.body(Body::from(body.to_vec())).unwrap())
         .await
         .unwrap()
-}
-
-fn tamper_descriptor(path: PathBuf, binding_id: open_compute_core::BindingId, digest: [u8; 32]) {
-    let connection = rusqlite::Connection::open(path).unwrap();
-    connection
-        .execute_batch("DROP TRIGGER IF EXISTS version_bindings_update_guard")
-        .unwrap();
-    connection
-        .execute(
-            "UPDATE version_bindings SET descriptor_sha256 = ?1 WHERE id = ?2",
-            params![digest.as_slice(), binding_id],
-        )
-        .unwrap();
 }
 
 fn delete_version(

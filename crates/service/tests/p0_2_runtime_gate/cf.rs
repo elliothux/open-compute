@@ -9,7 +9,7 @@ use hyper_util::rt::TokioExecutor;
 use std::panic::AssertUnwindSafe;
 use std::process::Output;
 
-const CF_VERSION: &str = "1.0.0-beta.12";
+const CF_VERSION: &str = "1.0.0-beta.21";
 const WORKER_NAME: &str = "cf-runtime-gate";
 const WORKFLOW_NAME: &str = "cf-runtime-gate-flow";
 const FIXTURE_SECRET: &str = "cf-runtime-gate-secret";
@@ -319,7 +319,8 @@ async fn verify_project(
             .map(|version| (version.version_number, version.state))
             .collect::<Vec<_>>()
     );
-    let output = String::from_utf8_lossy(&uploaded.stdout);
+    // cf reports upload progress, including the version ID, on stderr.
+    let output = String::from_utf8_lossy(&uploaded.stderr);
     let reported = output
         .lines()
         .filter_map(|line| {
@@ -331,7 +332,7 @@ async fn verify_project(
             })
         })
         .collect::<Vec<_>>();
-    assert_eq!(reported.len(), 1);
+    assert_eq!(reported.len(), 1, "stderr={output}");
     let candidate = reported[0];
     assert_ne!(candidate, first);
     let accepted = versions
@@ -569,7 +570,7 @@ impl CfCommand<'_> {
 fn fixed_cf() -> PathBuf {
     let root = repo_root();
     let lock = std::fs::read_to_string(root.join("bun.lock")).unwrap();
-    assert!(lock.contains("\"cf\": [\"cf@1.0.0-beta.12\""));
+    assert!(lock.contains("\"cf\": [\"cf@1.0.0-beta.21\""));
     let package = root.join("node_modules/cf");
     let metadata: serde_json::Value =
         serde_json::from_slice(&std::fs::read(package.join("package.json")).unwrap()).unwrap();

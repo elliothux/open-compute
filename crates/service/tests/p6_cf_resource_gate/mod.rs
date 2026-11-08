@@ -35,7 +35,7 @@ use std::path::{Path, PathBuf};
 use std::process::Output;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-const CF_VERSION: &str = "1.0.0-beta.12";
+const CF_VERSION: &str = "1.0.0-beta.21";
 const ADMIN_TOKEN: &str = platform_process::ADMIN_TOKEN;
 const TOKEN: &str = "p6-cf-resource-gate-deployer-token";
 const READ_ONLY_TOKEN: &str = "p6-cf-resource-gate-read-only-token";

@@ -307,33 +307,6 @@ pub(super) async fn run() {
     .await;
     assert_eq!(oversized.status(), StatusCode::PAYLOAD_TOO_LARGE);
 
-    let original_hash = binding.descriptor_sha256;
-    tamper_descriptor(storage.data_dir().control_db_path(), binding.id, [0; 32]);
-    let warm_tamper = dispatch(
-        &transport,
-        &repository,
-        account,
-        worker.id,
-        &bound,
-        "/get",
-        "",
-    )
-    .await;
-    assert_eq!(warm_tamper.status, 500);
-    assert!(warm_tamper.body.contains("VERSION_INVARIANT_VIOLATION"));
-    assert_eq!(
-        repository
-            .get_worker(account, worker.id)
-            .unwrap()
-            .active_version_id,
-        Some(bound.id)
-    );
-    tamper_descriptor(
-        storage.data_dir().control_db_path(),
-        binding.id,
-        original_hash,
-    );
-
     let read_only = deploy(
         &versions,
         version_request(

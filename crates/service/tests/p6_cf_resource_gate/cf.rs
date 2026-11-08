@@ -58,7 +58,7 @@ impl CfCommand<'_> {
 pub(super) fn fixed_cf() -> PathBuf {
     let root = repo_root();
     let lock = fs::read_to_string(root.join("bun.lock")).unwrap();
-    assert!(lock.contains("\"cf\": [\"cf@1.0.0-beta.12\""));
+    assert!(lock.contains("\"cf\": [\"cf@1.0.0-beta.21\""));
     let package = root.join("node_modules/cf");
     let metadata: Value =
         serde_json::from_slice(&fs::read(package.join("package.json")).unwrap()).unwrap();
