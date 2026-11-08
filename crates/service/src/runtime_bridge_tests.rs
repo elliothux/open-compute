@@ -432,7 +432,7 @@ async fn transport_and_source_helpers_fail_closed_without_a_generation() {
     );
 
     assert_eq!(
-        original_url(&HeaderMap::new(), &"/path".parse().unwrap(), false)
+        original_url(&HeaderMap::new(), &"/path".parse().unwrap(), None)
             .unwrap_err()
             .code(),
         ErrorCode::RouteNotFound
@@ -440,12 +440,13 @@ async fn transport_and_source_helpers_fail_closed_without_a_generation() {
     let mut headers = HeaderMap::new();
     headers.insert(header::HOST, HeaderValue::from_static("example.com"));
     assert_eq!(
-        original_url(&headers, &"/path?q=1".parse().unwrap(), false).unwrap(),
+        original_url(&headers, &"/path?q=1".parse().unwrap(), None).unwrap(),
         "http://example.com/path?q=1"
     );
+    let trusted = TrustedOrigin("https://app.example.com:8443".to_owned());
     assert_eq!(
-        original_url(&headers, &"/path?q=1".parse().unwrap(), true).unwrap(),
-        "https://example.com/path?q=1"
+        original_url(&headers, &"/a%2Fb?x=%2F".parse().unwrap(), Some(&trusted)).unwrap(),
+        "https://app.example.com:8443/a%2Fb?x=%2F"
     );
     assert_eq!(
         insert_header(&mut headers, "x-test", "bad\nvalue")

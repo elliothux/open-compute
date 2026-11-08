@@ -21,6 +21,14 @@ pub(super) fn read_manifest(root: &Path) -> Result<OcdManifest, PlatformError> {
         gateway.validate()?;
         crate::config_load::validate_caddy_sources(gateway)?;
     }
+    if let Some(external) = &manifest.external_ingress {
+        let mut others = vec![manifest.server.public_addr()?];
+        others.extend(manifest.server.admin_addr()?);
+        if let Some(gateway) = &manifest.gateway {
+            others.push(gateway.https_listen);
+        }
+        external.validate(&others)?;
+    }
     manifest.artifacts.validate()?;
     manifest.metrics.validate()?;
     Ok(manifest)

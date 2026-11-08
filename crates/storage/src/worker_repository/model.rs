@@ -526,6 +526,87 @@ impl WorkerOriginExposure {
     }
 }
 
+/// Ingress transport that is allowed to serve one Worker origin.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum WorkerOriginTransport {
+    /// The daemon local HTTP listener.
+    LocalHttp,
+    /// The daemon-managed HTTPS Gateway.
+    ManagedGateway,
+    /// The operator reverse proxy behind the external ingress listener.
+    ExternalProxy {
+        /// Public scheme that the operator proxy serves.
+        scheme: open_compute_core::ExternalScheme,
+        /// Public port, with the scheme default stored explicitly.
+        port: u16,
+    },
+}
+
+impl WorkerOriginTransport {
+    /// Listener kind that may serve this transport.
+    #[must_use]
+    pub const fn ingress(self) -> IngressTransport {
+        match self {
+            Self::LocalHttp => IngressTransport::LocalHttp,
+            Self::ManagedGateway => IngressTransport::ManagedGateway,
+            Self::ExternalProxy { .. } => IngressTransport::ExternalProxy,
+        }
+    }
+
+    /// Exposure implied by the transport.
+    #[must_use]
+    pub const fn exposure(self) -> WorkerOriginExposure {
+        match self {
+            Self::LocalHttp => WorkerOriginExposure::Local,
+            Self::ManagedGateway | Self::ExternalProxy { .. } => WorkerOriginExposure::Public,
+        }
+    }
+
+    pub(crate) fn parse(
+        value: &str,
+        scheme: Option<String>,
+        port: Option<i64>,
+    ) -> rusqlite::Result<Self> {
+        match (value, scheme, port) {
+            ("local_http", None, None) => Ok(Self::LocalHttp),
+            ("managed_gateway", None, None) => Ok(Self::ManagedGateway),
+            ("external_proxy", Some(scheme), Some(port)) => Ok(Self::ExternalProxy {
+                scheme: open_compute_core::ExternalScheme::parse(&scheme)
+                    .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                port: u16::try_from(port)
+                    .ok()
+                    .filter(|port| *port != 0)
+                    .ok_or(rusqlite::Error::InvalidQuery)?,
+            }),
+            _ => Err(rusqlite::Error::InvalidQuery),
+        }
+    }
+}
+
+/// Listener that received one ingress request; requests cannot choose it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum IngressTransport {
+    /// The daemon local HTTP listener.
+    LocalHttp,
+    /// The private Gateway upstream.
+    ManagedGateway,
+    /// The trusted-peer external ingress listener.
+    ExternalProxy,
+}
+
+impl IngressTransport {
+    /// Persisted transport token matched by this listener.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::LocalHttp => "local_http",
+            Self::ManagedGateway => "managed_gateway",
+            Self::ExternalProxy => "external_proxy",
+        }
+    }
+}
+
 /// Active canonical-hostname route metadata.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -540,6 +621,8 @@ pub struct RouteRecord {
     pub hostname_ascii: String,
     /// Listener authority for this route.
     pub exposure: WorkerOriginExposure,
+    /// Ingress transport that serves this route.
+    pub transport: WorkerOriginTransport,
     /// Canonical path prefix.
     pub path_prefix: String,
     /// Optional named entrypoint.
@@ -548,6 +631,23 @@ pub struct RouteRecord {
     pub generation: u64,
     /// Route creation time.
     pub created_at_ms: i64,
+}
+
+impl RouteRecord {
+    /// The bound external origin of an external proxy route.
+    #[must_use]
+    pub fn external_origin(&self) -> Option<open_compute_core::ExternalOrigin> {
+        match self.transport {
+            WorkerOriginTransport::ExternalProxy { scheme, port } => {
+                Some(open_compute_core::ExternalOrigin {
+                    scheme,
+                    hostname: self.hostname_ascii.clone(),
+                    port,
+                })
+            }
+            WorkerOriginTransport::LocalHttp | WorkerOriginTransport::ManagedGateway => None,
+        }
+    }
 }
 
 /// Frozen route and active version identity for one request.

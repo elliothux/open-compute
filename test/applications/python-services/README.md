@@ -19,7 +19,7 @@ node test/conformance/applications/prepare-python-main.ts /absolute/python-servi
 The existing authorized Emscripten build interpreter is sufficient. No runtime or
 tool is downloaded implicitly, no PyWrangler version is checked, and cf owns
 upload/deploy/auth/resource operations. See the [main fixture preparation](../python-main/README.md)
-and the removal TODO in [PyWrangler removal TODO](../../../docs/p25-platform-follow-ups.md).
+and the removal TODO in [PyWrangler removal TODO](../../../docs/p26-platform-follow-ups.md).
 
 The reviewed original capture and dependency lock are retained under
 [`test/fixtures/python-services/`](../../fixtures/python-services/README.md).

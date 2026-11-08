@@ -27,6 +27,7 @@ mod retention;
 mod version_create;
 
 pub use model::*;
+pub use public_origins::PublicOriginTarget;
 pub use python_prepared::PythonPreparedArtifactRecord;
 
 pub(crate) fn validate_worker_name(name: &str) -> Result<(), PlatformError> {
@@ -336,6 +337,11 @@ fn map_route(row: &rusqlite::Row<'_>) -> rusqlite::Result<RouteRecord> {
         worker_id: row.get(2)?,
         hostname_ascii: row.get(3)?,
         exposure: WorkerOriginExposure::parse(&row.get::<_, String>(8)?)?,
+        transport: WorkerOriginTransport::parse(
+            &row.get::<_, String>(9)?,
+            row.get(10)?,
+            row.get(11)?,
+        )?,
         path_prefix: row.get(4)?,
         entrypoint: row.get(5)?,
         generation: u64::try_from(generation).map_err(|_| rusqlite::Error::InvalidQuery)?,

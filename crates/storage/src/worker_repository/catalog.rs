@@ -122,10 +122,11 @@ impl<'a> WorkerRepository<'a> {
             .map_err(|_| db_error())?;
             tx.execute(
                 "INSERT INTO worker_host_routes
-                 (id, claim_id, worker_id, namespace, exposure,
+                 (id, claim_id, worker_id, namespace, exposure, transport,
                   path_prefix, entrypoint, state,
                   generation, created_at_ms, updated_at_ms, deleted_at_ms)
-                 VALUES (?1, ?1, ?2, 'worker', 'local', '/', NULL, 'active', 1, ?3, ?3, NULL)",
+                 VALUES (?1, ?1, ?2, 'worker', 'local', 'local_http', '/', NULL, 'active', 1,
+                         ?3, ?3, NULL)",
                 params![route_id, worker_id, now_ms],
             )
             .map_err(|_| db_error())?;
@@ -157,6 +158,7 @@ impl<'a> WorkerRepository<'a> {
                 worker_id,
                 hostname_ascii: hostname.clone(),
                 exposure: WorkerOriginExposure::Local,
+                transport: WorkerOriginTransport::LocalHttp,
                 path_prefix: "/".to_owned(),
                 entrypoint: None,
                 generation: 1,

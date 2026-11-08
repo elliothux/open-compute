@@ -1,4 +1,4 @@
-# P25：平台后续能力
+# P26：平台后续能力
 
 状态：**planned**。本页保留尚未进入独立阶段的现有产品待办；开始实施时应冻结每项合同，若范围扩大则拆成独立编号。
 
@@ -17,11 +17,11 @@
 当前固定清单的 65 个成员均声明为 `supported`。
 2026-10-23（UTC），P23 的三项真实产品用例、coverage、最终 Gate 子进程及三宿主候选包已通过。
 最终 Gate 外层守卫失败与独立摘要补证分别保留；正式 tag 工作流与公开发布尚未执行。
-上述验收由 P23 记录，不作为 P25 的后续实现任务。
+上述验收由 P23 记录，不作为 P26 的后续实现任务。
 候选实现、正式 runtime、coverage、最终 Gate 与 package 的证据由 P23 结果页和 [Containers 运维](references/containers.md) 记录。
 基础路径或专项检查通过不改变完整成员资格。
 
-以下能力仍为 P25 的后续范围。
+以下能力仍为 P26 的后续范围。
 
 - [ ] 实现 application 主进程 stdout/stderr 采集。
       `observability.logs` 当前只保存请求意图；`enabled = true` 不证明实际采集。
@@ -36,4 +36,4 @@
 
 上面的 `.env` 待办只针对 instance 配置，不是应用项目 dotenv；应用配置与 CLI 凭据文件规则由官方 cf 负责，见 P20。
 
-workerd compatibility authority 已拆入 R3。Q1 coverage 与 P24 macOS 签名已有各自的活动方案，不在这里重复跟踪。
+workerd compatibility authority 已拆入 R3。Q1 coverage 与 P25 macOS 签名已有各自的活动方案，不在这里重复跟踪。

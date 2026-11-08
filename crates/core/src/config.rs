@@ -13,6 +13,7 @@ mod ai;
 mod browser;
 mod containers;
 mod extensions;
+mod external_ingress;
 mod public_gateway;
 mod scheduler;
 pub use ai::{
@@ -26,6 +27,10 @@ pub use browser::{BrowserBackendConfig, BrowserConfig, validate_cdp_url};
 pub use containers::{ContainersConfig, validate_container_socket};
 pub use extensions::{
     LocalExtensionConfig, PrivateHttpGrant, PrivateHttpServiceConfig, validate_local_extension_name,
+};
+pub use external_ingress::{
+    DaemonExternalIngressConfig, ExternalIngressConfig, ExternalOrigin, ExternalScheme,
+    validate_external_hostname,
 };
 pub use public_gateway::{
     CaddyFileConfig, DaemonGatewayConfig, GatewayDnsRecord, GatewayDnsRecordKind,
@@ -180,6 +185,9 @@ pub struct PlatformConfig {
     /// Optional public base domain assigned to this instance.
     #[serde(default)]
     pub public_gateway: Option<PublicDomainConfig>,
+    /// Optional exact hostnames delegated to this instance for external proxy origins.
+    #[serde(default)]
+    pub external_ingress: Option<ExternalIngressConfig>,
     /// Statically configured local native extensions keyed by service name.
     #[serde(default)]
     pub extensions: std::collections::BTreeMap<String, LocalExtensionConfig>,
@@ -259,6 +267,20 @@ impl PlatformConfig {
         self.dashboard.validate();
         if let Some(gateway) = &self.public_gateway {
             gateway.validate()?;
+        }
+        if let Some(external) = &self.external_ingress {
+            external.validate()?;
+            if let Some(gateway) = &self.public_gateway
+                && external.hostnames.iter().any(|hostname| {
+                    hostname == &gateway.base_domain
+                        || hostname.ends_with(&format!(".{}", gateway.base_domain))
+                })
+            {
+                return Err(PlatformError::new(
+                    ErrorCode::ConfigInvalid,
+                    "external hostnames cannot use the managed public base domain",
+                ));
+            }
         }
         if self.extensions.len() > 64 {
             return Err(PlatformError::new(
@@ -342,6 +364,7 @@ impl PlatformConfig {
             scheduler: SchedulerConfig::default(),
             dashboard: DashboardConfig::default(),
             public_gateway: None,
+            external_ingress: None,
             extensions: std::collections::BTreeMap::new(),
             private_services: std::collections::BTreeMap::new(),
         }

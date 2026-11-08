@@ -30,7 +30,7 @@ bun run --filter @open-compute/python-queues-fixture build
 Only Python builds use the temporary user-installed PyWrangler bridge. cf owns
 upload, deployment, authentication and resources; the bridge does not install
 or validate the PyWrangler version. Its removal TODO and missing-tool behavior
-are documented in [PyWrangler removal TODO](../../../docs/p25-platform-follow-ups.md).
+are documented in [PyWrangler removal TODO](../../../docs/p26-platform-follow-ups.md).
 Generated Python dependencies and Build Output remain untracked. The developer
 capture tool consumes a fresh prebuilt copy under the repository's `.temp/`:
 

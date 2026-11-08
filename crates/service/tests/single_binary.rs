@@ -24,6 +24,8 @@ use interactive_setup::interactive_instance_setup;
 
 #[path = "single_binary/evidence.rs"]
 mod evidence;
+#[path = "single_binary/external_ingress.rs"]
+mod external_ingress;
 #[path = "single_binary/package_scope.rs"]
 mod package_scope;
 #[path = "single_binary/provider_ack.rs"]

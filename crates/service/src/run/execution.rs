@@ -138,7 +138,16 @@ async fn serve(composed: composition::ComposedPlatform) -> Result<(), PlatformEr
 
     let state = state
         .with_local_origin_addr(public_addr)
-        .with_control_origin_addr(admin_addr.unwrap_or(public_addr));
+        .with_control_origin_addr(admin_addr.unwrap_or(public_addr))
+        .with_external_ingress(
+            loaded
+                .config
+                .external_ingress
+                .as_ref()
+                .map(|external| external.hostnames.clone())
+                .unwrap_or_default(),
+            opts.external_ingress_bound.clone(),
+        );
     record(&opts, "listen");
     #[cfg(any(test, feature = "test-support"))]
     if let Err(err) = fail_after(&opts, FailAfter::Listen, &metrics, StartStage::Listen) {

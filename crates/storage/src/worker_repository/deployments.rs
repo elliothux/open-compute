@@ -335,28 +335,29 @@ impl<'a> WorkerRepository<'a> {
         })
     }
 
-    /// Resolve one active canonical hostname on a trusted listener and freeze its active version.
+    /// Resolve one active canonical hostname for the ingress transport that received the
+    /// request, and freeze its active version.
     pub fn resolve_route(
         &self,
         hostname_ascii: &str,
         path: &str,
-        exposure: WorkerOriginExposure,
+        transport: IngressTransport,
     ) -> Result<RouteSnapshot, PlatformError> {
         self.db.with_read(|conn| {
             let route = conn
                 .query_row(
                     "SELECT r.id, (SELECT instance_id FROM instance_identity), r.worker_id, c.hostname_ascii,
                             r.path_prefix, r.entrypoint, r.generation, r.created_at_ms,
-                            r.exposure
+                            r.exposure, r.transport, r.external_scheme, r.external_port
                      FROM hostname_claims c
                      JOIN worker_host_routes r ON r.claim_id = c.id
                      WHERE c.hostname_ascii = ?1
-                       AND c.namespace = 'worker' AND c.exposure = ?3
+                       AND c.namespace = 'worker' AND r.transport = ?3
                        AND r.namespace = c.namespace AND r.exposure = c.exposure
                        AND c.state = 'active' AND r.state = 'active'
                        AND ?2 LIKE r.path_prefix || '%'
                      LIMIT 1",
-                    params![hostname_ascii, path, exposure.as_str()],
+                    params![hostname_ascii, path, transport.as_str()],
                     map_route,
                 )
                 .optional()
@@ -434,7 +435,7 @@ impl<'a> WorkerRepository<'a> {
                 .prepare(
                     "SELECT r.id, (SELECT instance_id FROM instance_identity), r.worker_id, c.hostname_ascii,
                             r.path_prefix, r.entrypoint, r.generation, r.created_at_ms,
-                            r.exposure
+                            r.exposure, r.transport, r.external_scheme, r.external_port
                      FROM worker_host_routes r
                      JOIN hostname_claims c ON c.id = r.claim_id
                      WHERE (SELECT instance_id FROM instance_identity) = ?1 AND r.worker_id = ?2

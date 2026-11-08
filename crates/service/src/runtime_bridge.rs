@@ -303,9 +303,11 @@ pub(in crate::runtime_bridge) struct EndpointSnapshot {
 use source_server::source_platform_error;
 pub use source_server::*;
 pub use transport::WorkerdTransport;
-/// Set only by the private, peer-verified Caddy ingress after TLS termination.
-#[derive(Clone, Copy)]
-pub(crate) struct TrustedHttpsOrigin;
+/// Validated `scheme://authority` of a public ingress request.
+///
+/// Only the Gateway and external ingress set it, after peer, Host, route, and transport checks.
+#[derive(Clone)]
+pub(crate) struct TrustedOrigin(pub(crate) String);
 #[cfg(test)]
 use transport::{validate_alarm_dispatch_result, validate_alarm_repair_result};
 use transport::{
@@ -313,16 +315,24 @@ use transport::{
     validate_scheduled_dispatch_request, validate_scheduled_dispatch_result,
 };
 
-fn original_url(headers: &HeaderMap, uri: &Uri, https: bool) -> Result<String, PlatformError> {
-    let host = headers
-        .get(header::HOST)
-        .and_then(|value| value.to_str().ok())
-        .ok_or_else(|| {
-            PlatformError::new(ErrorCode::RouteNotFound, "public request Host is required")
-        })?;
+fn original_url(
+    headers: &HeaderMap,
+    uri: &Uri,
+    trusted: Option<&TrustedOrigin>,
+) -> Result<String, PlatformError> {
     let path = uri.path_and_query().map_or("/", |value| value.as_str());
-    let scheme = if https { "https" } else { "http" };
-    let value = format!("{scheme}://{host}{path}");
+    let value = match trusted {
+        Some(TrustedOrigin(origin)) => format!("{origin}{path}"),
+        None => {
+            let host = headers
+                .get(header::HOST)
+                .and_then(|value| value.to_str().ok())
+                .ok_or_else(|| {
+                    PlatformError::new(ErrorCode::RouteNotFound, "public request Host is required")
+                })?;
+            format!("http://{host}{path}")
+        }
+    };
     HeaderValue::from_str(&value).map_err(|_| {
         PlatformError::new(ErrorCode::RouteNotFound, "public request URL is invalid")
     })?;

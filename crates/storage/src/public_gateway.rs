@@ -28,6 +28,23 @@ impl<'a> PublicGatewayRepository<'a> {
                 )
                 .optional()
                 .map_err(|_| db_error())?;
+            let external_conflict: bool = tx
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM worker_host_routes r
+                     JOIN hostname_claims c ON c.id = r.claim_id
+                     WHERE r.transport = 'external_proxy' AND r.state = 'active'
+                       AND (c.hostname_ascii = ?1
+                            OR substr(c.hostname_ascii, -length(?1) - 1) = '.' || ?1))",
+                    [base_domain],
+                    |row| row.get(0),
+                )
+                .map_err(|_| db_error())?;
+            if external_conflict {
+                return Err(PlatformError::new(
+                    ErrorCode::RouteConflict,
+                    "an external Worker origin already uses the public base domain",
+                ));
+            }
             if let Some((domain, _)) = &current
                 && PublicGatewayConfig::validate_base_domain(domain).is_err()
             {
@@ -77,8 +94,8 @@ impl<'a> PublicGatewayRepository<'a> {
                 Some(_) => {
                     let active: bool = tx
                         .query_row(
-                            "SELECT EXISTS(SELECT 1 FROM hostname_claims
-                             WHERE exposure = 'public' AND state = 'active')",
+                            "SELECT EXISTS(SELECT 1 FROM worker_host_routes
+                             WHERE transport = 'managed_gateway' AND state = 'active')",
                             [],
                             |row| row.get(0),
                         )
@@ -125,8 +142,8 @@ impl<'a> PublicGatewayRepository<'a> {
         self.db.with_immediate(|tx| {
             let active: bool = tx
                 .query_row(
-                    "SELECT EXISTS(SELECT 1 FROM hostname_claims
-                     WHERE exposure = 'public' AND state = 'active')",
+                    "SELECT EXISTS(SELECT 1 FROM worker_host_routes
+                     WHERE transport = 'managed_gateway' AND state = 'active')",
                     [],
                     |row| row.get(0),
                 )

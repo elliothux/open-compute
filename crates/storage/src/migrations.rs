@@ -230,16 +230,25 @@ fn run_invariants(tx: &Transaction<'_>) -> Result<(), PlatformError> {
                    OR r.namespace != c.namespace
                    OR (r.state = 'active' AND w.deleted_at_ms IS NOT NULL)
                 UNION ALL
-                SELECT 1 FROM hostname_claims c
+                SELECT 1 FROM worker_host_routes r
+                JOIN hostname_claims c ON c.id = r.claim_id
                 LEFT JOIN public_gateway_domains d ON d.id = 1
                 LEFT JOIN public_gateway_namespaces n
                   ON n.domain_id = d.id AND n.name = 'worker'
-                WHERE c.exposure = 'public' AND c.state = 'active'
+                WHERE r.transport = 'managed_gateway' AND r.state = 'active'
                   AND (d.id IS NULL OR n.name IS NULL
                        OR d.state IN ('disabling', 'disabled')
                        OR n.state IN ('disabling', 'disabled') OR
                        substr(c.hostname_ascii, -length(d.base_domain_ascii) - 1)
                            != '.' || d.base_domain_ascii)
+                UNION ALL
+                SELECT 1 FROM worker_host_routes r
+                JOIN hostname_claims c ON c.id = r.claim_id
+                JOIN public_gateway_domains d ON d.id = 1
+                WHERE r.transport = 'external_proxy' AND r.state = 'active'
+                  AND (c.hostname_ascii = d.base_domain_ascii OR
+                       substr(c.hostname_ascii, -length(d.base_domain_ascii) - 1)
+                           = '.' || d.base_domain_ascii)
                 UNION ALL
                 SELECT 1 FROM public_gateway_domains d
                 LEFT JOIN public_gateway_namespaces n

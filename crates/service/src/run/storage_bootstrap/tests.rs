@@ -83,7 +83,17 @@ fn bootstrap_rejects_gateway_removal_while_public_origin_is_active() {
         .activate_workers("compute.example.com", 2)
         .unwrap();
     workers
-        .set_public_origin(account, worker.id, Some("app"), RequestId::generate(), 3)
+        .set_public_origin(
+            account,
+            worker.id,
+            Some(
+                &open_compute_storage::worker_repository::PublicOriginTarget::ManagedGateway {
+                    name: "app".to_owned(),
+                },
+            ),
+            RequestId::generate(),
+            3,
+        )
         .unwrap();
     drop(scheduler);
     drop(storage);

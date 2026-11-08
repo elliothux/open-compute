@@ -36,6 +36,7 @@ struct RegisteredInstance {
     view: InstanceView,
     tokens: RegisteredTokens,
     public_base_domain: Option<String>,
+    external_hostnames: Vec<String>,
     cache: Option<LiveCache>,
 }
 
@@ -145,6 +146,7 @@ impl DaemonApi {
                     },
                     tokens,
                     public_base_domain: record.public_base_domain.clone(),
+                    external_hostnames: record.external_hostnames.clone(),
                     cache: None,
                 },
             );
@@ -234,6 +236,7 @@ impl DaemonApi {
         deployer: &SecretString,
         read_only: &SecretString,
         public_base_domain: Option<&str>,
+        external_hostnames: &[String],
     ) -> Result<bool, PlatformError> {
         let instances = self.instances.read().map_err(|_| unavailable())?;
         let Some(entry) = instances.get(id) else {
@@ -242,7 +245,20 @@ impl DaemonApi {
         Ok(self.admin_token.expose() == admin.expose()
             && entry.tokens.deployer.expose() == deployer.expose()
             && entry.tokens.read_only.expose() == read_only.expose()
-            && entry.public_base_domain.as_deref() == public_base_domain)
+            && entry.public_base_domain.as_deref() == public_base_domain
+            && entry.external_hostnames == external_hostnames)
+    }
+
+    /// The registered instance, running or not, that the operator authorized for `hostname`.
+    pub(crate) fn external_hostname_owner(
+        &self,
+        hostname: &str,
+    ) -> Result<Option<InstanceId>, PlatformError> {
+        let instances = self.instances.read().map_err(|_| unavailable())?;
+        Ok(instances
+            .iter()
+            .find(|(_, entry)| entry.external_hostnames.iter().any(|name| name == hostname))
+            .map(|(id, _)| *id))
     }
 
     pub(crate) fn mark(
@@ -284,6 +300,7 @@ impl DaemonApi {
                 },
                 tokens: credentials,
                 public_base_domain: record.public_base_domain.clone(),
+                external_hostnames: record.external_hostnames.clone(),
                 cache: None,
             },
         );
@@ -307,6 +324,7 @@ impl DaemonApi {
         entry.view.name = record.name.clone();
         entry.tokens = credentials;
         entry.public_base_domain = record.public_base_domain.clone();
+        entry.external_hostnames = record.external_hostnames.clone();
         Ok(())
     }
 

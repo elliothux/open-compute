@@ -55,7 +55,7 @@ Owner、client 与 attachment grant 分别撤销所属回调，不把 native Own
   外层运行器因依赖文件描述符检查以退出码 1 结束，独立补查确认输入摘要一致。报告：`.temp/gate-run/20261023T175731-7f3ea228/report.json`。
 - 三宿主发行包、十项安装范围和 x64 压力恢复检查通过。
 - 2026-10-24 正式 tag 资格失败，公开发布未执行。
-- 主进程日志采集仍未实现，见 [P25](../p25-platform-follow-ups.md)。
+- 主进程日志采集仍未实现，见 [P26](../p26-platform-follow-ups.md)。
 
 ### 4.1 CF 兼容性复核
 

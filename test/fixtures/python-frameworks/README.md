@@ -45,7 +45,7 @@ same capture tool with a third `django`, `flask` or `fastapi` argument. Review
 original bytes, SDK hashes and wheel provenance before retaining input. Do not
 fabricate bundles or overwrite retained failure evidence. The bridge uses
 user-installed PyWrangler with no version check. Upload/deploy/auth/resources use
-cf. See [PyWrangler removal TODO](../../../docs/p25-platform-follow-ups.md) for the removal TODO.
+cf. See [PyWrangler removal TODO](../../../docs/p26-platform-follow-ups.md) for the removal TODO.
 
 The Django input was regenerated after declaring `.localhost` as an allowed
 application host for the ordinary daemon Gate. The prior capture is retained under

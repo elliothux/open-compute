@@ -9,7 +9,7 @@ use axum::response::{IntoResponse, Response};
 use open_compute_artifacts::ArtifactStore;
 use open_compute_core::{ErrorCode, InstanceId, PlatformError, RequestId, VersionId, WorkerId};
 use open_compute_storage::PlatformStorage;
-use open_compute_storage::worker_repository::{WorkerOriginExposure, WorkerRepository};
+use open_compute_storage::worker_repository::{IngressTransport, WorkerRepository};
 use open_compute_workers::{BundleLimits, VersionPins};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -238,16 +238,16 @@ impl WorkerTrafficRegistry {
 
 /// Resolve a local Worker origin from the public HTTP listener.
 pub async fn local_ingress(State(state): State<HttpState>, mut request: Request) -> Response {
-    request.headers_mut().remove("cf-connecting-ip");
-    if let Some(peer) = request
-        .extensions()
-        .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
-        .map(|value| value.0.ip().to_string())
-        && let Ok(value) = axum::http::HeaderValue::from_str(&peer)
+    replace_client_ip_with_peer(&mut request);
+    let hostname = match request_host(&request)
+        .and_then(|value| canonical_request_host(value, state.local_origin_port()))
     {
-        request.headers_mut().insert("cf-connecting-ip", value);
-    }
-    dispatch_ingress(state, request, WorkerOriginExposure::Local).await
+        Ok(hostname) => hostname,
+        Err(error) => {
+            return crate::http::platform_error_response(&error, request_id(&request));
+        }
+    };
+    dispatch_ingress(state, request, IngressTransport::LocalHttp, hostname, None).await
 }
 
 /// Resolve a public Worker origin only on the private Caddy upstream listener.
@@ -263,49 +263,131 @@ pub async fn gateway_ingress(State(state): State<HttpState>, mut request: Reques
     {
         request.headers_mut().insert("cf-connecting-ip", value);
     }
+    let hostname =
+        match request_host(&request).and_then(|value| canonical_request_host(value, Some(443))) {
+            Ok(hostname) => hostname,
+            Err(error) => {
+                return crate::http::platform_error_response(&error, request_id(&request));
+            }
+        };
     request
         .extensions_mut()
-        .insert(crate::runtime_bridge::TrustedHttpsOrigin);
-    dispatch_ingress(state, request, WorkerOriginExposure::Public).await
+        .insert(crate::runtime_bridge::TrustedOrigin(format!(
+            "https://{hostname}"
+        )));
+    dispatch_ingress(
+        state,
+        request,
+        IngressTransport::ManagedGateway,
+        hostname,
+        None,
+    )
+    .await
 }
 
-async fn dispatch_ingress(
-    state: HttpState,
-    request: Request,
-    exposure: WorkerOriginExposure,
-) -> Response {
-    let request_id = request_id(&request);
-    let Some(api) = state.worker_api() else {
-        return StatusCode::NOT_FOUND.into_response();
+/// Resolve an external proxy origin on the trusted-peer external ingress listener.
+///
+/// The daemon router already checked the TCP peer, the Host header, and the instance.
+pub async fn external_ingress(State(state): State<HttpState>, mut request: Request) -> Response {
+    replace_client_ip_with_peer(&mut request);
+    request.headers_mut().remove("x-real-ip");
+    let Some((hostname, port)) = request
+        .headers()
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok())
+        .and_then(external_request_authority)
+    else {
+        return StatusCode::BAD_REQUEST.into_response();
     };
-    let hostname = match request
+    dispatch_ingress(
+        state,
+        request,
+        IngressTransport::ExternalProxy,
+        hostname,
+        port,
+    )
+    .await
+}
+
+/// Split an external ingress Host into its canonical hostname and optional explicit port.
+pub(crate) fn external_request_authority(value: &str) -> Option<(String, Option<u16>)> {
+    let authority = value.parse::<axum::http::uri::Authority>().ok()?;
+    if authority.as_str() != value || value.contains('@') {
+        return None;
+    }
+    if value.contains(':') && authority.port_u16().is_none_or(|port| port == 0) {
+        return None;
+    }
+    open_compute_core::validate_external_hostname(authority.host()).ok()?;
+    Some((authority.host().to_owned(), authority.port_u16()))
+}
+
+fn replace_client_ip_with_peer(request: &mut Request) {
+    request.headers_mut().remove("cf-connecting-ip");
+    if let Some(peer) = request
+        .extensions()
+        .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+        .map(|value| value.0.ip().to_canonical().to_string())
+        && let Ok(value) = axum::http::HeaderValue::from_str(&peer)
+    {
+        request.headers_mut().insert("cf-connecting-ip", value);
+    }
+}
+
+fn request_host(request: &Request) -> Result<&str, PlatformError> {
+    request
         .headers()
         .get(header::HOST)
         .and_then(|value| value.to_str().ok())
         .ok_or_else(|| PlatformError::new(ErrorCode::RouteNotFound, "Host header is required"))
-        .and_then(|value| {
-            canonical_request_host(
-                value,
-                if exposure == WorkerOriginExposure::Local {
-                    state.local_origin_port()
-                } else {
-                    Some(443)
-                },
-            )
-        }) {
-        Ok(hostname) => hostname,
-        Err(error) => return crate::http::platform_error_response(&error, request_id),
+}
+
+async fn dispatch_ingress(
+    state: HttpState,
+    mut request: Request,
+    transport: IngressTransport,
+    hostname: String,
+    host_port: Option<u16>,
+) -> Response {
+    let request_id = request_id(&request);
+    let not_found = |error: &PlatformError| {
+        if transport == IngressTransport::ExternalProxy {
+            StatusCode::NOT_FOUND.into_response()
+        } else {
+            crate::http::platform_error_response(error, request_id)
+        }
+    };
+    let Some(api) = state.worker_api() else {
+        return StatusCode::NOT_FOUND.into_response();
     };
     let repo = WorkerRepository::new(api.storage.db());
-    let snapshot = match repo.resolve_route(&hostname, request.uri().path(), exposure) {
+    let snapshot = match repo.resolve_route(&hostname, request.uri().path(), transport) {
         Ok(snapshot) => snapshot,
+        Err(error) if error.code() == ErrorCode::RouteNotFound => return not_found(&error),
         Err(error) => return crate::http::platform_error_response(&error, request_id),
     };
+    // External origins check the public port in Host against the binding, not the listener.
+    if transport == IngressTransport::ExternalProxy {
+        let Some(origin) = snapshot
+            .route
+            .external_origin()
+            .filter(|origin| host_port.unwrap_or(origin.scheme.default_port()) == origin.port)
+        else {
+            return StatusCode::NOT_FOUND.into_response();
+        };
+        let Ok(host) = axum::http::HeaderValue::from_str(&origin.authority()) else {
+            return StatusCode::NOT_FOUND.into_response();
+        };
+        request.headers_mut().insert(header::HOST, host);
+        request
+            .extensions_mut()
+            .insert(crate::runtime_bridge::TrustedOrigin(origin.origin()));
+    }
     let Some(deployment_id) = snapshot.worker.active_deployment_id else {
-        return crate::http::platform_error_response(
-            &PlatformError::new(ErrorCode::RouteNotFound, "route has no active deployment"),
-            request_id,
-        );
+        return not_found(&PlatformError::new(
+            ErrorCode::RouteNotFound,
+            "route has no active deployment",
+        ));
     };
     let pin = match api.pins.pin_deployment(snapshot.version.id, deployment_id) {
         Ok(pin) => pin,

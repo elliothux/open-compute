@@ -16,7 +16,7 @@ use open_compute_core::{InstanceId, RequestId, SecretString, WorkerId};
 use open_compute_storage::PlatformStorage;
 use open_compute_storage::public_gateway::PublicGatewayRepository;
 use open_compute_storage::worker_repository::{
-    RouteRecord, WorkerOriginExposure, WorkerRepository,
+    RouteRecord, WorkerOriginExposure, WorkerOriginTransport, WorkerRepository,
 };
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI32, Ordering};
@@ -75,6 +75,7 @@ fn endpoints_are_projected_per_trusted_ingress() {
         worker_id: WorkerId::generate(),
         hostname_ascii: "worker.example.com".to_owned(),
         exposure: WorkerOriginExposure::Public,
+        transport: WorkerOriginTransport::ManagedGateway,
         path_prefix: "/".to_owned(),
         entrypoint: None,
         generation: 1,
@@ -93,11 +94,41 @@ fn endpoints_are_projected_per_trusted_ingress() {
     assert_eq!(public["kind"], "public_origin");
     assert_eq!(public["scope"], "public_network");
     assert_eq!(public["url"], "https://worker.example.com/");
+    assert_eq!(public["transport"], "managed_gateway");
     pid.store(43, Ordering::Release);
     assert!(project_worker_endpoint(route.clone(), &state).is_none());
+
+    let external = RouteRecord {
+        transport: WorkerOriginTransport::ExternalProxy {
+            scheme: open_compute_core::ExternalScheme::Https,
+            port: 8443,
+        },
+        ..route.clone()
+    };
+    assert!(project_worker_endpoint(external.clone(), &state).is_none());
+    let bound = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let external_state = state
+        .clone()
+        .with_external_ingress(vec!["worker.example.com".to_owned()], Some(bound.clone()));
+    let endpoint = project_worker_endpoint(external.clone(), &external_state)
+        .unwrap()
+        .unwrap();
+    let endpoint = serde_json::to_value(endpoint).unwrap();
+    assert_eq!(endpoint["kind"], "public_origin");
+    assert_eq!(endpoint["transport"], "external_proxy");
+    assert_eq!(endpoint["url"], "https://worker.example.com:8443/");
+    bound.store(false, Ordering::Release);
+    assert!(project_worker_endpoint(external.clone(), &external_state).is_none());
+    let unauthorized = state.clone().with_external_ingress(
+        vec!["other.example.com".to_owned()],
+        Some(Arc::new(std::sync::atomic::AtomicBool::new(true))),
+    );
+    assert!(project_worker_endpoint(external, &unauthorized).is_none());
+
     let local = project_worker_endpoint(
         RouteRecord {
             exposure: WorkerOriginExposure::Local,
+            transport: WorkerOriginTransport::LocalHttp,
             ..route
         },
         &state,
@@ -191,7 +222,9 @@ async fn public_origin_mutation_requires_write_role() {
             .uri(path)
             .header(header::AUTHORIZATION, "Bearer read-token")
             .header(header::CONTENT_TYPE, "application/json")
-            .body(Body::from(r#"{"name":"worker"}"#))
+            .body(Body::from(
+                r#"{"transport":"managed_gateway","name":"worker"}"#,
+            ))
             .unwrap();
         let response = router.clone().oneshot(request).await.unwrap();
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
@@ -250,7 +283,9 @@ async fn public_origin_api_preserves_local_entrypoint() {
         .uri(&path)
         .header(header::AUTHORIZATION, "Bearer deployer-token")
         .header(header::CONTENT_TYPE, "application/json")
-        .body(Body::from(r#"{"name":"app"}"#))
+        .body(Body::from(
+            r#"{"transport":"managed_gateway","name":"app"}"#,
+        ))
         .unwrap();
     let response = router.clone().oneshot(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
@@ -260,13 +295,17 @@ async fn public_origin_api_preserves_local_entrypoint() {
         .uri(&path)
         .header(header::AUTHORIZATION, "Bearer deployer-token")
         .header(header::CONTENT_TYPE, "application/json")
-        .body(Body::from(r#"{"name":"app"}"#))
+        .body(Body::from(
+            r#"{"transport":"managed_gateway","name":"app"}"#,
+        ))
         .unwrap();
     let response = router.clone().oneshot(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     let body: serde_json::Value =
         serde_json::from_slice(&to_bytes(response.into_body(), 4096).await.unwrap()).unwrap();
-    assert_eq!(body["result"]["url"], "https://app.compute.example.com/");
+    assert_eq!(body["result"]["origin"], "https://app.compute.example.com");
+    assert_eq!(body["result"]["transport"], "managed_gateway");
+    assert_eq!(body["result"]["ingress_available"], true);
     let response = router
         .clone()
         .oneshot(authed(&endpoints_path))
@@ -282,7 +321,9 @@ async fn public_origin_api_preserves_local_entrypoint() {
         .uri(&path)
         .header(header::AUTHORIZATION, "Bearer deployer-token")
         .header(header::CONTENT_TYPE, "application/json")
-        .body(Body::from(r#"{"name":"renamed"}"#))
+        .body(Body::from(
+            r#"{"transport":"managed_gateway","name":"renamed"}"#,
+        ))
         .unwrap();
     let response = router.clone().oneshot(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
@@ -299,7 +340,8 @@ async fn public_origin_api_preserves_local_entrypoint() {
     let body: serde_json::Value =
         serde_json::from_slice(&to_bytes(response.into_body(), 4096).await.unwrap()).unwrap();
     assert_eq!(body["result"]["name"], "app");
-    assert_eq!(body["result"]["url"], "https://app.compute.example.com/");
+    assert_eq!(body["result"]["origin"], "https://app.compute.example.com");
+    assert_eq!(body["result"]["ingress_available"], false);
     let response = router
         .clone()
         .oneshot(admin(Method::DELETE, &path, Body::empty()))
@@ -311,6 +353,209 @@ async fn public_origin_api_preserves_local_entrypoint() {
     let body: serde_json::Value =
         serde_json::from_slice(&to_bytes(response.into_body(), 4096).await.unwrap()).unwrap();
     assert_eq!(body["result"].as_array().unwrap().len(), 1);
+}
+
+fn put_origin(path: &str, token: &str, body: &'static str) -> Request {
+    Request::builder()
+        .method(Method::PUT)
+        .uri(path)
+        .header(header::AUTHORIZATION, format!("Bearer {token}"))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(body))
+        .unwrap()
+}
+
+async fn json_body(response: Response) -> serde_json::Value {
+    serde_json::from_slice(&to_bytes(response.into_body(), 4096).await.unwrap()).unwrap()
+}
+
+#[tokio::test]
+async fn external_public_origin_requires_authorization_not_gateway() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("data");
+    let storage = Arc::new(
+        PlatformStorage::bootstrap(
+            &DataConfig {
+                path: root.clone(),
+                master_key_file: root.join("keys/master.key"),
+                master_key_env: None,
+                sqlite_busy_timeout_ms: 5_000,
+                free_space_soft_bytes: 1,
+                free_space_hard_bytes: 1,
+            },
+            &SystemClock,
+        )
+        .unwrap(),
+    );
+    let account = storage.identity().instance_id;
+    let workers = WorkerRepository::new(storage.db());
+    for name in ["app", "other"] {
+        workers
+            .create_worker(account, name, RequestId::generate(), 1, 100)
+            .unwrap();
+    }
+    let authority = V4InstanceContext::new(
+        storage.identity().instance_id,
+        storage.identity().created_at_ms,
+    );
+    let path = format!(
+        "/accounts/{}/open-compute/workers/app/public-origin",
+        authority.public_id(),
+    );
+    let other_path = format!(
+        "/accounts/{}/open-compute/workers/other/public-origin",
+        authority.public_id(),
+    );
+    let endpoints_path = format!(
+        "/accounts/{}/open-compute/workers/app/endpoints",
+        authority.public_id(),
+    );
+    let bound = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let router = app(state()
+        .with_v4_instance_context(authority)
+        .with_platform_storage(storage)
+        .with_local_origin_addr("127.0.0.1:8787".parse().unwrap())
+        .with_external_ingress(
+            vec!["example.com".to_owned(), "app.example.com".to_owned()],
+            Some(bound.clone()),
+        ));
+
+    for (token, body, status) in [
+        (
+            "read-token",
+            r#"{"transport":"external_proxy","origin":"https://example.com"}"#,
+            StatusCode::FORBIDDEN,
+        ),
+        (
+            "deployer-token",
+            r#"{"transport":"external_proxy","origin":"https://unlisted.example.com"}"#,
+            StatusCode::FORBIDDEN,
+        ),
+        (
+            "deployer-token",
+            r#"{"transport":"external_proxy","origin":"https://example.com/app"}"#,
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            "deployer-token",
+            r#"{"transport":"external_proxy","name":"app"}"#,
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            "deployer-token",
+            r#"{"transport":"external_proxy","origin":"https://example.com","name":"app"}"#,
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            "deployer-token",
+            r#"{"name":"app"}"#,
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            "deployer-token",
+            r#"{"transport":"managed_gateway","name":"app"}"#,
+            StatusCode::SERVICE_UNAVAILABLE,
+        ),
+    ] {
+        let response = router
+            .clone()
+            .oneshot(put_origin(&path, token, body))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), status, "{body}");
+    }
+
+    let response = router
+        .clone()
+        .oneshot(put_origin(
+            &path,
+            "deployer-token",
+            r#"{"transport":"external_proxy","origin":"https://example.com:443/"}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let first = json_body(response).await;
+    assert_eq!(first["result"]["transport"], "external_proxy");
+    assert_eq!(first["result"]["origin"], "https://example.com");
+    assert_eq!(first["result"]["ingress_available"], false);
+    assert!(first["result"].get("name").is_none());
+    let response = router
+        .clone()
+        .oneshot(put_origin(
+            &path,
+            "deployer-token",
+            r#"{"transport":"external_proxy","origin":"https://example.com"}"#,
+        ))
+        .await
+        .unwrap();
+    let repeated = json_body(response).await;
+    assert_eq!(repeated["result"]["id"], first["result"]["id"]);
+    assert_eq!(
+        repeated["result"]["created_on"],
+        first["result"]["created_on"]
+    );
+    let response = router
+        .clone()
+        .oneshot(put_origin(
+            &other_path,
+            "deployer-token",
+            r#"{"transport":"external_proxy","origin":"http://example.com:8080"}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+
+    let endpoints = json_body(
+        router
+            .clone()
+            .oneshot(authed(&endpoints_path))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(endpoints["result"].as_array().unwrap().len(), 1);
+    bound.store(true, Ordering::Release);
+    let endpoints = json_body(
+        router
+            .clone()
+            .oneshot(authed(&endpoints_path))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let endpoints = endpoints["result"].as_array().unwrap();
+    assert_eq!(endpoints.len(), 2);
+    let external = endpoints
+        .iter()
+        .find(|endpoint| endpoint["transport"] == "external_proxy")
+        .unwrap();
+    assert_eq!(external["url"], "https://example.com/");
+    assert_eq!(external["scope"], "public_network");
+    let current = json_body(router.clone().oneshot(authed(&path)).await.unwrap()).await;
+    assert_eq!(current["result"]["ingress_available"], true);
+
+    for _ in 0..2 {
+        let response = router
+            .clone()
+            .oneshot(admin(Method::DELETE, &path, Body::empty()))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(json_body(response).await["result"].is_null());
+    }
+    let current = json_body(router.clone().oneshot(authed(&path)).await.unwrap()).await;
+    assert!(current["result"].is_null());
+    let response = router
+        .clone()
+        .oneshot(put_origin(
+            &other_path,
+            "deployer-token",
+            r#"{"transport":"external_proxy","origin":"http://example.com:8080"}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
 }
 
 #[tokio::test]

@@ -3133,16 +3133,40 @@
         "additionalProperties": false
       },
       "PublicOriginRequest": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "name": {
-            "type": "string",
-            "maxLength": 63,
-            "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "transport": {
+                "type": "string",
+                "const": "managed_gateway"
+              },
+              "name": {
+                "type": "string",
+                "maxLength": 63,
+                "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"
+              }
+            },
+            "required": ["transport", "name"]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "transport": {
+                "type": "string",
+                "const": "external_proxy"
+              },
+              "origin": {
+                "type": "string",
+                "maxLength": 268,
+                "format": "uri"
+              }
+            },
+            "required": ["transport", "origin"]
           }
-        },
-        "required": ["name"]
+        ]
       },
       "QueueConsumerRuntime": {
         "type": "object",
@@ -3552,6 +3576,10 @@
             "type": "string",
             "enum": ["local_origin", "public_origin"]
           },
+          "transport": {
+            "type": "string",
+            "enum": ["local_http", "managed_gateway", "external_proxy"]
+          },
           "url": {
             "type": "string",
             "format": "uri"
@@ -3565,7 +3593,7 @@
             "format": "date-time"
           }
         },
-        "required": ["id", "kind", "url", "scope", "created_on"],
+        "required": ["id", "kind", "transport", "url", "scope", "created_on"],
         "additionalProperties": false
       },
       "PathSegment": {
@@ -4032,15 +4060,35 @@
           "result": {
             "type": ["object", "null"],
             "properties": {
-              "name": {
+              "id": {
                 "type": "string"
               },
-              "url": {
+              "transport": {
+                "type": "string",
+                "enum": ["managed_gateway", "external_proxy"]
+              },
+              "name": {
+                "type": ["string", "null"]
+              },
+              "origin": {
                 "type": "string",
                 "format": "uri"
+              },
+              "ingress_available": {
+                "type": "boolean"
+              },
+              "created_on": {
+                "type": "string",
+                "format": "date-time"
               }
             },
-            "required": ["name", "url"],
+            "required": [
+              "id",
+              "transport",
+              "origin",
+              "ingress_available",
+              "created_on"
+            ],
             "additionalProperties": false
           },
           "errors": {

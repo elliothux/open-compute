@@ -31,7 +31,9 @@ struct InstanceRoutes {
     public: Router,
     admin: Router,
     gateway: Option<Router>,
+    external: Router,
     public_base_domain: Option<String>,
+    external_hostnames: Vec<String>,
     admin_secret: Arc<SecretString>,
     deployer_secret: Option<Arc<SecretString>>,
     read_only_secret: Option<Arc<SecretString>>,
@@ -89,6 +91,7 @@ impl SharedRoutes {
                 deployer,
                 read_only,
                 public_base_domain,
+                state.external_hostnames(),
             )? {
                 return Err(PlatformError::new(
                     ErrorCode::SecretRefInvalid,
@@ -114,6 +117,13 @@ impl SharedRoutes {
             {
                 return Err(invalid_routes());
             }
+            if state
+                .external_hostnames()
+                .iter()
+                .any(|hostname| entry.external_hostnames.contains(hostname))
+            {
+                return Err(invalid_routes());
+            }
         }
         let generation = StartupId::generate();
         entries.insert(
@@ -125,7 +135,9 @@ impl SharedRoutes {
                 public: super::public_router(state.clone()),
                 admin: super::admin_router(state.clone()),
                 gateway: public_base_domain.map(|_| super::gateway_router(state.clone())),
+                external: super::external_router(state.clone()),
                 public_base_domain: public_base_domain.map(str::to_owned),
+                external_hostnames: state.external_hostnames().to_vec(),
                 admin_secret,
                 deployer_secret: state.auth.deployer_secret,
                 read_only_secret: state.auth.read_only_secret,
@@ -208,6 +220,79 @@ impl SharedRoutes {
             return Err(invalid_routes());
         }
         Ok(entry.gateway.clone().map(|router| (*id, router)))
+    }
+
+    /// Tenant-only daemon router for the external ingress listener.
+    ///
+    /// It has no platform paths: the peer, the request target, and the exact Host select one
+    /// running instance, and every path of a bound hostname belongs to its Worker.
+    pub(crate) fn external_router(
+        &self,
+        config: open_compute_core::DaemonExternalIngressConfig,
+    ) -> Router {
+        let routes = self.clone();
+        let config = Arc::new(config);
+        Router::new().fallback(move |request: Request| {
+            let routes = routes.clone();
+            let config = config.clone();
+            async move { routes.dispatch_external(request, &config).await }
+        })
+    }
+
+    async fn dispatch_external(
+        &self,
+        request: Request,
+        config: &open_compute_core::DaemonExternalIngressConfig,
+    ) -> Response {
+        let trusted = request
+            .extensions()
+            .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+            .is_some_and(|peer| config.trusts(peer.0.ip()));
+        if !trusted {
+            return StatusCode::FORBIDDEN.into_response();
+        }
+        let uri = request.uri();
+        if request.method() == Method::CONNECT
+            || uri.scheme().is_some()
+            || uri.authority().is_some()
+            || !uri.path().starts_with('/')
+        {
+            return StatusCode::BAD_REQUEST.into_response();
+        }
+        let mut hosts = request.headers().get_all(header::HOST).iter();
+        let Some((hostname, _)) = hosts
+            .next()
+            .filter(|_| hosts.next().is_none())
+            .and_then(|value| value.to_str().ok())
+            .and_then(crate::workers_http::external_request_authority)
+        else {
+            return StatusCode::BAD_REQUEST.into_response();
+        };
+        let router = {
+            let Ok(entries) = self.inner.read() else {
+                return StatusCode::SERVICE_UNAVAILABLE.into_response();
+            };
+            entries
+                .values()
+                .find(|entry| entry.external_hostnames.contains(&hostname))
+                .map(|entry| entry.external.clone())
+        };
+        let Some(router) = router else {
+            return match self
+                .daemon
+                .as_ref()
+                .map(|daemon| daemon.external_hostname_owner(&hostname))
+                .transpose()
+            {
+                Ok(Some(Some(_))) => StatusCode::SERVICE_UNAVAILABLE.into_response(),
+                Ok(_) => StatusCode::NOT_FOUND.into_response(),
+                Err(_) => StatusCode::SERVICE_UNAVAILABLE.into_response(),
+            };
+        };
+        router
+            .oneshot(request)
+            .await
+            .unwrap_or_else(|_| StatusCode::SERVICE_UNAVAILABLE.into_response())
     }
 
     async fn dispatch(

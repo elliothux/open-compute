@@ -14,6 +14,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useAtomValue, useSetAtom } from "jotai";
 import { useEffect, useState, type ReactNode } from "react";
+import type { PublicOriginRequest, WorkerEndpoint } from "@open-compute/sdk";
 import {
   CloudflareProductIcon,
   productIcon,
@@ -57,6 +58,13 @@ type ListRow = {
   detail?: ReactNode;
   actions?: ReactNode;
 };
+
+function endpointTitle(endpoint: WorkerEndpoint): string {
+  if (endpoint.kind === "local_origin") return "Local origin";
+  return endpoint.transport === "external_proxy"
+    ? "Public origin (external proxy)"
+    : "Public origin";
+}
 
 function asRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -278,6 +286,8 @@ export function WorkerDetailPage({
   const { client, instanceId: selectedInstanceId } = useAuth();
   const feedback = useMutationFeedback();
   const enabled = client !== null && selectedInstanceId !== null;
+  const [publicTransport, setPublicTransport] =
+    useState<PublicOriginRequest["transport"]>("managed_gateway");
   const [publicDraft, setPublicDraft] = useState(workerId);
   const liveTail = useAtomValue(liveTailAtom);
   const selectLiveWorker = useSetAtom(selectLiveTailWorkerAtom);
@@ -623,8 +633,8 @@ export function WorkerDetailPage({
   }
 
   const saveOrigin = useMutation({
-    mutationFn: (name: string | null) =>
-      name === null
+    mutationFn: (input: PublicOriginRequest | null) =>
+      input === null
         ? client!.openCompute.workers.publicOrigin.delete(
             selectedInstanceId!,
             workerId,
@@ -632,9 +642,7 @@ export function WorkerDetailPage({
         : client!.openCompute.workers.publicOrigin.set(
             selectedInstanceId!,
             workerId,
-            {
-              name,
-            },
+            input,
           ),
     onSuccess: async () => {
       await Promise.all([publicOrigin.refetch(), endpoints.refetch()]);
@@ -661,9 +669,10 @@ export function WorkerDetailPage({
   });
 
   const activeDeployment = deployments.data?.deployments[0];
-  const publicUrl =
-    publicOrigin.data?.url ??
-    endpoints.data?.find((item) => item.kind === "local_origin")?.url;
+  const publicUrl = (
+    endpoints.data?.find((item) => item.kind === "public_origin") ??
+    endpoints.data?.find((item) => item.kind === "local_origin")
+  )?.url;
   const loading =
     deployments.isLoading ||
     endpoints.isLoading ||
@@ -788,7 +797,7 @@ export function WorkerDetailPage({
             </div>
             <Section title="Domains and routes">
               {/* prettier-ignore */}
-              <ListRows rows={(endpoints.data ?? []).map((endpoint) => ({ id: endpoint.id, title: endpoint.kind === "public_origin" ? "Public origin" : "Local origin", detail: <a className="text-kumo-link break-all hover:underline" href={endpoint.url}>{endpoint.url}</a> }))} empty="No Worker endpoints are reachable." />
+              <ListRows rows={(endpoints.data ?? []).map((endpoint) => ({ id: endpoint.id, title: endpointTitle(endpoint), detail: <a className="text-kumo-link break-all hover:underline" href={endpoint.url}>{endpoint.url}</a> }))} empty="No Worker endpoints are reachable." />
             </Section>
           </div>
         </div>
@@ -904,11 +913,24 @@ export function WorkerDetailPage({
           compatibilityDate={versionSettings.data?.compatibility_date}
           compatibilityFlags={versionSettings.data?.compatibility_flags}
           cpuTimeLimit={versionSettings.data?.limits?.cpu_ms}
-          publicOrigin={publicOrigin.data?.url}
+          publicOrigin={publicOrigin.data ?? null}
+          publicTransport={publicTransport}
+          onPublicTransportChange={(transport) => {
+            setPublicTransport(transport);
+            setPublicDraft(
+              transport === "managed_gateway" ? workerId : "https://",
+            );
+          }}
           publicDraft={publicDraft}
           onPublicDraftChange={setPublicDraft}
           publicOriginPending={saveOrigin.isPending}
-          onSavePublicOrigin={() => saveOrigin.mutate(publicDraft)}
+          onSavePublicOrigin={() =>
+            saveOrigin.mutate(
+              publicTransport === "managed_gateway"
+                ? { transport: publicTransport, name: publicDraft.trim() }
+                : { transport: publicTransport, origin: publicDraft.trim() },
+            )
+          }
           onDisablePublicOrigin={() => saveOrigin.mutate(null)}
           onAddSecret={openAddSecretDialog}
           onDeleteSecret={(name) =>

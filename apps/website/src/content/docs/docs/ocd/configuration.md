@@ -92,6 +92,13 @@ base_domain = "compute.example.com"
 
 See [Dashboard](/docs/ocd/dashboard/) and [Gateway](/docs/gateway/). Shared Gateway listeners and Caddy inputs remain in `ocd.toml`.
 
+An instance may authorize exact hostnames for an operator reverse proxy, and `ocd.toml` then needs `[external_ingress]` with `bind` and `trusted_proxies`. See [External reverse proxy](/docs/gateway/external-proxy/).
+
+```toml
+[external_ingress]
+hostnames = ["app.example.com"]
+```
+
 ## `[ai]`: provider backends and embedding profiles
 
 An AI backend is one operation-specific, final request URL. `ocd` never appends `/embeddings` or `/chat/completions`, so include any provider path prefix and the operation route in `endpoint`:
@@ -220,7 +227,7 @@ The endpoint is resolved to a private address and pinned when `ocd` starts. Redi
 
 ## Other sections
 
-The instance template also includes `[instance]`, `[auth]`, `[runtime]`, `[cache]`, `[response_cache]`, `[images]`, `[ai]`, `[document_parser]`, `[observability]`, `[metrics]`, `[hardening]`, `[workers]`, `[kv]`, `[r2]`, `[d1]`, `[queues]`, `[durable_objects]`, `[scheduler]` (including pools), `[workflows]`, optional `[browser]`, `[dashboard]`, `[public_gateway]`, `[extensions.<name>]`, and `[private_services.<name>]`. Public listener settings belong only in `ocd.toml`, not `compute.toml`. These are local quotas and timeouts, not Cloudflare plan SKUs. Run `config check` before changing them, then `capabilities --json` for actual `limits`.
+The instance template also includes `[instance]`, `[auth]`, `[runtime]`, `[cache]`, `[response_cache]`, `[images]`, `[ai]`, `[document_parser]`, `[observability]`, `[metrics]`, `[hardening]`, `[workers]`, `[kv]`, `[r2]`, `[d1]`, `[queues]`, `[durable_objects]`, `[scheduler]` (including pools), `[workflows]`, optional `[browser]`, `[dashboard]`, `[public_gateway]`, `[external_ingress]`, `[extensions.<name>]`, and `[private_services.<name>]`. Public listener settings belong only in `ocd.toml`, not `compute.toml`. These are local quotas and timeouts, not Cloudflare plan SKUs. Run `config check` before changing them, then `capabilities --json` for actual `limits`.
 
 `hardening.emergency_reserve_bytes` must be below the `[data]` hard reserve.
 

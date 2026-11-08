@@ -402,9 +402,15 @@ export type ObservabilityUsage = {
   }[];
 };
 
-export type PublicOriginRequest = {
-  readonly name: string;
-};
+export type PublicOriginRequest =
+  | {
+      readonly transport: "managed_gateway";
+      readonly name: string;
+    }
+  | {
+      readonly transport: "external_proxy";
+      readonly origin: string;
+    };
 
 export type QueueConsumer = {
   readonly consumer_id: string;
@@ -538,6 +544,7 @@ export type UpgradeCheck = {
 export type WorkerEndpoint = {
   readonly id: string;
   readonly kind: "local_origin" | "public_origin";
+  readonly transport: "local_http" | "managed_gateway" | "external_proxy";
   readonly url: string;
   readonly scope: "local_machine" | "public_network";
   readonly created_on: string;
@@ -1020,14 +1027,22 @@ function buildOpenCompute(transport: BaseCloudflare): OpenComputeVendorNode {
           scriptName: string,
           options?: OpenComputeRequestOptions,
         ): APIPromise<{
-          readonly name: string;
-          readonly url: string;
+          readonly id: string;
+          readonly transport: "managed_gateway" | "external_proxy";
+          readonly name?: string | null;
+          readonly origin: string;
+          readonly ingress_available: boolean;
+          readonly created_on: string;
         } | null> =>
           transport
             .get<
               V4Envelope<{
-                readonly name: string;
-                readonly url: string;
+                readonly id: string;
+                readonly transport: "managed_gateway" | "external_proxy";
+                readonly name?: string | null;
+                readonly origin: string;
+                readonly ingress_available: boolean;
+                readonly created_on: string;
               } | null>
             >(
               `/accounts/${segment(accountId)}/open-compute/workers/${segment(scriptName)}/public-origin`,
@@ -1750,8 +1765,12 @@ export interface OpenComputeVendorWorkersPublicOriginNode {
     scriptName: string,
     options?: OpenComputeRequestOptions,
   ) => APIPromise<{
-    readonly name: string;
-    readonly url: string;
+    readonly id: string;
+    readonly transport: "managed_gateway" | "external_proxy";
+    readonly name?: string | null;
+    readonly origin: string;
+    readonly ingress_available: boolean;
+    readonly created_on: string;
   } | null>;
   readonly set: (
     accountId: string,

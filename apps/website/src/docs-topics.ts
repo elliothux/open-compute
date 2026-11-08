@@ -147,6 +147,11 @@ const topics: TopicDefinition[] = [
         link("Gateway overview", "Gateway 概览", "/gateway"),
         link("DNS and TLS", "DNS 与 TLS", "/gateway/dns-tls"),
         link("Caddy configuration", "Caddy 配置", "/gateway/caddy"),
+        link(
+          "External reverse proxy",
+          "外部反向代理",
+          "/gateway/external-proxy",
+        ),
       ]),
       group("Reliability", "可靠性", groupIcons.reliability, [
         link("Health and monitoring", "健康与监控", "/ocd/health"),

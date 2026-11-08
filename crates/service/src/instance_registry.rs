@@ -1,11 +1,11 @@
 //! Explicit `ocd.toml` instance registration.
 
 use open_compute_core::{
-    DaemonGatewayConfig, DaemonServerConfig, ErrorCode, InstanceId, InstanceSelector,
-    ObjectStorageConfig, PlatformError,
+    DaemonExternalIngressConfig, DaemonGatewayConfig, DaemonServerConfig, ErrorCode, InstanceId,
+    InstanceSelector, ObjectStorageConfig, PlatformError,
 };
 use open_compute_storage::fs::ensure_dir_secure;
-use open_compute_storage::inspect::inspect_control_db;
+use open_compute_storage::inspect::{inspect_control_db, inspect_external_hostnames};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -82,6 +82,8 @@ pub struct InstanceRecord {
     pub object_authority: RegisteredObjectAuthority,
     /// Public base domain declared by this instance, when present.
     pub public_base_domain: Option<String>,
+    /// Exact hostnames delegated to this instance for external proxy origins.
+    pub external_hostnames: Vec<String>,
     /// OCD service scope.
     pub service_scope: ServiceScope,
     /// Instance authority creation time in Unix milliseconds.
@@ -110,6 +112,8 @@ struct OcdManifest {
     server: DaemonServerConfig,
     #[serde(default)]
     gateway: Option<DaemonGatewayConfig>,
+    #[serde(default)]
+    external_ingress: Option<DaemonExternalIngressConfig>,
     #[serde(default)]
     artifacts: DaemonArtifactsConfig,
     #[serde(default)]
@@ -226,6 +230,14 @@ impl InstanceRegistry {
         scope: ServiceScope,
     ) -> Result<Option<DaemonGatewayConfig>, PlatformError> {
         Ok(read_manifest(self.root_for(scope))?.gateway)
+    }
+
+    /// Read the one optional shared external ingress listener configuration.
+    pub fn external_ingress_config(
+        &self,
+        scope: ServiceScope,
+    ) -> Result<Option<DaemonExternalIngressConfig>, PlatformError> {
+        Ok(read_manifest(self.root_for(scope))?.external_ingress)
     }
 
     pub(crate) fn artifacts_config(
@@ -460,6 +472,23 @@ fn load_record(
             "registered instance data is not initialized or its identity is invalid",
         )
     })?;
+    let external_hostnames = loaded
+        .config
+        .external_ingress
+        .map(|external| external.hostnames)
+        .unwrap_or_default();
+    let bound = inspect_external_hostnames(
+        &data_path.join("control.sqlite"),
+        loaded.config.data.sqlite_busy_timeout_ms,
+    )?;
+    if bound
+        .iter()
+        .any(|hostname| !external_hostnames.contains(hostname))
+    {
+        return Err(manifest_invalid(
+            "revoke the external Worker origin before removing its hostname authorization",
+        ));
+    }
     let instance_id = identity.instance_id;
     let object_authority = match &loaded.config.object_storage {
         ObjectStorageConfig::Local(_) => RegisteredObjectAuthority::Local,
@@ -486,6 +515,7 @@ fn load_record(
             .config
             .public_gateway
             .map(|gateway| gateway.base_domain),
+        external_hostnames,
         service_scope: scope,
         created_at,
         autostart,
@@ -534,6 +564,27 @@ fn validate_unique_records(records: &[InstanceRecord]) -> Result<(), PlatformErr
                 return Err(manifest_invalid(
                     "registered public gateway base domains overlap",
                 ));
+            }
+            if left
+                .external_hostnames
+                .iter()
+                .any(|hostname| right.external_hostnames.contains(hostname))
+            {
+                return Err(manifest_invalid(
+                    "an external hostname is authorized for more than one instance",
+                ));
+            }
+            for (record, other) in [(left, right), (right, left)] {
+                if let Some(domain) = &other.public_base_domain
+                    && record
+                        .external_hostnames
+                        .iter()
+                        .any(|hostname| public_domains_overlap(hostname, domain))
+                {
+                    return Err(manifest_invalid(
+                        "an external hostname uses a managed public base domain",
+                    ));
+                }
             }
             if let (
                 RegisteredObjectAuthority::S3 {

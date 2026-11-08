@@ -42,7 +42,7 @@ impl WorkerdTransport {
             original_url(
                 &parts.headers,
                 &parts.uri,
-                parts.extensions.get::<TrustedHttpsOrigin>().is_some(),
+                parts.extensions.get::<TrustedOrigin>(),
             )?
         };
         let mut headers = sanitize_tenant_headers(parts.headers);

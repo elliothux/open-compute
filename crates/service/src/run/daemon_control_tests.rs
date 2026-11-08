@@ -29,6 +29,7 @@ fn daemon_api_scopes_tokens_and_refreshes_only_stopped_instances() {
         data_path: "/first-data".to_owned(),
         object_authority: RegisteredObjectAuthority::Local,
         public_base_domain: None,
+        external_hostnames: Vec::new(),
         service_scope: ServiceScope::User,
         created_at: 1,
         autostart: false,
@@ -71,6 +72,7 @@ fn daemon_api_scopes_tokens_and_refreshes_only_stopped_instances() {
             &SecretString::new("deployer"),
             &SecretString::new("reader"),
             None,
+            &[],
         )
         .unwrap()
     );
@@ -81,6 +83,7 @@ fn daemon_api_scopes_tokens_and_refreshes_only_stopped_instances() {
             &SecretString::new("deployer"),
             &SecretString::new("reader"),
             None,
+            &[],
         )
         .unwrap()
     );
@@ -172,6 +175,7 @@ async fn cache_clean_uses_registered_live_cache_and_reports_dry_run() {
         data_path: temp.path().join("data").display().to_string(),
         object_authority: RegisteredObjectAuthority::Local,
         public_base_domain: None,
+        external_hostnames: Vec::new(),
         service_scope: ServiceScope::User,
         created_at: 1,
         autostart: true,

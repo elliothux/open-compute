@@ -17,7 +17,7 @@
   "x-open-compute-sdk": {
     "package": "@open-compute/sdk",
     "packageVersion": "0.4.0",
-    "surfaceDigest": "3c6761fe8aebcc24436e8f1747a6aeca968985824b059fafc7841c2de0b78469",
+    "surfaceDigest": "f9264a7580f90443ac16aae420bbd0c2caec02c6c786f3338bc7cd98759c9435",
     "openapiRevision": "1e7d44922a8a0174a7e68f81c9ff5709cd8c6db7",
     "cloudflareSdk": "7.3.0"
   },
@@ -52567,17 +52567,45 @@
         "additionalProperties": false
       },
       "OpenComputePublicOriginRequest": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "name": {
-            "type": "string",
-            "maxLength": 63,
-            "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "transport": {
+                "type": "string",
+                "const": "managed_gateway"
+              },
+              "name": {
+                "type": "string",
+                "maxLength": 63,
+                "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"
+              }
+            },
+            "required": [
+              "transport",
+              "name"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "transport": {
+                "type": "string",
+                "const": "external_proxy"
+              },
+              "origin": {
+                "type": "string",
+                "maxLength": 268,
+                "format": "uri"
+              }
+            },
+            "required": [
+              "transport",
+              "origin"
+            ]
           }
-        },
-        "required": [
-          "name"
         ]
       },
       "OpenComputeQueueConsumerRuntime": {
@@ -53047,6 +53075,14 @@
               "public_origin"
             ]
           },
+          "transport": {
+            "type": "string",
+            "enum": [
+              "local_http",
+              "managed_gateway",
+              "external_proxy"
+            ]
+          },
           "url": {
             "type": "string",
             "format": "uri"
@@ -53066,6 +53102,7 @@
         "required": [
           "id",
           "kind",
+          "transport",
           "url",
           "scope",
           "created_on"
@@ -53615,17 +53652,40 @@
               "null"
             ],
             "properties": {
-              "name": {
+              "id": {
                 "type": "string"
               },
-              "url": {
+              "transport": {
+                "type": "string",
+                "enum": [
+                  "managed_gateway",
+                  "external_proxy"
+                ]
+              },
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "origin": {
                 "type": "string",
                 "format": "uri"
+              },
+              "ingress_available": {
+                "type": "boolean"
+              },
+              "created_on": {
+                "type": "string",
+                "format": "date-time"
               }
             },
             "required": [
-              "name",
-              "url"
+              "id",
+              "transport",
+              "origin",
+              "ingress_available",
+              "created_on"
             ],
             "additionalProperties": false
           },

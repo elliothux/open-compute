@@ -98,6 +98,7 @@ ONCE = {
     'single-binary': (
         'readonly_commands_need_only_the_single_executable',
         'evidence::failure_evidence_copy_preserves_files_modes_and_symlinks',
+        'external_ingress::external_proxy_origins_route_exact_hostnames_without_gateway',
     ),
     # Default Node builtins, process.env isolation, and fail-closed stubs.
     'workers': ('nodejs::p0_2_nodejs_default_surface_isolation_and_unsupported_stubs',),

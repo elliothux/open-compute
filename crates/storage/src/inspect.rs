@@ -136,6 +136,50 @@ pub fn inspect_control_db(
     Ok((version, identity))
 }
 
+/// Read the hostnames of active external proxy Worker origins from an existing database.
+///
+/// A running instance may have just bound one in its WAL, so an existing WAL is read too.
+/// Without a WAL the read creates no sidecar files. A database that predates external
+/// origins has none.
+pub fn inspect_external_hostnames(
+    path: &Path,
+    busy_timeout_ms: u64,
+) -> Result<Vec<String>, PlatformError> {
+    let mut wal = path.as_os_str().to_owned();
+    wal.push("-wal");
+    let db = if Path::new(&wal).exists() {
+        ControlDb::open_readonly_wal_aware(path, busy_timeout_ms)?
+    } else {
+        ControlDb::open_readonly(path, busy_timeout_ms)?
+    };
+    db.with_read(|connection| {
+        let supported: bool = connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM pragma_table_info('worker_host_routes')
+                 WHERE name = 'transport')",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|_| inspect_error())?;
+        if !supported {
+            return Ok(Vec::new());
+        }
+        let mut statement = connection
+            .prepare(
+                "SELECT c.hostname_ascii FROM worker_host_routes r
+                 JOIN hostname_claims c ON c.id = r.claim_id
+                 WHERE r.transport = 'external_proxy' AND r.state = 'active'
+                 ORDER BY c.hostname_ascii",
+            )
+            .map_err(|_| inspect_error())?;
+        let rows = statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|_| inspect_error())?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|_| inspect_error())
+    })
+}
+
 /// Read the bounded, secret-free resource health catalog from an existing database.
 pub fn inspect_resources(
     path: &Path,

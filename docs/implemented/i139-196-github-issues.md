@@ -105,7 +105,7 @@
 - 官方 SDK 7.3.0 未表达的新增字段（KV `mode` 回显、Workflows jurisdiction 冲突、Observability `$metadata` 时间字段、
   AI Search 音视频 chunk 字段）本地不产生。它们在 schema 中都是可选字段，或是本地不会出现的错误。
 - cf `1.0.0-beta.21` 新增的 `access` 配置字段按 `unsupported` 失败关闭。
-- macOS `ocd.log` 不轮转。日志轮转和保留属于 [P25](../p25-platform-follow-ups.md) 的 operator logger 合同。
+- macOS `ocd.log` 不轮转。日志轮转和保留属于 [P26](../p26-platform-follow-ups.md) 的 operator logger 合同。
 - glibc 2.28（RHEL 8 系）不在基线内。
 - 扫描本身唤醒每个活着的 Durable Object（[#157](https://github.com/elliothux/open-compute/issues/157)），需要独立的
   alarm 投影方案。

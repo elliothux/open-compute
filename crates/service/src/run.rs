@@ -121,6 +121,8 @@ pub struct RunOptions {
     pub daemon_server: DaemonServerConfig,
     /// Shared Gateway settings supplied by the isolated test OCD scope.
     pub daemon_gateway: Option<DaemonGatewayConfig>,
+    /// Shared external ingress listener supplied by the isolated test OCD scope.
+    pub daemon_external_ingress: Option<open_compute_core::DaemonExternalIngressConfig>,
     /// Fail after this stage.
     pub fail_after: Option<FailAfter>,
     /// Recorded stage names.
@@ -135,6 +137,9 @@ pub struct RunOptions {
 struct RunInner {
     daemon_server: DaemonServerConfig,
     daemon_gateway: Option<DaemonGatewayConfig>,
+    daemon_external_ingress: Option<open_compute_core::DaemonExternalIngressConfig>,
+    /// Set while the optional external ingress listener serves.
+    external_ingress_bound: Option<Arc<std::sync::atomic::AtomicBool>>,
     daemon_artifacts: DaemonArtifactsConfig,
     daemon_metrics: DaemonMetricsConfig,
     shared_package: Option<open_compute_runtime::RuntimePackage>,
@@ -183,6 +188,7 @@ pub async fn run_platform(
     let records = registry.list_scope(scope)?;
     let daemon_server = registry.server_config(scope)?;
     let daemon_gateway = registry.gateway_config(scope)?;
+    let daemon_external_ingress = registry.external_ingress_config(scope)?;
     let daemon_artifacts = registry.artifacts_config(scope)?;
     let daemon_metrics = registry.metrics_config(scope)?;
     let credentials = validate_registered_tokens(&records, &daemon_server)?;
@@ -224,6 +230,7 @@ pub async fn run_platform(
     let opts = RunInner {
         daemon_server,
         daemon_gateway,
+        daemon_external_ingress,
         daemon_artifacts,
         daemon_metrics,
         shared_package: Some(shared_package),
@@ -280,12 +287,20 @@ pub async fn run_platform_with(
         .map(|registry| registry.metrics_config(scope))
         .transpose()?
         .unwrap_or_default();
+    let daemon_external_ingress = opts
+        .instance_registry
+        .as_ref()
+        .map(|registry| registry.external_ingress_config(scope))
+        .transpose()?
+        .flatten()
+        .or(opts.daemon_external_ingress);
     run_until_signal(
         vec![loaded],
         RunInner {
             daemon_server: opts.daemon_server,
             daemon_artifacts,
             daemon_gateway,
+            daemon_external_ingress,
             daemon_metrics,
             scope: Some(scope),
             fail_after: opts.fail_after,
@@ -352,6 +367,7 @@ async fn run_until_signal(
     remember_bind(&opts, Some(public_bound));
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let mut listeners = tokio::task::JoinSet::new();
+    let external_ingress = start_external_ingress(&mut opts, &routes, shutdown_rx.clone()).await;
     let gateway = gateway::start(
         &loaded_instances,
         &opts,
@@ -551,6 +567,9 @@ async fn run_until_signal(
             result = Err(error);
         }
     }
+    if let Some(external_ingress) = external_ingress {
+        let _ = external_ingress.await;
+    }
     while let Some(listener) = listeners.join_next().await {
         if let Err(error) = listener
             .map_err(|_| {
@@ -563,6 +582,44 @@ async fn run_until_signal(
         }
     }
     result
+}
+
+/// Serve the optional external ingress listener apart from the required listeners.
+///
+/// A bind or serve failure makes only external origins unavailable; local and managed
+/// ingress keep serving.
+async fn start_external_ingress(
+    opts: &mut RunInner,
+    routes: &http::SharedRoutes,
+    mut shutdown: watch::Receiver<bool>,
+) -> Option<tokio::task::JoinHandle<()>> {
+    let config = opts.daemon_external_ingress.clone()?;
+    let listener = match http::bind(config.bind).await {
+        Ok(listener) => listener,
+        Err(error) => {
+            tracing::warn!(
+                code = error.code().as_str(),
+                "external ingress listener is unavailable"
+            );
+            return None;
+        }
+    };
+    let bound = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    opts.external_ingress_bound = Some(bound.clone());
+    let router = routes.external_router(config);
+    Some(tokio::spawn(async move {
+        let result = http::serve_until(listener, router, async move {
+            let _ = shutdown.changed().await;
+        })
+        .await;
+        bound.store(false, std::sync::atomic::Ordering::Release);
+        if let Err(error) = result {
+            tracing::warn!(
+                code = error.code().as_str(),
+                "external ingress listener stopped"
+            );
+        }
+    }))
 }
 
 async fn run_inner(loaded: LoadedConfig, opts: RunInner) -> Result<(), PlatformError> {

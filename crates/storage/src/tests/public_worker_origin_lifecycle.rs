@@ -1,7 +1,164 @@
 use super::*;
 use crate::public_gateway::PublicGatewayRepository;
-use crate::worker_repository::WorkerOriginExposure;
-use open_compute_core::RequestId;
+use crate::worker_repository::{PublicOriginTarget, WorkerOriginExposure, WorkerOriginTransport};
+use open_compute_core::{ExternalOrigin, ExternalScheme, RequestId};
+
+fn managed(name: &str) -> PublicOriginTarget {
+    PublicOriginTarget::ManagedGateway {
+        name: name.to_owned(),
+    }
+}
+
+fn external(origin: &str) -> PublicOriginTarget {
+    PublicOriginTarget::ExternalProxy(ExternalOrigin::parse(origin).unwrap())
+}
+
+#[test]
+fn external_worker_origin_needs_no_gateway_and_keeps_one_public_route() {
+    let (_temp, root) = unique_root();
+    let config = storage_config(&root);
+    let storage = PlatformStorage::bootstrap(&config, &SystemClock).unwrap();
+    let account = storage.identity().instance_id;
+    let workers = WorkerRepository::new(storage.db());
+    let gateway = PublicGatewayRepository::new(storage.db());
+    let request = RequestId::generate();
+    let (worker, local) = workers
+        .create_worker(account, "app", request, 1, 100)
+        .unwrap();
+    let (other, _) = workers
+        .create_worker(account, "other", request, 2, 100)
+        .unwrap();
+
+    let first = workers
+        .set_public_origin(
+            account,
+            worker.id,
+            Some(&external("https://example.com")),
+            request,
+            3,
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(first.hostname_ascii, "example.com");
+    assert_eq!(
+        first.transport,
+        WorkerOriginTransport::ExternalProxy {
+            scheme: ExternalScheme::Https,
+            port: 443
+        }
+    );
+    assert_eq!(
+        first.external_origin().unwrap().origin(),
+        "https://example.com"
+    );
+    let repeated = workers
+        .set_public_origin(
+            account,
+            worker.id,
+            Some(&external("https://example.com/")),
+            request,
+            4,
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        (repeated.id.as_str(), repeated.created_at_ms),
+        (first.id.as_str(), 3)
+    );
+    assert_eq!(
+        workers
+            .set_public_origin(
+                account,
+                other.id,
+                Some(&external("http://example.com:8080")),
+                request,
+                5
+            )
+            .unwrap_err()
+            .code(),
+        ErrorCode::RouteConflict
+    );
+    let moved = workers
+        .set_public_origin(
+            account,
+            worker.id,
+            Some(&external("http://example.com:8080")),
+            request,
+            6,
+        )
+        .unwrap()
+        .unwrap();
+    assert_ne!(moved.id, first.id);
+    assert_eq!(
+        moved.external_origin().unwrap().origin(),
+        "http://example.com:8080"
+    );
+    let routes = workers.list_routes(account, worker.id).unwrap();
+    assert_eq!(routes.len(), 2);
+    assert!(routes.iter().any(|route| route.id == local.id));
+    assert_eq!(
+        crate::inspect::inspect_external_hostnames(&root.join("control.sqlite"), 1000).unwrap(),
+        ["example.com"]
+    );
+
+    assert_eq!(
+        gateway.provision("example.com", 7).unwrap_err().code(),
+        ErrorCode::RouteConflict
+    );
+    gateway.provision("compute.example.net", 8).unwrap();
+    gateway.disable(9).unwrap();
+    gateway.provision("compute.example.net", 10).unwrap();
+    gateway.activate_workers("compute.example.net", 11).unwrap();
+    let switched = workers
+        .set_public_origin(account, worker.id, Some(&managed("app")), request, 12)
+        .unwrap()
+        .unwrap();
+    assert_eq!(switched.transport, WorkerOriginTransport::ManagedGateway);
+    assert_eq!(switched.hostname_ascii, "app.compute.example.net");
+    assert_eq!(
+        workers
+            .set_public_origin(
+                account,
+                other.id,
+                Some(&external("https://api.compute.example.net")),
+                request,
+                13
+            )
+            .unwrap_err()
+            .code(),
+        ErrorCode::ConfigInvalid
+    );
+    workers
+        .set_public_origin(
+            account,
+            other.id,
+            Some(&external("https://example.com")),
+            request,
+            14,
+        )
+        .unwrap()
+        .unwrap();
+    drop(storage);
+
+    let restored = PlatformStorage::bootstrap(&config, &SystemClock).unwrap();
+    let routes = WorkerRepository::new(restored.db())
+        .list_routes(account, other.id)
+        .unwrap();
+    assert!(
+        routes
+            .iter()
+            .any(|route| route.hostname_ascii == "example.com"
+                && route.exposure == WorkerOriginExposure::Public)
+    );
+    WorkerRepository::new(restored.db())
+        .set_public_origin(account, other.id, None, RequestId::generate(), 15)
+        .unwrap();
+    assert!(
+        crate::inspect::inspect_external_hostnames(&root.join("control.sqlite"), 1000)
+            .unwrap()
+            .is_empty()
+    );
+}
 
 #[test]
 fn public_worker_origin_lifecycle_preserves_local_and_survives_restart() {
@@ -28,7 +185,7 @@ fn public_worker_origin_lifecycle_preserves_local_and_survives_restart() {
         .unwrap();
     assert_eq!(
         workers
-            .set_public_origin(account, worker.id, Some("app"), request, 3)
+            .set_public_origin(account, worker.id, Some(&managed("app")), request, 3)
             .unwrap_err()
             .code(),
         ErrorCode::RouteConflict
@@ -38,20 +195,20 @@ fn public_worker_origin_lifecycle_preserves_local_and_survives_restart() {
         .unwrap();
     assert_eq!(
         workers
-            .set_public_origin(account, worker.id, Some("probe"), request, 5)
+            .set_public_origin(account, worker.id, Some(&managed("probe")), request, 5)
             .unwrap_err()
             .code(),
         ErrorCode::RouteConflict
     );
     let first = workers
-        .set_public_origin(account, worker.id, Some("app"), request, 5)
+        .set_public_origin(account, worker.id, Some(&managed("app")), request, 5)
         .unwrap()
         .unwrap();
     assert_eq!(first.exposure, WorkerOriginExposure::Public);
     assert_eq!(first.hostname_ascii, "app.gateway-test.open-compute.dev");
     assert_eq!(
         workers
-            .set_public_origin(account, worker.id, Some("app"), request, 6)
+            .set_public_origin(account, worker.id, Some(&managed("app")), request, 6)
             .unwrap()
             .unwrap()
             .id,
@@ -62,13 +219,13 @@ fn public_worker_origin_lifecycle_preserves_local_and_survives_restart() {
         .unwrap();
     assert_eq!(
         workers
-            .set_public_origin(account, other.id, Some("app"), request, 8)
+            .set_public_origin(account, other.id, Some(&managed("app")), request, 8)
             .unwrap_err()
             .code(),
         ErrorCode::RouteConflict
     );
     let replacement = workers
-        .set_public_origin(account, worker.id, Some("next"), request, 9)
+        .set_public_origin(account, worker.id, Some(&managed("next")), request, 9)
         .unwrap()
         .unwrap();
     assert_ne!(first.id, replacement.id);
@@ -104,7 +261,7 @@ fn public_worker_origin_lifecycle_preserves_local_and_survives_restart() {
     );
     assert_eq!(
         workers
-            .set_public_origin(account, worker.id, Some("app"), request, 13)
+            .set_public_origin(account, worker.id, Some(&managed("app")), request, 13)
             .unwrap_err()
             .code(),
         ErrorCode::RouteConflict
@@ -114,7 +271,7 @@ fn public_worker_origin_lifecycle_preserves_local_and_survives_restart() {
         .unwrap();
     assert_eq!(
         workers
-            .set_public_origin(account, worker.id, Some("app"), request, 14)
+            .set_public_origin(account, worker.id, Some(&managed("app")), request, 14)
             .unwrap_err()
             .code(),
         ErrorCode::RouteConflict
@@ -122,7 +279,7 @@ fn public_worker_origin_lifecycle_preserves_local_and_survives_restart() {
     gateway.provision("other.example.com", 15).unwrap();
     gateway.activate_workers("other.example.com", 16).unwrap();
     let new_origin = workers
-        .set_public_origin(account, worker.id, Some("app"), request, 17)
+        .set_public_origin(account, worker.id, Some(&managed("app")), request, 17)
         .unwrap()
         .unwrap();
     assert_eq!(new_origin.hostname_ascii, "app.other.example.com");
@@ -206,7 +363,7 @@ fn public_origin_replacement_tombstones_the_joined_claim() {
         .unwrap()
         .0;
     let first = workers
-        .set_public_origin(account, worker.id, Some("first"), request, 4)
+        .set_public_origin(account, worker.id, Some(&managed("first")), request, 4)
         .unwrap()
         .unwrap();
     let route_id = uuid::Uuid::now_v7().to_string();
@@ -223,7 +380,7 @@ fn public_origin_replacement_tombstones_the_joined_claim() {
         .unwrap();
 
     workers
-        .set_public_origin(account, worker.id, Some("second"), request, 5)
+        .set_public_origin(account, worker.id, Some(&managed("second")), request, 5)
         .unwrap();
     let (old_state, active_claims): (String, i64) = storage
         .db()

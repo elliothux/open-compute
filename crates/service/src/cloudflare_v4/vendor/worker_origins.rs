@@ -9,7 +9,7 @@ use axum::response::Response;
 use axum::routing::get;
 use open_compute_core::{ErrorCode, InstanceId, PlatformError};
 use open_compute_storage::worker_repository::{
-    RouteRecord, WorkerOriginExposure, WorkerRepository,
+    PublicOriginTarget, RouteRecord, WorkerOriginExposure, WorkerOriginTransport, WorkerRepository,
 };
 use serde::{Deserialize, Serialize};
 
@@ -54,7 +54,7 @@ pub(super) async fn worker_public_origin(
         Ok(routes) => match routes
             .into_iter()
             .find(|route| route.exposure == WorkerOriginExposure::Public)
-            .map(|route| public_origin_binding(&route))
+            .map(|route| public_origin_binding(&route, &state))
             .transpose()
         {
             Ok(binding) => success_response(context, binding),
@@ -64,15 +64,39 @@ pub(super) async fn worker_public_origin(
     }
 }
 
-fn public_origin_binding(route: &RouteRecord) -> Result<PublicOriginBinding, V4Error> {
-    let (name, _) = route
-        .hostname_ascii
-        .split_once('.')
-        .ok_or(V4Error::Internal)?;
-    Ok(PublicOriginBinding {
-        name: name.to_owned(),
-        url: format!("https://{}/", route.hostname_ascii),
-    })
+fn public_origin_binding(
+    route: &RouteRecord,
+    state: &HttpState,
+) -> Result<PublicOriginBinding, V4Error> {
+    let created_on = crate::cloudflare_v4::iso_timestamp(route.created_at_ms)?;
+    match route.transport {
+        WorkerOriginTransport::ManagedGateway => {
+            let (name, _) = route
+                .hostname_ascii
+                .split_once('.')
+                .ok_or(V4Error::Internal)?;
+            Ok(PublicOriginBinding {
+                id: route.id.clone(),
+                transport: PublicOriginTransport::ManagedGateway,
+                name: Some(name.to_owned()),
+                origin: format!("https://{}", route.hostname_ascii),
+                ingress_available: state.public_gateway_serving(),
+                created_on,
+            })
+        }
+        WorkerOriginTransport::ExternalProxy { .. } => {
+            let origin = route.external_origin().ok_or(V4Error::Internal)?;
+            Ok(PublicOriginBinding {
+                id: route.id.clone(),
+                transport: PublicOriginTransport::ExternalProxy,
+                name: None,
+                ingress_available: state.external_ingress_serves(&origin.hostname),
+                origin: origin.origin(),
+                created_on,
+            })
+        }
+        WorkerOriginTransport::LocalHttp => Err(V4Error::Internal),
+    }
 }
 
 pub(super) async fn worker_endpoints(
@@ -131,6 +155,17 @@ pub(super) async fn set_worker_public_origin(
             Ok(value) => value,
             Err(response) => return response.into_response(),
         };
+    let target = match input {
+        PublicOriginInput::ManagedGateway { name } => PublicOriginTarget::ManagedGateway { name },
+        PublicOriginInput::ExternalProxy { origin } => {
+            match open_compute_core::ExternalOrigin::parse(&origin) {
+                Ok(origin) => PublicOriginTarget::ExternalProxy(origin),
+                Err(_) => {
+                    return error_response(V4Error::InvalidField("/origin"), context.request_id());
+                }
+            }
+        }
+    };
     let Some(storage) = state.platform_storage() else {
         return error_response(V4Error::Unavailable, context.request_id());
     };
@@ -139,19 +174,21 @@ pub(super) async fn set_worker_public_origin(
         Ok(value) => value,
         Err(error) => return platform_error(&error, context),
     };
-    if !state.public_gateway_serving() {
-        return error_response(V4Error::Unavailable, context.request_id());
+    match &target {
+        PublicOriginTarget::ManagedGateway { .. } if !state.public_gateway_serving() => {
+            return error_response(V4Error::Unavailable, context.request_id());
+        }
+        PublicOriginTarget::ExternalProxy(origin)
+            if !state.external_hostname_authorized(&origin.hostname) =>
+        {
+            return error_response(V4Error::PermissionDenied, context.request_id());
+        }
+        PublicOriginTarget::ManagedGateway { .. } | PublicOriginTarget::ExternalProxy(_) => {}
     }
     let now = crate::cloudflare_v4::storage::now_ms();
-    match workers.set_public_origin(
-        account,
-        worker_id,
-        Some(&input.name),
-        context.request_id(),
-        now,
-    ) {
-        Ok(Some(route)) => match public_origin_endpoint(route) {
-            Ok(endpoint) => success_response(context, endpoint),
+    match workers.set_public_origin(account, worker_id, Some(&target), context.request_id(), now) {
+        Ok(Some(route)) => match public_origin_binding(&route, &state) {
+            Ok(binding) => success_response(context, binding),
             Err(error) => error_response(error, context.request_id()),
         },
         Ok(None) => error_response(V4Error::Internal, context.request_id()),
@@ -205,37 +242,53 @@ fn tenant_worker_id(
         .ok_or_else(|| PlatformError::new(ErrorCode::WorkerNotFound, "Worker not found"))
 }
 
-fn public_origin_endpoint(route: RouteRecord) -> Result<WorkerEndpoint, V4Error> {
-    Ok(WorkerEndpoint {
-        id: route.id,
-        kind: WorkerEndpointKind::PublicOrigin,
-        url: format!("https://{}/", route.hostname_ascii),
-        scope: WorkerEndpointScope::PublicNetwork,
-        created_on: crate::cloudflare_v4::iso_timestamp(route.created_at_ms)?,
-    })
-}
-
 pub(super) fn project_worker_endpoint(
     route: RouteRecord,
     state: &HttpState,
 ) -> Option<Result<WorkerEndpoint, V4Error>> {
-    match route.exposure {
-        WorkerOriginExposure::Local => {
-            let port = state.local_origin_port()?;
-            Some(
-                crate::cloudflare_v4::iso_timestamp(route.created_at_ms).map(|created_on| {
-                    WorkerEndpoint {
-                        id: route.id,
-                        kind: WorkerEndpointKind::LocalOrigin,
-                        url: format!("http://{}:{port}/", route.hostname_ascii),
-                        scope: WorkerEndpointScope::LocalMachine,
-                        created_on,
-                    }
-                }),
+    let (kind, transport, url, scope) = match route.transport {
+        WorkerOriginTransport::LocalHttp => (
+            WorkerEndpointKind::LocalOrigin,
+            WorkerEndpointTransport::LocalHttp,
+            format!(
+                "http://{}:{}/",
+                route.hostname_ascii,
+                state.local_origin_port()?
+            ),
+            WorkerEndpointScope::LocalMachine,
+        ),
+        WorkerOriginTransport::ManagedGateway => {
+            if !state.public_gateway_serving() {
+                return None;
+            }
+            (
+                WorkerEndpointKind::PublicOrigin,
+                WorkerEndpointTransport::ManagedGateway,
+                format!("https://{}/", route.hostname_ascii),
+                WorkerEndpointScope::PublicNetwork,
             )
         }
-        WorkerOriginExposure::Public => state
-            .public_gateway_serving()
-            .then(|| public_origin_endpoint(route)),
-    }
+        WorkerOriginTransport::ExternalProxy { .. } => {
+            let origin = route.external_origin()?;
+            if !state.external_ingress_serves(&origin.hostname) {
+                return None;
+            }
+            (
+                WorkerEndpointKind::PublicOrigin,
+                WorkerEndpointTransport::ExternalProxy,
+                format!("{}/", origin.origin()),
+                WorkerEndpointScope::PublicNetwork,
+            )
+        }
+    };
+    Some(
+        crate::cloudflare_v4::iso_timestamp(route.created_at_ms).map(|created_on| WorkerEndpoint {
+            id: route.id,
+            kind,
+            transport,
+            url,
+            scope,
+            created_on,
+        }),
+    )
 }

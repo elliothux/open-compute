@@ -296,6 +296,14 @@ tenant Worker 使用 `http://<worker>.<instance-id>.localhost:<port>/` 的 exact
 和只在 loopback listener 可达时发布 endpoint 都是自托管拓扑差异，不宣称提供 Cloudflare 公共 DNS、TLS、preview URL 或全球路由。
 Host-first dispatch、canonical authority 拒绝、endpoint OpenAPI/SDK shape 和真实进程调用均有回归覆盖。可选 P18 Gateway 另投影 `https://<public-name>.<instance-id>.<base-domain>/`；这是单机 operator 域名、共享 Caddy DNS-01 和各实例 SQLite authority 的明确拓扑偏差，不声明 Cloudflare `workers.dev`、全球路由或托管证书服务。公网 endpoint 仅在当前受管 Caddy PID 完成 TLS 资格化时发布。
 
+### 外部反向代理 origin
+
+P24 让 operator 在 `compute.toml` 授权 exact hostname，deployer 通过 OCD vendor `public-origin` API 把一个完整
+`http(s)://hostname[:port]` origin 绑定到 Worker，由 operator 自己的代理终止 TLS 并回源到 daemon 的 tenant-only
+`[external_ingress]` listener。这是自托管 origin 绑定，不实现 Cloudflare
+[Custom Domains](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/) API、Zone/DNS 或证书生命周期；
+项目文件中的 `routes` 仍不允许。Worker 看到绑定 origin 加原始 path/query，`CF-Connecting-IP` 是代理 peer 而不是终端客户端。
+
 ### 固定客户端的 Worker upload wire
 
 `PUT /workers/scripts/{script}` 返回 Script upload 结果。`result.id` 是 Script 名称，
@@ -520,7 +528,7 @@ P21 临时例外只限开发侧 Python 构建：调用用户安装的 PyWrangler
 Worker 配置仍为 `cloudflare.config.ts`，上游构建的 Build Output 只由 cf `--prebuilt` 上传/部署。
 认证与资源管理保持 cf。官方 cf Python builder 可用且资格通过后删除桥接，不保留双构建路径；
 fresh sync/build 与 cf loopback prebuilt capture 已通过并保留真实静态输入；七类 ordinary 场景已在完整 workspace coverage 中执行。Flask context-bearing stream 仍受 SDK 1.9.2 gap 影响并按已知问题暂缓。
-移除 TODO 与具体资格边界见 [P25 构建桥接移除待办](../p25-platform-follow-ups.md)。
+移除 TODO 与具体资格边界见 [P26 构建桥接移除待办](../p26-platform-follow-ups.md)。
 支持范围以本页的普通部署合同和已接受限制为准。
 
 2026-10-04 的 P21 扩展源码审查核对了 shared materializer、核心 binding policy 与 prepared artifact 的
@@ -537,7 +545,7 @@ Flask `stream_with_context` 因此出现 request/app ContextVar 错误，可能�
 Flask 带 request/app context 的流式响应暂不在本轮支持与验收范围，不能从普通 Flask HTTP/template
 Gate 推断 streaming 已通过。原应用路由、失败日志与诊断补丁保留，正式 SDK 不改动。
 Flask 用例验证 HTTP、模板与日志安全；Main 用例验证不可变部署、restart/rollback 和密文损坏拒绝。
-TODO(P25)：上游发布修复后重新验证该路由的完整 body、并发上下文与 cancellation cleanup，恢复流式验收并移除该限制。
+TODO(P26)：上游发布修复后重新验证该路由的完整 body、并发上下文与 cancellation cleanup，恢复流式验收并移除该限制。
 证据见 `.temp/p20-python-flask/diagnostic-01.json` 和 `.temp/p21-flask-context-diagnostic/qualification-01.json`。
 
 P20 支持 cf 当前 Beta Version GET/list 的扁平响应、分页与 `include=modules`；模块来自校验后的不可变 artifact，secret 只返回 binding 名称。版本与 Service 元数据以 `open-compute` 标识平台 producer，不冒充某个客户端品牌或 Cloudflare Dashboard。cf/Vite 动态导入分片的 `./` 模块前缀在上传入口规范化；路径穿越与规范化后的重复名称仍拒绝。Workflow export 与同 Script binding 引用复用现有 definition reservation 和 WorkerId，不开放跨 Script 引用。

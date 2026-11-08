@@ -53,6 +53,7 @@ interface Schema {
   properties?: Record<string, Schema>;
   items?: Schema;
   additionalProperties?: Schema | boolean;
+  oneOf?: Schema[];
 }
 
 interface VendorOperation {
@@ -127,6 +128,10 @@ function typeForSchema(schema: Schema | boolean, indent = ""): string {
   if (schema.const !== undefined) return JSON.stringify(schema.const);
   if (schema.enum !== undefined)
     return schema.enum.map((value) => JSON.stringify(value)).join(" | ");
+  if (schema.oneOf !== undefined)
+    return schema.oneOf
+      .map((variant) => typeForSchema(variant, indent))
+      .join(" | ");
   const schemaType = schema.type;
   if (Array.isArray(schemaType)) {
     return schemaType
@@ -849,6 +854,7 @@ function vendorReachableTypes(authority: Authority): Array<[string, string]> {
     for (const value of Object.values(schema.properties ?? {}))
       collectRefs(value, out);
     if (schema.items !== undefined) collectRefs(schema.items, out);
+    for (const variant of schema.oneOf ?? []) collectRefs(variant, out);
     if (
       schema.additionalProperties !== undefined &&
       typeof schema.additionalProperties !== "boolean"

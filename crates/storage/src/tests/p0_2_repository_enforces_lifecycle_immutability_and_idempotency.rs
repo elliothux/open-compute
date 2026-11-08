@@ -102,7 +102,7 @@ fn p0_2_repository_enforces_lifecycle_immutability_and_idempotency() {
         .resolve_route(
             &route.hostname_ascii,
             "/path",
-            crate::worker_repository::WorkerOriginExposure::Local,
+            crate::worker_repository::IngressTransport::LocalHttp,
         )
         .unwrap();
     assert_eq!(resolved.version.id, version);
@@ -135,10 +135,10 @@ fn p0_2_repository_enforces_lifecycle_immutability_and_idempotency() {
             .unwrap();
             tx.execute(
                 "INSERT INTO worker_host_routes
-                 (id, claim_id, worker_id, namespace, exposure,
+                 (id, claim_id, worker_id, namespace, exposure, transport,
                   path_prefix, entrypoint, state, generation, created_at_ms,
                   updated_at_ms, deleted_at_ms)
-                 VALUES (?1, ?1, ?2, 'worker', 'public', '/', NULL,
+                 VALUES (?1, ?1, ?2, 'worker', 'public', 'managed_gateway', '/', NULL,
                          'active', 1, 2201, 2201, NULL)",
                 rusqlite::params![public_claim, worker.id],
             )
@@ -150,7 +150,7 @@ fn p0_2_repository_enforces_lifecycle_immutability_and_idempotency() {
         .resolve_route(
             public_hostname,
             "/path",
-            crate::worker_repository::WorkerOriginExposure::Public,
+            crate::worker_repository::IngressTransport::ManagedGateway,
         )
         .unwrap();
     assert_eq!(public.version.id, version);
@@ -159,7 +159,7 @@ fn p0_2_repository_enforces_lifecycle_immutability_and_idempotency() {
         repo.resolve_route(
             public_hostname,
             "/path",
-            crate::worker_repository::WorkerOriginExposure::Local,
+            crate::worker_repository::IngressTransport::LocalHttp,
         )
         .unwrap_err()
         .code(),
@@ -169,7 +169,7 @@ fn p0_2_repository_enforces_lifecycle_immutability_and_idempotency() {
         repo.resolve_route(
             &route.hostname_ascii,
             "/path",
-            crate::worker_repository::WorkerOriginExposure::Public,
+            crate::worker_repository::IngressTransport::ManagedGateway,
         )
         .unwrap_err()
         .code(),

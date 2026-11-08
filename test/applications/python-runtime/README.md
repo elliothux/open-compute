@@ -7,7 +7,7 @@ preparing its Emscripten interpreter and dependencies. The bridge selects the
 project `.venv/bin/pywrangler`, then PATH; missing tools fail with installation
 guidance. It neither installs nor checks their version. Only Python build uses
 PyWrangler; upload, deploy, development and resource management use cf.
-TODO(P25): remove the bridge when cf has a qualified Python builder.
+TODO(P26): remove the bridge when cf has a qualified Python builder.
 
 The reviewed raw cf upload and assets requests are in
 `../../fixtures/python-runtime/`. The single `python-runtime` case verifies

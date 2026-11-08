@@ -30,4 +30,4 @@ A Worker named `api` then keeps its local origin and may receive `https://api.co
 
 Certificate and ACME authority lives below `<OCD_DIR>/gateway/` and is shared daemon state, not part of an instance snapshot. Back it up with `ocd.toml`, global keys, and any external operator Caddyfiles.
 
-Continue with [DNS and TLS](/docs/gateway/dns-tls/) and [Caddy configuration](/docs/gateway/caddy/). Public DNS and certificate qualification requires a host reachable on TCP 443 and UDP/TCP 53.
+To use your own reverse proxy and certificates instead, see [External reverse proxy](/docs/gateway/external-proxy/). Continue with [DNS and TLS](/docs/gateway/dns-tls/) and [Caddy configuration](/docs/gateway/caddy/). Public DNS and certificate qualification requires a host reachable on TCP 443 and UDP/TCP 53.

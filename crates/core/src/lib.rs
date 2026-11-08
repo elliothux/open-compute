@@ -44,15 +44,17 @@ pub use config::{
     AiGenerationModelConfig, AiRerankingModelConfig, AiSourceProviderConfig, AiTokenizer,
     AiTokenizerArtifactConfig, AiTokenizerConfig, AiVlmModelConfig, ArtifactsConfig,
     BrowserBackendConfig, BrowserConfig, CacheConfig, CaddyFileConfig, ContainersConfig, D1Config,
-    DaemonGatewayConfig, DaemonServerConfig, DataConfig, DocumentParserConfig,
-    DurableObjectsConfig, GatewayDnsRecord, GatewayDnsRecordKind, HardeningConfig, ImagesConfig,
+    DaemonExternalIngressConfig, DaemonGatewayConfig, DaemonServerConfig, DataConfig,
+    DocumentParserConfig, DurableObjectsConfig, ExternalIngressConfig, ExternalOrigin,
+    ExternalScheme, GatewayDnsRecord, GatewayDnsRecordKind, HardeningConfig, ImagesConfig,
     InstanceAuthConfig, InstanceMetadataConfig, KvConfig, LocalExtensionConfig,
     LocalObjectStorageConfig, MetricsConfig, ObjectStorageConfig, ObjectStorageKind,
     PlatformConfig, PrivateHttpGrant, PrivateHttpServiceConfig, PublicDomainConfig,
     PublicGatewayConfig, QueuesConfig, R2Config, ResolvedEmbeddingModelContract,
     ResolvedTokenizerContract, ResolvedVlmModelContract, ResponseCacheConfig, RuntimeConfig,
     S3Config, SchedulerConfig, SchedulerPoolConfig, SchedulerPoolsConfig, SecretReference,
-    WorkersConfig, validate_bootstrap_config_path, validate_cdp_url, validate_local_extension_name,
+    WorkersConfig, validate_bootstrap_config_path, validate_cdp_url, validate_external_hostname,
+    validate_local_extension_name,
 };
 pub use cron::CronSchedule;
 pub use durable_objects::{

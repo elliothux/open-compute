@@ -354,6 +354,7 @@ async fn dashboard_shell_uses_a_running_enabled_instance_before_authentication()
         data_path: "/unused/dashboard".to_owned(),
         object_authority: RegisteredObjectAuthority::Local,
         public_base_domain: None,
+        external_hostnames: Vec::new(),
         service_scope: ServiceScope::User,
         created_at: 0,
         autostart: true,
@@ -432,6 +433,7 @@ async fn dashboard_shell_uses_a_running_enabled_instance_before_authentication()
         data_path: "/unused/second".to_owned(),
         object_authority: RegisteredObjectAuthority::Local,
         public_base_domain: None,
+        external_hostnames: Vec::new(),
         service_scope: ServiceScope::User,
         created_at: 0,
         autostart: true,
@@ -492,6 +494,7 @@ async fn dashboard_session_is_shared_across_registered_instances() {
             data_path: "/unused/first".to_owned(),
             object_authority: RegisteredObjectAuthority::Local,
             public_base_domain: None,
+            external_hostnames: Vec::new(),
             service_scope: ServiceScope::User,
             created_at: 0,
             autostart: true,
@@ -503,6 +506,7 @@ async fn dashboard_session_is_shared_across_registered_instances() {
             data_path: "/unused/second".to_owned(),
             object_authority: RegisteredObjectAuthority::Local,
             public_base_domain: None,
+            external_hostnames: Vec::new(),
             service_scope: ServiceScope::User,
             created_at: 0,
             autostart: true,
@@ -585,6 +589,7 @@ async fn stopped_instance_keeps_only_its_registered_discovery_scope() {
         data_path: "/unused/data".to_owned(),
         object_authority: RegisteredObjectAuthority::Local,
         public_base_domain: Some("a.example.com".to_owned()),
+        external_hostnames: Vec::new(),
         service_scope: ServiceScope::User,
         created_at: 0,
         autostart: false,
@@ -640,4 +645,119 @@ async fn stopped_instance_keeps_only_its_registered_discovery_scope() {
             .unwrap()
             .is_none()
     );
+}
+
+#[tokio::test]
+async fn external_ingress_selects_only_an_authorized_running_instance() {
+    let running = InstanceId::generate();
+    let stopped = InstanceId::generate();
+    let record = |id: InstanceId, hostnames: &[&str]| InstanceRecord {
+        instance_id: id.to_string(),
+        name: None,
+        canonical_config_path: format!("/unused/{id}/compute.toml"),
+        data_path: format!("/unused/{id}/data"),
+        object_authority: RegisteredObjectAuthority::Local,
+        public_base_domain: None,
+        external_hostnames: hostnames.iter().map(|value| (*value).to_owned()).collect(),
+        service_scope: ServiceScope::User,
+        created_at: 0,
+        autostart: false,
+    };
+    let tokens = |id: InstanceId, name: &str| RegisteredTokens {
+        instance_id: id,
+        deployer: SecretString::new(name),
+        read_only: SecretString::new(format!("{name}-read")),
+    };
+    let (daemon, _receiver) = DaemonApi::channel(
+        &[
+            record(running, &["example.com"]),
+            record(stopped, &["stopped.example.com"]),
+        ],
+        vec![tokens(running, "running"), tokens(stopped, "stopped")],
+        SecretString::new("global-admin"),
+    )
+    .unwrap();
+    let routes = SharedRoutes::new(Some(daemon), 1024);
+    assert!(matches!(
+        routes.insert(running, state("running"), None),
+        Err(error) if error.code() == ErrorCode::SecretRefInvalid
+    ));
+    let _lease = routes
+        .insert(
+            running,
+            state("running").with_external_ingress(vec!["example.com".to_owned()], None),
+            None,
+        )
+        .unwrap();
+    let router = routes.external_router(open_compute_core::DaemonExternalIngressConfig {
+        bind: "127.0.0.1:8788".parse().unwrap(),
+        trusted_proxies: vec!["127.0.0.1/32".parse().unwrap()],
+    });
+    let send = |peer: &str, uri: &str, hosts: &[&str]| {
+        let mut request = Request::builder().uri(uri);
+        for host in hosts {
+            request = request.header(header::HOST, *host);
+        }
+        let request = request
+            .extension(axum::extract::ConnectInfo(
+                peer.parse::<std::net::SocketAddr>().unwrap(),
+            ))
+            .body(Body::empty())
+            .unwrap();
+        router.clone().oneshot(request)
+    };
+    let routed = |response: &Response| {
+        response
+            .headers()
+            .contains_key(crate::http::REQUEST_ID_HEADER)
+    };
+
+    let response = send("10.0.0.1:5000", "/", &["example.com"]).await.unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert!(!routed(&response));
+    for path in [
+        "/health/live",
+        "/metrics",
+        "/client/v4/accounts",
+        "/operator/session/exchange",
+        "/__open_compute_gateway_probe__",
+    ] {
+        let response = send("[::ffff:127.0.0.1]:5000", path, &["example.com"])
+            .await
+            .unwrap();
+        assert!(routed(&response), "{path}");
+        assert_ne!(response.status(), StatusCode::OK, "{path}");
+    }
+    assert!(routed(
+        &send("127.0.0.1:5000", "/", &["example.com:8443"])
+            .await
+            .unwrap()
+    ));
+    for (uri, hosts) in [
+        ("/", &[][..]),
+        ("/", &["example.com", "example.com"][..]),
+        ("/", &["EXAMPLE.com"][..]),
+        ("/", &["example.com."][..]),
+        ("/", &["127.0.0.1"][..]),
+        ("/", &["example.com:0"][..]),
+        ("http://example.com/", &["example.com"][..]),
+    ] {
+        let response = send("127.0.0.1:5000", uri, hosts).await.unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::BAD_REQUEST,
+            "{uri} {hosts:?}"
+        );
+        assert!(!routed(&response));
+    }
+    let response = send("127.0.0.1:5000", "/", &["unknown.example.com"])
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert!(!routed(&response));
+    let response = send("127.0.0.1:5000", "/", &["stopped.example.com"])
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert!(!routed(&response));
 }

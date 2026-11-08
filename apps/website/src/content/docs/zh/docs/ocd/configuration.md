@@ -92,6 +92,13 @@ base_domain = "compute.example.com"
 
 详见 [Dashboard](/zh/docs/ocd/dashboard/) 和 [Gateway](/zh/docs/gateway/)。共享 Gateway listener 与 Caddy 输入仍属于 `ocd.toml`。
 
+实例可为 operator 反向代理授权 exact hostname，此时 `ocd.toml` 需要带 `bind` 与 `trusted_proxies` 的 `[external_ingress]`。见[外部反向代理](/zh/docs/gateway/external-proxy/)。
+
+```toml
+[external_ingress]
+hostnames = ["app.example.com"]
+```
+
 ## `[ai]`：provider backend 与 embedding profile
 
 一个 AI backend 表示一个 operation-specific 最终请求 URL。`ocd` 不会追加 `/embeddings` 或 `/chat/completions`，因此 `endpoint` 必须同时包含 provider 的路径前缀和操作路由：
@@ -220,7 +227,7 @@ allow = [{ account_id = "<instance-id>", worker_id = "<worker-id>", entrypoint =
 
 ## 其它段
 
-实例模板还包含 `[instance]`、`[auth]`、`[runtime]`、`[cache]`、`[response_cache]`、`[images]`、`[ai]`、`[document_parser]`、`[observability]`、`[metrics]`、`[hardening]`、`[workers]`、`[kv]`、`[r2]`、`[d1]`、`[queues]`、`[durable_objects]`、`[scheduler]`（含 pool）、`[workflows]`，以及可选的 `[browser]`、`[dashboard]`、`[public_gateway]`、`[extensions.<name>]` 和 `[private_services.<name>]`。公共监听设置只属于 `ocd.toml`，不属于 `compute.toml`。这些是本机配额与超时，不是 Cloudflare 套餐。改之前用 `config check`，改完用 `capabilities --json` 看实际 `limits`。
+实例模板还包含 `[instance]`、`[auth]`、`[runtime]`、`[cache]`、`[response_cache]`、`[images]`、`[ai]`、`[document_parser]`、`[observability]`、`[metrics]`、`[hardening]`、`[workers]`、`[kv]`、`[r2]`、`[d1]`、`[queues]`、`[durable_objects]`、`[scheduler]`（含 pool）、`[workflows]`，以及可选的 `[browser]`、`[dashboard]`、`[public_gateway]`、`[external_ingress]`、`[extensions.<name>]` 和 `[private_services.<name>]`。公共监听设置只属于 `ocd.toml`，不属于 `compute.toml`。这些是本机配额与超时，不是 Cloudflare 套餐。改之前用 `config check`，改完用 `capabilities --json` 看实际 `limits`。
 
 `hardening.emergency_reserve_bytes` 必须低于 `[data]` 的 hard reserve。
 

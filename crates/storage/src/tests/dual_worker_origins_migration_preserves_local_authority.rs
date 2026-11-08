@@ -66,6 +66,38 @@ fn seed_v7(path: &Path, corrupt: bool) -> (String, String, String) {
     (account, worker, claim)
 }
 
+fn insert_public(
+    tx: &rusqlite::Transaction<'_>,
+    hostname: &str,
+    worker: &str,
+    transport: &str,
+) -> rusqlite::Result<()> {
+    let id = uuid::Uuid::now_v7().to_string();
+    let (scheme, port) = if transport == "external_proxy" {
+        (Some("https"), Some(443))
+    } else {
+        (None, None)
+    };
+    tx.execute(
+        "INSERT INTO hostname_claims
+         (id, hostname_ascii, namespace, exposure, state,
+          generation, created_at_ms, updated_at_ms, deleted_at_ms)
+         VALUES(?1, ?2, 'worker', 'public', 'active', 1, 5, 5, NULL)",
+        rusqlite::params![id, hostname],
+    )?;
+    let inserted = tx.execute(
+        "INSERT INTO worker_host_routes
+         (id, claim_id, worker_id, namespace, exposure, transport, external_scheme,
+          external_port, path_prefix, entrypoint, state, generation, created_at_ms,
+          updated_at_ms, deleted_at_ms)
+         VALUES(?1, ?1, ?2, 'worker', 'public', ?3, ?4, ?5, '/', NULL,
+                'active', 1, 5, 5, NULL)",
+        rusqlite::params![id, worker, transport, scheme, port],
+    );
+    tx.execute("DELETE FROM hostname_claims WHERE id = ?1", [&id])?;
+    inserted.map(|_| ())
+}
+
 #[test]
 fn dual_worker_origins_migration_preserves_local_authority() {
     let temp = tempfile::tempdir().unwrap();
@@ -85,13 +117,11 @@ fn dual_worker_origins_migration_preserves_local_authority() {
         assert_eq!(local, (claim.clone(), claim.clone(), "local".to_owned()));
 
         assert!(
-            tx.execute(
-                "INSERT INTO hostname_claims
-                 (id, hostname_ascii, namespace, exposure, state,
-                  generation, created_at_ms, updated_at_ms, deleted_at_ms)
-                 VALUES(?1, 'early.gateway-test.open-compute.dev', 'worker',
-                        'public', 'active', 1, 5, 5, NULL)",
-                [uuid::Uuid::now_v7().to_string()],
+            insert_public(
+                tx,
+                "early.gateway-test.open-compute.dev",
+                &worker,
+                "managed_gateway"
             )
             .is_err()
         );
@@ -111,34 +141,25 @@ fn dual_worker_origins_migration_preserves_local_authority() {
             [],
         )
         .unwrap();
-        assert!(
-            tx.execute(
-                "INSERT INTO hostname_claims
-                 (id, hostname_ascii, namespace, exposure, state,
-                  generation, created_at_ms, updated_at_ms, deleted_at_ms)
-                 VALUES(?1, 'app.example.net', 'worker', 'public',
-                        'active', 1, 5, 5, NULL)",
-                [uuid::Uuid::now_v7().to_string()],
-            )
-            .is_err()
-        );
-
         for hostname in [
+            "app.example.net",
             "-bad.gateway-test.open-compute.dev",
             "bad-.gateway-test.open-compute.dev",
             "admin.gateway-test.open-compute.dev",
             "probe.gateway-test.open-compute.dev",
         ] {
             assert!(
-                tx.execute(
-                    "INSERT INTO hostname_claims
-                     (id, hostname_ascii, namespace, exposure, state,
-                      generation, created_at_ms, updated_at_ms, deleted_at_ms)
-                     VALUES(?1, ?2, 'worker', 'public', 'active', 1, 5, 5, NULL)",
-                    rusqlite::params![uuid::Uuid::now_v7().to_string(), hostname],
-                )
-                .is_err(),
-                "accepted invalid public hostname: {hostname}"
+                insert_public(tx, hostname, &worker, "managed_gateway").is_err(),
+                "accepted invalid managed hostname: {hostname}"
+            );
+        }
+        for hostname in [
+            "gateway-test.open-compute.dev",
+            "x.gateway-test.open-compute.dev",
+        ] {
+            assert!(
+                insert_public(tx, hostname, &worker, "external_proxy").is_err(),
+                "accepted external hostname in the managed domain: {hostname}"
             );
         }
 
@@ -155,10 +176,10 @@ fn dual_worker_origins_migration_preserves_local_authority() {
         assert!(
             tx.execute(
                 "INSERT INTO worker_host_routes
-             (id, claim_id, worker_id, namespace, exposure,
+             (id, claim_id, worker_id, namespace, exposure, transport,
               path_prefix, entrypoint, state, generation, created_at_ms,
               updated_at_ms, deleted_at_ms)
-             VALUES(?1, ?1, ?2, 'worker', 'local', '/', NULL,
+             VALUES(?1, ?1, ?2, 'worker', 'local', 'local_http', '/', NULL,
                     'active', 1, 5, 5, NULL)",
                 rusqlite::params![public_claim, worker],
             )
@@ -166,10 +187,10 @@ fn dual_worker_origins_migration_preserves_local_authority() {
         );
         tx.execute(
             "INSERT INTO worker_host_routes
-             (id, claim_id, worker_id, namespace, exposure,
+             (id, claim_id, worker_id, namespace, exposure, transport,
               path_prefix, entrypoint, state, generation, created_at_ms,
               updated_at_ms, deleted_at_ms)
-             VALUES(?1, ?1, ?2, 'worker', 'public', '/', NULL,
+             VALUES(?1, ?1, ?2, 'worker', 'public', 'managed_gateway', '/', NULL,
                     'active', 1, 5, 5, NULL)",
             rusqlite::params![public_claim, worker],
         )
@@ -194,10 +215,10 @@ fn dual_worker_origins_migration_preserves_local_authority() {
         assert!(
             tx.execute(
                 "INSERT INTO worker_host_routes
-             (id, claim_id, worker_id, namespace, exposure,
+             (id, claim_id, worker_id, namespace, exposure, transport,
               path_prefix, entrypoint, state, generation, created_at_ms,
               updated_at_ms, deleted_at_ms)
-             VALUES(?1, ?1, ?2, 'worker', 'public', '/', NULL,
+             VALUES(?1, ?1, ?2, 'worker', 'public', 'managed_gateway', '/', NULL,
                     'active', 1, 6, 6, NULL)",
                 rusqlite::params![second_claim, worker],
             )

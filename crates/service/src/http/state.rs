@@ -26,6 +26,8 @@ pub(super) struct ListenerState {
     pub(super) local_origin_port: Option<u16>,
     pub(super) control_origin_port: Option<u16>,
     pub(super) public_gateway_process: Option<(Arc<AtomicI32>, Arc<AtomicI32>)>,
+    pub(super) external_hostnames: Arc<Vec<String>>,
+    pub(super) external_listener_bound: Option<Arc<std::sync::atomic::AtomicBool>>,
 }
 
 #[derive(Clone, Default)]
@@ -294,6 +296,41 @@ impl HttpState {
                 let child = child_pid.load(Ordering::Acquire);
                 child > 0 && qualified_pid.load(Ordering::Acquire) == child
             })
+    }
+
+    /// Publish this instance's authorized external hostnames and the daemon flag that is set
+    /// while the external ingress listener serves.
+    #[must_use]
+    pub fn with_external_ingress(
+        mut self,
+        hostnames: Vec<String>,
+        listener_bound: Option<Arc<std::sync::atomic::AtomicBool>>,
+    ) -> Self {
+        self.listener.external_hostnames = Arc::new(hostnames);
+        self.listener.external_listener_bound = listener_bound;
+        self
+    }
+
+    /// Whether the operator authorized `hostname` for this instance.
+    pub(crate) fn external_hostname_authorized(&self, hostname: &str) -> bool {
+        self.listener
+            .external_hostnames
+            .iter()
+            .any(|entry| entry == hostname)
+    }
+
+    /// Exact hostnames that the operator authorized for this instance.
+    pub(crate) fn external_hostnames(&self) -> &[String] {
+        &self.listener.external_hostnames
+    }
+
+    /// Whether the OCD side of the external ingress can serve `hostname` now.
+    pub(crate) fn external_ingress_serves(&self, hostname: &str) -> bool {
+        self.listener
+            .external_listener_bound
+            .as_ref()
+            .is_some_and(|bound| bound.load(Ordering::Acquire))
+            && self.external_hostname_authorized(hostname)
     }
 
     /// Attach a generic supervised-runtime restart hook to test-support builds.

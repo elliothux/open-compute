@@ -30,4 +30,4 @@ base_domain = "compute.example.com"
 
 证书与 ACME authority 位于 `<OCD_DIR>/gateway/` 下，属于共享 daemon 状态，不进入实例 snapshot。它必须与 `ocd.toml`、全局 key 及外置 operator Caddyfile 一起备份。
 
-继续阅读 [DNS 与 TLS](/zh/docs/gateway/dns-tls/)和 [Caddy 配置](/zh/docs/gateway/caddy/)。公网 DNS 与证书 qualification 需要主机可从 Internet 接收 TCP 443 和 UDP/TCP 53。
+若使用自己的反向代理和证书，见[外部反向代理](/zh/docs/gateway/external-proxy/)。继续阅读 [DNS 与 TLS](/zh/docs/gateway/dns-tls/)和 [Caddy 配置](/zh/docs/gateway/caddy/)。公网 DNS 与证书 qualification 需要主机可从 Internet 接收 TCP 443 和 UDP/TCP 53。

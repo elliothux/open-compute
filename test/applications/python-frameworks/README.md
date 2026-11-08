@@ -20,7 +20,7 @@ From the repository root, run `bun run build:python /absolute/framework-project`
 against a fresh self-contained `.temp/` copy. Each fixture now has its own
 `type: module` package and `bun run build` entry, with cf/TypeScript checks before
 the Python-only build.
-TODO(P25): remove this bridge when cf has a usable, qualified Python builder.
+TODO(P26): remove this bridge when cf has a usable, qualified Python builder.
 
 | Project    | Application behavior                                                                                            | Existing evidence                                                                              |
 | ---------- | --------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |

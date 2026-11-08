@@ -47,17 +47,25 @@ namespace 和 exposure 以复合外键对齐。local 恰好一条由 Worker 创�
 ```text
 local client  --HTTP------------------------> ocd ingress
 public client --HTTPS--> Gateway/TLS child --> private ocd ingress
+public client --HTTPS--> operator proxy -----> external ocd ingress
                                                    |
                                                    `-- same hostname authority
 ```
+
+public route 带一个 transport：`managed_gateway` 或 `external_proxy`，同一 Worker 二选一。external route 额外保存
+`external_scheme` 和 `external_port`；hostname 只在 claim 中。外部 hostname 由 instance `compute.toml` 的
+`[external_ingress].hostnames` 授权，daemon 只从已验证配置投影 `hostname → instance`，进入 instance 后再查 SQLite。
+同一 hostname 不能授权给两个已登记实例，不能落在任何 `base_domain` 内，有 active binding 时不能撤销授权。
 
 Gateway 的平台路径只拥有 TLS、ACME、固定 product namespace admission、外部 header 清洗和一个固定 `ocd` upstream。
 它不接收逐 Worker/bucket route，不持有 deployment/account mapping；资源创建、删除和切换不得触发 Gateway reload。
 
 `ocd` 从实际 listener 建立可信 ingress context。直接 listener 使用实际 scheme/client address；Gateway private listener 只接受经过固定
 peer/socket boundary 的 Gateway，并使用其覆盖后的 external scheme/client metadata。外部 `Forwarded`、`X-Forwarded-*` 与平台内部
-header 不能自行提升为可信 context。两条路径使用相同的 canonical Host resolver，但允许的 exposure 由实际 listener 决定：本机路径
-只接收 local claim，Gateway private 路径只接收 public claim。请求不能自行声明 exposure；transport metadata 不改变持久化 ownership。
+header 不能自行提升为可信 context。三条路径使用相同的 canonical Host resolver，但允许的 transport 由实际 listener 决定：本机路径只接收
+`local_http`，Gateway private 路径只接收 `managed_gateway`，external listener 只接收 `external_proxy`。请求不能自行声明
+transport。external listener 只接受 `trusted_proxies` 中的 TCP peer、唯一的 origin-form Host，并按绑定的公网端口校验
+authority；Worker 的 `request.url` 是绑定 origin 加原始 path/query。它不采信任何转发头，`CF-Connecting-IP` 取 socket peer。
 
 平台管理的 tenant hostname 必须在 path-based 控制面 router 之前解析。匹配后，`/health`、`/client/v4`、`/operator` 等 path 都是
 tenant path；unknown、disabled、tombstoned 或 Host/SNI 不一致均 fail closed。
@@ -80,7 +88,8 @@ Worker/R2 等 origin，不禁止用户在其他域名上发布非平台应用。
 Endpoint API 从 hostname authority 和各自 transport capability 独立投影 URL：本机返回 `local_origin`/`local_machine`，公网返回
 `public_origin`/`public_network`。local 使用实际可达 loopback port 与 HTTP，public 使用外部 HTTPS 443，不复用本机或 Caddy 内部端口。
 
-本机 listener 不可达时只省略 local 项，不能提前返回整个空列表；Gateway 未完成首次资格、已停用或不可服务时只省略 public 项。
+本机 listener 不可达时只省略 local 项，不能提前返回整个空列表；Gateway 未完成首次资格、已停用或不可服务时只省略 managed
+public 项；external listener 未绑定或 hostname 未授权时只省略 external 项。每项带 `transport`。
 已完成资格且有效证书仍能服务的 renewal degraded 不撤销既有 public endpoint；新增 public binding 仍要求 namespace active。
 故障不删除持久化 binding，也不阻止 Worker deployment 建立本机可用状态。endpoint 不是另一套路由 authority。
 
@@ -94,3 +103,5 @@ OpenAPI、生成 SDK、CLI/cf 与 Dashboard 同步消费两种 kind/scope，不�
   常驻 Caddy 接口已由 P18 提取接入；不拥有路由；
 - [P18 单域名公网网关、DNS 与 TLS](../implemented/p18-single-domain-public-gateway.md)：复用 R0 authority，增加公网 DNS、TLS、Gateway transport
   与固定双入口生命周期；未满足公网 DNS、端口和证书 readiness 时不提供 public endpoint。
+- [P24 外部反向代理下的 Worker 自定义域名](../implemented/p24-external-proxy-worker-origins.md)：external transport、
+  exact-host 授权和显式对外 origin。

@@ -18,7 +18,7 @@ fn refinery_history_is_current_and_future_schema_fails_closed() {
         history,
         (
             current_scheduler_schema_version(),
-            "ai_search_instance_move".to_owned()
+            "external_proxy_worker_origins".to_owned()
         )
     );
     connection

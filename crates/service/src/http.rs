@@ -97,6 +97,18 @@ pub fn gateway_router(state: HttpState) -> Router {
         .with_state(state)
 }
 
+/// Tenant-only router for the external ingress listener: every path belongs to the Worker.
+pub fn external_router(state: HttpState) -> Router {
+    let middleware_state = state.clone();
+    Router::new()
+        .fallback(workers_http::external_ingress)
+        .layer(middleware::from_fn_with_state(
+            middleware_state,
+            bounds_middleware,
+        ))
+        .with_state(state)
+}
+
 /// Admin routes, including public health plus operator API and metrics.
 pub fn admin_router(state: HttpState) -> Router {
     let middleware_state = state.clone();
@@ -393,7 +405,8 @@ async fn bounds_middleware(
     next: Next,
 ) -> Result<Response, StatusCode> {
     let start = Instant::now();
-    if request.method() != Method::GET
+    if request.extensions().get::<MatchedPath>().is_some()
+        && request.method() != Method::GET
         && request.method() != Method::HEAD
         && matches!(
             request.uri().path(),

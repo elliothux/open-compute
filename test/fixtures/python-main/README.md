@@ -29,8 +29,8 @@ original bytes and provenance, and retain original capture files. Never fabricat
 SDK/Build Output. PyWrangler is user-installed with no version checks; all upload,
 deploy, authentication and resource operations use cf.
 
-TODO(P25): remove the Python-only PyWrangler bridge when cf's official Python
-builder passes equivalent build/upload qualification, as tracked in `docs/p25-platform-follow-ups.md`.
+TODO(P26): remove the Python-only PyWrangler bridge when cf's official Python
+builder passes equivalent build/upload qualification, as tracked in `docs/p26-platform-follow-ups.md`.
 
 The Gate checks the capture, SDK sources and maintained Python main before
 starting the ordinary daemon. Only test-owned binding IDs, variable values and

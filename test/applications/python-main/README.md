@@ -43,9 +43,9 @@ bun run build
 ocd cf deploy --prebuilt
 ```
 
-TODO(P25): remove this bridge, its scripts/dependency/tests and these temporary
+TODO(P26): remove this bridge, its scripts/dependency/tests and these temporary
 Wrangler inputs when the official cf Python builder produces equivalent qualified
-Build Output. See [PyWrangler removal TODO](../../../docs/p25-platform-follow-ups.md).
+Build Output. See [PyWrangler removal TODO](../../../docs/p26-platform-follow-ups.md).
 
 After generating official Python Build Output in a project under `.temp/`, run:
 

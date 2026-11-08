@@ -2,14 +2,14 @@
   "schemaVersion": 1,
   "package": "@open-compute/sdk",
   "packageVersion": "0.4.0",
-  "surfaceDigest": "3c6761fe8aebcc24436e8f1747a6aeca968985824b059fafc7841c2de0b78469",
+  "surfaceDigest": "f9264a7580f90443ac16aae420bbd0c2caec02c6c786f3338bc7cd98759c9435",
   "authority": {
     "openapiRevision": "1e7d44922a8a0174a7e68f81c9ff5709cd8c6db7",
     "openapiSha256": "d9230d388f7df3a071a0f2091caee34aa0f79089bdb0749ffb91d3478735d46e",
     "cloudflareSdkVersion": "7.3.0",
     "cloudflareSdkNpmIntegrity": "sha512-0P4cMFjzdIe388E57xNCV2wKzv1ZVZqMFu7+p2gsZuggbXs39xTKtXJN8FACkKh+xjLQ7dNruNlT/aT+9ajJtg==",
     "subsetSha256": "3d8eb0141fb211b1f582efcf79e635fd6aec714b64ff9dfb499af17d01343bcd",
-    "extensionSha256": "9de0fa4b56c9803b85ac55074b2be8f6a5bd46febe5c50dbb851fb2746a7bcc1",
+    "extensionSha256": "e6dc15bbff3d584a802eeb1d9608c92c77f6f77d3295ba8264bc9300d06c0d72",
     "observedStandardSha256": "f7f365a0c3033166fd6263da179943040e00a58363bd74e0f8d1ccdd7090adde"
   },
   "operations": [

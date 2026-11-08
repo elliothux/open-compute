@@ -1,9 +1,10 @@
 import { Button } from "@cloudflare/kumo/components/button";
 import { Input } from "@cloudflare/kumo/components/input";
+import { Select } from "@cloudflare/kumo/components/select";
 import { Switch } from "@cloudflare/kumo/components/switch";
 import { IconPlus, IconTrash } from "@tabler/icons-react";
 import type { ReactNode } from "react";
-import type { QueueConsumer } from "@open-compute/sdk";
+import type { PublicOriginRequest, QueueConsumer } from "@open-compute/sdk";
 import { ErrorState, LoadingRows } from "../../components/dashboard-page";
 import { WorkerBindingEditor } from "../../components/worker-binding-editor";
 import { WorkerQueueTriggers } from "../../components/worker-queue-triggers";
@@ -20,6 +21,17 @@ type Binding = {
   queue_name?: string;
 };
 type Secret = { name: string };
+type PublicTransport = PublicOriginRequest["transport"];
+type PublicOriginBinding = {
+  transport: PublicTransport;
+  origin: string;
+  ingress_available: boolean;
+};
+
+const transportLabels: Record<PublicTransport, string> = {
+  managed_gateway: "Managed Gateway",
+  external_proxy: "External proxy / operator-managed TLS",
+};
 type Schedule = { cron: string };
 
 const sections = [
@@ -87,6 +99,8 @@ export function WorkerSettings({
   compatibilityFlags,
   cpuTimeLimit,
   publicOrigin,
+  publicTransport,
+  onPublicTransportChange,
   publicDraft,
   onPublicDraftChange,
   publicOriginPending,
@@ -112,7 +126,9 @@ export function WorkerSettings({
   compatibilityDate: string | undefined;
   compatibilityFlags: readonly string[] | undefined;
   cpuTimeLimit: number | undefined;
-  publicOrigin: string | undefined;
+  publicOrigin: PublicOriginBinding | null;
+  publicTransport: PublicTransport;
+  onPublicTransportChange: (transport: PublicTransport) => void;
   publicDraft: string;
   onPublicDraftChange: (value: string) => void;
   publicOriginPending: boolean;
@@ -226,10 +242,46 @@ export function WorkerSettings({
             <div className="border-kumo-line border-b px-4 py-3 font-medium">
               Public origin
             </div>
+            {publicOrigin ? (
+              <div className="border-kumo-line space-y-1 border-b px-4 py-3">
+                <a
+                  className="text-kumo-link break-all hover:underline"
+                  href={`${publicOrigin.origin}/`}
+                >
+                  {publicOrigin.origin}
+                </a>
+                <p className="text-kumo-subtle text-sm">
+                  {transportLabels[publicOrigin.transport]} ·{" "}
+                  {publicOrigin.ingress_available
+                    ? "OCD ingress available"
+                    : "OCD ingress unavailable"}
+                </p>
+              </div>
+            ) : null}
             <div className="flex flex-wrap items-end gap-2 px-4 py-3">
+              <Select
+                label="Transport"
+                value={publicTransport}
+                items={[
+                  { label: "Managed Gateway", value: "managed_gateway" },
+                  { label: "External proxy", value: "external_proxy" },
+                ]}
+                onValueChange={(value) =>
+                  onPublicTransportChange(value as PublicTransport)
+                }
+              />
               <Input
                 className="min-w-48 flex-1"
-                label="Public name"
+                label={
+                  publicTransport === "managed_gateway"
+                    ? "Public name"
+                    : "Origin"
+                }
+                placeholder={
+                  publicTransport === "managed_gateway"
+                    ? undefined
+                    : "https://app.example.com"
+                }
                 value={publicDraft}
                 onChange={(event) => onPublicDraftChange(event.target.value)}
               />
@@ -250,6 +302,13 @@ export function WorkerSettings({
                 </Button>
               ) : null}
             </div>
+            {publicTransport === "external_proxy" ? (
+              <p className="text-kumo-subtle px-4 pb-3 text-sm">
+                The operator must authorize this exact hostname for the
+                instance. The operator proxy owns TLS and certificates, and the
+                Worker sees the proxy address as the client IP.
+              </p>
+            ) : null}
           </Card>
         </Block>
         <Block id="danger" title="Danger zone">
