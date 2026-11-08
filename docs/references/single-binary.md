@@ -1,8 +1,8 @@
 # 单二进制分发与部署
 
-当前正式 lock 固定用户 fork `2ff33d645813e1d6253f44ec312d75ee70153912`，
-Release 为 `v1.20260930.0-open-compute-r25.2ff33d645`，见[workerd 方案](../workerd/README.md)。
-R25 的四平台原生资格与不可变 Release 的 10 项资产校验已通过；私有 Container 协议为 v4。
+当前正式 lock 固定用户 fork `8c3699444017902d9079d14e61eb6e81410c8262`，
+Release 为 `v1.20260930.0-open-compute-r26.8c3699444`，见[workerd 方案](../workerd/README.md)。
+R26 的四平台原生资格与不可变 Release 的 10 项资产校验已通过；私有 Container 协议为 v4。
 真实产品、完整 coverage、最终 Gate 和三宿主发行包的当前结果见 [P23 记录](../implemented/p23-cloudflare-containers.md)。
 三个正式产品平台加 macOS Intel 手动输入的 archive/binary 摘要、upstream base 与构建输入统一记录于 lock。
 四个平台的 gzip 由 workerd fork 的 GitHub Release 托管，lock 固定 URL、archive/binary digest 与构建身份；macOS Intel
