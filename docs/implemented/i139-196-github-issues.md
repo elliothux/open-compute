@@ -84,7 +84,21 @@
     release-tools 测试的替身 binary；dry-run 镜像同时补上测试使用的 `jq`。
   - `fe340fddd`：dry-run 把 `OPEN_COMPUTE_TEST_CONTAINERS_INPUT` 只读传入容器。根构建自 2026-10-18 起需要它。
   - `bf2af2f87`：dry-run 初始化 `third_party/workerd` submodule，与 tag workflow 一致。
-- 未执行：tag workflow 的 CI package job，它在下一次 release 中运行。
+- tag workflow 的 linux-x64 candidate run [42446371379](https://github.com/elliothux/open-compute/actions/runs/42446371379)
+  （`8352f0cf9`，不发布）中 package、package-gate、两个 install-lifecycle、stress 与 upgrade-driver 通过。
+  它的 coverage shards 暴露了 cf `1.0.0-beta.21` 升级留下的问题，后续修复如下：
+  - `9569aedf9`：`workers`、`cf-resources` 与 `containers` 改用 beta.21 的输出（stderr 上的 Version ID）、参数
+    （`--index-config-*`、`--namespace`、`--instance-id`、`--force`）和版本断言。`bindings` 删除 warm 请求检测
+    控制库改动的断言：PR #165（`9de4fc999`）的 runtime snapshot 缓存按 route generation 复用已验证 snapshot，
+    改本机文件不在威胁模型内。
+  - `dbaafc7a1`：用 PyWrangler 1.17.6、uv 0.12.3 和官方 bridge 重新构建并用 beta.21 重新捕获十个 Python fixture；
+    `pylock.toml` 与复核版本逐字节相同，可执行模块与旧捕获一致。
+  - 修复后，Gate `workers`、`cf-resources`、`bindings`、`contract`、`python-main`、`python-frameworks`、
+    `python-services`、`python-queues`、`python-workflows`、`python-runtime` 通过。
+- 未执行：
+  - `python-durable-objects` Gate：磁盘使用率 97%，触发 DO stop-writes 水位（`DO_STORAGE_LIMIT`）；
+  - `containers` Gate：需要真实 P23 Broker；
+  - 修复后的 candidate run 的 coverage shards 尚未重跑。
 
 ## 已接受的限制
 
