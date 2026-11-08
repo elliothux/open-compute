@@ -211,7 +211,7 @@ export async function verifyPackageArtifact(
   directory: string,
   target: string,
   identity: ReleaseIdentity,
-): Promise<PackageReport> {
+): Promise<{ report: PackageReport; bytes: Buffer }> {
   if (!releaseTargets.some((supported) => supported === target))
     throw new Error("unsupported package target");
   const tag = `v${identity.version}`;
@@ -245,8 +245,7 @@ export async function verifyPackageArtifact(
       `${target} package report does not match the immutable release inputs`,
     );
   }
-  if (target.startsWith("linux-")) checkGlibcBaseline(bytes, filename);
-  return report;
+  return { report, bytes };
 }
 
 export async function assembleRelease(
@@ -298,8 +297,14 @@ export async function assembleRelease(
   const artifacts = [];
   for (const target of releaseTargets) {
     const filename = `ocd-${tag}-${target}`;
-    const report = await verifyPackageArtifact(directory, target, identity);
+    const { report, bytes } = await verifyPackageArtifact(
+      directory,
+      target,
+      identity,
+    );
     const [os, arch] = target.split("-") as [string, string];
+    // Published Linux artifacts claim the baseline that install.sh enforces.
+    if (os === "linux") checkGlibcBaseline(bytes, filename);
     artifacts.push({
       target,
       os,

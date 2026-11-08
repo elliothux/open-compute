@@ -19,6 +19,7 @@ RUN ln -s /usr/local/bin/bun /usr/local/bin/bunx \
       cmake \
       curl \
       git-lfs \
+      jq \
       libssl-dev \
       pkg-config \
       python3 \

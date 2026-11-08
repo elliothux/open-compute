@@ -869,6 +869,27 @@ test("release assembly requires and describes the exact three native executables
     );
     badReport.revision = identity.revision;
     await writeFile(badReportPath, JSON.stringify(badReport));
+    const linuxBinary = join(root, "ocd-v1.2.3-linux-x64");
+    const baselineBytes = await readFile(linuxBinary);
+    const newerGlibc = syntheticElf(
+      ["libc.so.6"],
+      [["libc.so.6", ["GLIBC_2.38"]]],
+    );
+    await writeFile(linuxBinary, newerGlibc);
+    await writeFile(
+      badReportPath,
+      JSON.stringify({
+        ...badReport,
+        bytes: newerGlibc.length,
+        sha256: sha256(newerGlibc),
+      }),
+    );
+    await assert.rejects(
+      assembleRelease(root, "v1.2.3", identity, sdkReport, evidenceDirectory),
+      /GLIBC_2\.38/,
+    );
+    await writeFile(linuxBinary, baselineBytes);
+    await writeFile(badReportPath, JSON.stringify(badReport));
     await assembleRelease(
       root,
       "v1.2.3",
