@@ -39,9 +39,7 @@ impl D1Engine {
         let result = (|| {
             let mut readonly = true;
             for statement in statements {
-                let prepared = connection
-                    .prepare(&statement.sql)
-                    .map_err(|error| map_sqlite_error(&error, &control))?;
+                let prepared = control.prepare(|| connection.prepare(&statement.sql))?;
                 if prepared.parameter_count() != statement.params.len() {
                     return Err(parameter_mismatch());
                 }
@@ -63,9 +61,7 @@ impl D1Engine {
         let connection = self.open()?;
         let preflight = install_guard(&connection, limits, SqlAuthority::Tenant);
         let readonly = (|| {
-            let prepared = connection
-                .prepare(&statement.sql)
-                .map_err(|error| map_sqlite_error(&error, &preflight))?;
+            let prepared = preflight.prepare(|| connection.prepare(&statement.sql))?;
             if prepared.parameter_count() != statement.params.len() {
                 return Err(parameter_mismatch());
             }
@@ -95,13 +91,7 @@ impl D1Engine {
                 let _ = connection.execute_batch("ROLLBACK");
                 return Err(error);
             }
-            if connection.execute_batch("COMMIT").is_err() {
-                let _ = connection.execute_batch("ROLLBACK");
-                return Err(PlatformError::new(
-                    ErrorCode::D1ResultUnknown,
-                    "D1 statement commit result is unknown",
-                ));
-            }
+            commit(&connection, "D1 statement commit result is unknown")?;
         }
         result.meta.size_after = logical_size(&connection)?;
         Ok(result)
@@ -124,7 +114,7 @@ impl D1Engine {
         let mut any_write = false;
         let mut preflight_error = None;
         for statement in statements {
-            match connection.prepare(&statement.sql) {
+            match preflight.prepare(|| connection.prepare(&statement.sql)) {
                 Ok(prepared) => {
                     if prepared.parameter_count() != statement.params.len() {
                         preflight_error = Some(parameter_mismatch());
@@ -133,7 +123,7 @@ impl D1Engine {
                     any_write |= !prepared.readonly();
                 }
                 Err(error) => {
-                    preflight_error = Some(map_sqlite_error(&error, &preflight));
+                    preflight_error = Some(error);
                     break;
                 }
             }
@@ -179,13 +169,7 @@ impl D1Engine {
             let _ = connection.execute_batch("ROLLBACK");
             return Err(error);
         }
-        if connection.execute_batch("COMMIT").is_err() {
-            let _ = connection.execute_batch("ROLLBACK");
-            return Err(PlatformError::new(
-                ErrorCode::D1ResultUnknown,
-                "D1 batch commit result is unknown",
-            ));
-        }
+        commit(&connection, "D1 batch commit result is unknown")?;
         let size = logical_size(&connection)?;
         for result in &mut results {
             result.meta.size_after = size;
@@ -221,10 +205,7 @@ impl D1Engine {
             for query in queries {
                 let mut params_used = 0_usize;
                 let mut batch = Batch::new(&connection, &query.sql);
-                while let Some(statement) = batch
-                    .next()
-                    .map_err(|error| map_sqlite_error(&error, &control))?
-                {
+                while let Some(statement) = control.prepare(|| batch.next())? {
                     statement_count = statement_count.checked_add(1).ok_or_else(limit_error)?;
                     if statement_count > D1_MAX_BATCH_STATEMENTS {
                         return Err(limit_error());
@@ -274,13 +255,7 @@ impl D1Engine {
             let _ = connection.execute_batch("ROLLBACK");
             return Err(error);
         }
-        if connection.execute_batch("COMMIT").is_err() {
-            let _ = connection.execute_batch("ROLLBACK");
-            return Err(PlatformError::new(
-                ErrorCode::D1ResultUnknown,
-                "D1 query batch commit result is unknown",
-            ));
-        }
+        commit(&connection, "D1 query batch commit result is unknown")?;
         let size = logical_size(&connection)?;
         for result in &mut results {
             result.meta.size_after = size;
@@ -451,15 +426,26 @@ impl D1Engine {
             let _ = connection.execute_batch("ROLLBACK");
             return Err(error);
         }
-        if connection.execute_batch("COMMIT").is_err() {
-            let _ = connection.execute_batch("ROLLBACK");
-            return Err(PlatformError::new(
-                ErrorCode::D1ResultUnknown,
-                "D1 migration commit result is unknown",
-            ));
-        }
+        commit(&connection, "D1 migration commit result is unknown")?;
         Ok(applied.into_values().collect())
     }
+}
+
+fn commit(connection: &Connection, unknown: &'static str) -> Result<(), PlatformError> {
+    if let Err(error) = connection.execute_batch("COMMIT") {
+        let rolled_back = connection.execute_batch("ROLLBACK").is_ok();
+        if rolled_back
+            && error.sqlite_error().map(|error| error.extended_code)
+                == Some(rusqlite::ffi::SQLITE_CONSTRAINT_FOREIGNKEY)
+        {
+            return Err(PlatformError::new(
+                ErrorCode::D1SqlInvalid,
+                "D1 foreign key constraint failed",
+            ));
+        }
+        return Err(PlatformError::new(ErrorCode::D1ResultUnknown, unknown));
+    }
+    Ok(())
 }
 
 fn materialize(
@@ -468,9 +454,7 @@ fn materialize(
     limits: D1QueryLimits,
     control: &Arc<ExecutionControl>,
 ) -> Result<D1StatementResult, PlatformError> {
-    let statement = connection
-        .prepare(&input.sql)
-        .map_err(|error| map_sqlite_error(&error, control))?;
+    let statement = control.prepare(|| connection.prepare(&input.sql))?;
     materialize_prepared(connection, statement, &input.params, limits, control)
 }
 
@@ -603,10 +587,7 @@ pub(super) fn execute_tail_batch(
     let mut count = 0_usize;
     let mut any_write = false;
     let mut rows_read = 0_u64;
-    while let Some(mut statement) = batch
-        .next()
-        .map_err(|error| map_sqlite_error(&error, control))?
-    {
+    while let Some(mut statement) = control.prepare(|| batch.next())? {
         count = count.checked_add(1).ok_or_else(limit_error)?;
         if count > maximum {
             return Err(limit_error());
@@ -637,10 +618,7 @@ fn execute_tail_batch_versioned(
     let mut batch = Batch::new(connection, sql);
     let mut count = 0_usize;
     let mut version_persisted = false;
-    while let Some(mut statement) = batch
-        .next()
-        .map_err(|error| map_sqlite_error(&error, control))?
-    {
+    while let Some(mut statement) = control.prepare(|| batch.next())? {
         count = count.checked_add(1).ok_or_else(limit_error)?;
         if count > maximum {
             return Err(limit_error());

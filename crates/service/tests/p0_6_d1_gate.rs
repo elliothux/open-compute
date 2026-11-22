@@ -2,6 +2,9 @@
 
 #![cfg(feature = "test-support")]
 
+#[path = "p0_6_d1_gate/http_migrations.rs"]
+mod http_migrations;
+
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, header};
 use open_compute_artifacts::{

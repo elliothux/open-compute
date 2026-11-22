@@ -6,7 +6,8 @@ const doMaxObjectNameBytes :Text = "__OPEN_COMPUTE_DO_MAX_OBJECT_NAME_BYTES__";
 const doMaxFetchBodyBytes :Text = "__OPEN_COMPUTE_DO_MAX_FETCH_BODY_BYTES__";
 const doDispatchTimeoutMs :Text = "__OPEN_COMPUTE_DO_DISPATCH_TIMEOUT_MS__";
 const doMaxInFlightDispatches :Text = "__OPEN_COMPUTE_DO_MAX_IN_FLIGHT_DISPATCHES__";
-const doDiskStopWritesPercent :Text = "__OPEN_COMPUTE_DO_DISK_STOP_WRITES_PERCENT__";
+const doDiskStopWritesFreeBytes :Text = "__OPEN_COMPUTE_DO_DISK_STOP_WRITES_FREE_BYTES__";
+const doDiskDegradedFreeBytes :Text = "__OPEN_COMPUTE_DO_DISK_DEGRADED_FREE_BYTES__";
 const systemCompatibilityDate :Text = "__OPEN_COMPUTE_SYSTEM_COMPATIBILITY_DATE__";
 const systemCompatibilityFlagsJson :Text = "__OPEN_COMPUTE_SYSTEM_COMPATIBILITY_FLAGS_JSON__";
 
@@ -271,7 +272,8 @@ const doHostWorker :Workerd.Worker = (
     (name = "DO_MAX_FETCH_BODY_BYTES", text = .doMaxFetchBodyBytes),
     (name = "DO_DISPATCH_TIMEOUT_MS", text = .doDispatchTimeoutMs),
     (name = "DO_MAX_IN_FLIGHT_DISPATCHES", text = .doMaxInFlightDispatches),
-    (name = "DO_DISK_STOP_WRITES_PERCENT", text = .doDiskStopWritesPercent),
+    (name = "DO_DISK_STOP_WRITES_FREE_BYTES", text = .doDiskStopWritesFreeBytes),
+    (name = "DO_DISK_DEGRADED_FREE_BYTES", text = .doDiskDegradedFreeBytes),
     (name = "SYSTEM_COMPATIBILITY_DATE", text = .systemCompatibilityDate),
     (name = "SYSTEM_COMPATIBILITY_FLAGS", json = .systemCompatibilityFlagsJson),
   ],

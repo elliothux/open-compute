@@ -62,8 +62,8 @@ async fn p0_7_real_durable_objects_matrix() {
 
 fn durable_objects_config() -> DurableObjectsConfig {
     DurableObjectsConfig {
-        disk_high_watermark_percent: 98,
-        disk_stop_writes_percent: 99,
+        disk_degraded_free_bytes: 2,
+        disk_stop_writes_free_bytes: 1,
         ..DurableObjectsConfig::default()
     }
 }

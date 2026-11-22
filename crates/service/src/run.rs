@@ -633,24 +633,23 @@ fn update_do_storage_health(
     health: &HealthCoordinator,
     metrics: &MetricsRegistry,
 ) -> Result<(), PlatformError> {
-    let used = storage.filesystem_used_percent()?;
-    let watermark = if used >= config.disk_stop_writes_percent {
-        2
-    } else if used >= config.disk_high_watermark_percent {
-        1
-    } else {
-        0
-    };
-    metrics.set_do_storage_watermark(watermark);
-    let state = if watermark == 0 {
-        ComponentState::Healthy
-    } else {
-        ComponentState::Degraded
-    };
-    let reason = match watermark {
-        0 => ReadinessReason::Ready,
-        1 => ReadinessReason::DiskSoftLimit,
-        _ => ReadinessReason::DiskHardLimit,
+    let (available_bytes, _) = storage.filesystem_space()?;
+    report_do_storage_health(config, available_bytes, health, metrics)
+}
+
+fn report_do_storage_health(
+    config: &open_compute_core::DurableObjectsConfig,
+    available_bytes: u64,
+    health: &HealthCoordinator,
+    metrics: &MetricsRegistry,
+) -> Result<(), PlatformError> {
+    use open_compute_core::config::DoStorageWatermark;
+    let watermark = config.storage_watermark(available_bytes);
+    metrics.set_do_storage_watermark(watermark as usize);
+    let (state, reason) = match watermark {
+        DoStorageWatermark::Normal => (ComponentState::Healthy, ReadinessReason::Ready),
+        DoStorageWatermark::High => (ComponentState::Degraded, ReadinessReason::DiskSoftLimit),
+        DoStorageWatermark::Stop => (ComponentState::Degraded, ReadinessReason::DiskHardLimit),
     };
     health.set_component(ComponentName::DataDir, state, Some(reason))
 }

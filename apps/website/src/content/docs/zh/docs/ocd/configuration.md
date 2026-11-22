@@ -233,6 +233,31 @@ allow = [{ account_id = "<instance-id>", worker_id = "<worker-id>", entrypoint =
 
 Browser Run 不默认启用，backend 与容量字段见 [Browser Run](/zh/docs/browser-run/)。
 
+### Durable Object 磁盘预留空间
+
+在 `[durable_objects]` 中以字节设置预留空间。两个值都必须是正整数，且停止阈值必须小于降级阈值。服务启动时检查两个阈值是否都在数据目录所在文件系统的总容量以内。
+
+| 配置项                        | 默认值                     |
+| ----------------------------- | -------------------------- |
+| `disk_stop_writes_free_bytes` | 2 GiB（2147483648 字节）   |
+| `disk_degraded_free_bytes`    | 10 GiB（10737418240 字节） |
+
+| 数据目录所在文件系统的可用字节数 | 健康状态 | `oc_do_storage_watermark` 状态 | 创建新对象              |
+| -------------------------------- | -------- | ------------------------------ | ----------------------- |
+| 大于或等于降级阈值               | 健康     | `normal`                       | 允许                    |
+| 大于或等于停止阈值且小于降级阈值 | 降级     | `high`                         | 允许                    |
+| 小于停止阈值                     | 降级     | `stop`                         | 返回 `DO_STORAGE_LIMIT` |
+
+已有对象仍可按现有存储准入规则解析。
+
+#### 从 v0.4.0 升级
+
+v0.4.0 的 `setup` 即使生成默认实例配置，也会写入 `disk_stop_writes_percent` 和 `disk_high_watermark_percent`。运行 `ocd upgrade` 前，从实例实际使用的 `compute.toml` 中移除这两个字段。省略两项后，v0.4.0 仍使用 95% 的停止阈值和 85% 的降级阈值，升级后则使用 2 GiB 的停止预留和 10 GiB 的降级预留。
+
+如果使用自定义阈值，请显式选择以字节计的新预留值。切换到新版二进制后，设置 `disk_stop_writes_free_bytes` 和 `disk_degraded_free_bytes`，再运行 `config check`。升级时不会自动换算百分比。
+
+当前作用域的守护进程正在运行时，`ocd upgrade` 会先用待安装的二进制检查已登记的实例配置，再替换已安装的二进制。配置中保留旧字段会导致预检失败。
+
 ## Containers
 
 `[containers]` 是可选配置。未配置时，实例不准入 Containers。应填写已通过资格检查的 Broker socket、合同摘要、实例与快照上限，以及资源上限。Broker 使用独立配置文件。参见 [Container 配置](/zh/docs/containers/#实例配置)。

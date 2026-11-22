@@ -44,6 +44,7 @@ function alarmIndex(value: unknown): value is AlarmIndexCapability {
   return (
     value !== null &&
     (typeof value === "object" || typeof value === "function") &&
+    typeof nativeGet(value, "begin") === "function" &&
     typeof nativeGet(value, "upsert") === "function" &&
     typeof nativeGet(value, "delete") === "function" &&
     typeof nativeGet(value, "clear") === "function"

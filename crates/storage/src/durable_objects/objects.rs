@@ -200,6 +200,16 @@ impl<'a> DurableObjectRepository<'a> {
                 ],
             )
             .map_err(|_| db_error())?;
+            tx.execute(
+                "DELETE FROM do_alarm_repair
+                 WHERE (namespace_resource_id, object_id, generation) = (?1, ?2, ?3)",
+                params![
+                    namespace_id,
+                    object_id.to_string(),
+                    i64::try_from(current.generation).map_err(|_| invariant())?,
+                ],
+            )
+            .map_err(|_| db_error())?;
             read_object(tx, namespace_id, object_id, current.generation)
         })
     }
@@ -315,12 +325,12 @@ impl<'a> DurableObjectRepository<'a> {
         })
     }
 
-    /// Scan a stable, bounded page of live object generations for alarm repair.
-    pub fn alarm_repair_candidates(
+    /// Page through live generations whose alarm projection needs verification.
+    pub fn pending_alarm_repairs(
         &self,
         after: Option<(ResourceId, DurableObjectId, u64)>,
         limit: u32,
-    ) -> Result<Vec<DurableObjectRecord>, PlatformError> {
+    ) -> Result<Vec<(DurableObjectRecord, String)>, PlatformError> {
         if limit == 0 {
             return Ok(Vec::new());
         }
@@ -334,29 +344,31 @@ impl<'a> DurableObjectRepository<'a> {
                 )
             },
         );
+        // Leave active deliveries and discard cleanup to the scheduler.
         self.storage.db().with_read(|connection| {
             let mut statement = connection
                 .prepare(
-                    "SELECT namespace_resource_id, object_id, generation, state,
-                            created_at_ms, updated_at_ms, deleted_at_ms
-                     FROM do_objects
-                     WHERE state IN ('creating', 'ready') AND (
-                       namespace_resource_id > ?1 OR
-                       (namespace_resource_id = ?1 AND object_id > ?2) OR
-                       (namespace_resource_id = ?1 AND object_id = ?2 AND generation > ?3)
-                     )
-                     ORDER BY namespace_resource_id, object_id, generation LIMIT ?4",
+                    "SELECT o.namespace_resource_id, o.object_id, o.generation, o.state,
+                            o.created_at_ms, o.updated_at_ms, o.deleted_at_ms, r.revision
+                     FROM do_alarm_repair r
+                     JOIN do_objects o ON (o.namespace_resource_id, o.object_id, o.generation)
+                                       = (r.namespace_resource_id, r.object_id, r.generation)
+                     LEFT JOIN scheduled_jobs j ON (j.namespace_resource_id, j.object_id, j.object_generation)
+                                                 = (r.namespace_resource_id, r.object_id, r.generation)
+                     WHERE (r.namespace_resource_id, r.object_id, r.generation) > (?1, ?2, ?3)
+                       AND o.state IN ('creating', 'ready')
+                       AND (j.id IS NULL OR j.state = 'scheduled')
+                       AND (r.expected_row_token IS NULL OR j.id IS NULL
+                            OR j.row_token IS NOT r.expected_row_token
+                            OR j.due_at_ms IS NOT r.expected_due_at_ms
+                            OR j.retry_count IS NOT r.expected_retry_count)
+                     ORDER BY r.namespace_resource_id, r.object_id, r.generation LIMIT ?4",
                 )
                 .map_err(|_| db_error())?;
             let rows = statement
                 .query_map(
-                    params![
-                        after_namespace,
-                        after_object,
-                        after_generation,
-                        i64::from(limit)
-                    ],
-                    map_object,
+                    params![after_namespace, after_object, after_generation, i64::from(limit)],
+                    |row| Ok((map_object(row)?, row.get(7)?)),
                 )
                 .map_err(|_| db_error())?;
             collect_rows(rows)

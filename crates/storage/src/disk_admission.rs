@@ -38,7 +38,7 @@ impl DiskAdmission {
 
     /// Capture one immutable decision input from current host and staging state.
     pub fn snapshot(&self, data_dir: &DataDir) -> Result<AdmissionSnapshotV1, PlatformError> {
-        let stat = rustix::fs::statvfs(data_dir.root()).map_err(|_| {
+        let (filesystem_free_bytes, _) = filesystem_space(data_dir.root()).map_err(|_| {
             PlatformError::new(
                 ErrorCode::StoragePressure,
                 "data directory free space could not be measured",
@@ -55,7 +55,7 @@ impl DiskAdmission {
         })?;
         Ok(AdmissionSnapshotV1 {
             schema_version: 1,
-            filesystem_free_bytes: stat.f_bavail.saturating_mul(stat.f_frsize),
+            filesystem_free_bytes,
             soft_reserve_bytes: self.soft_reserve_bytes,
             hard_reserve_bytes: self.hard_reserve_bytes,
             emergency_reserve_bytes: self.emergency_reserve_bytes,
@@ -107,6 +107,17 @@ impl DiskAdmission {
             _ => PlatformMode::Offline,
         }
     }
+}
+
+pub(crate) fn filesystem_space(path: &Path) -> rustix::io::Result<(u64, u64)> {
+    rustix::fs::statvfs(path).map(|stat| filesystem_space_from_stat(&stat))
+}
+
+pub(crate) fn filesystem_space_from_stat(stat: &rustix::fs::StatVfs) -> (u64, u64) {
+    (
+        stat.f_bavail.saturating_mul(stat.f_frsize),
+        stat.f_blocks.saturating_mul(stat.f_frsize),
+    )
 }
 
 fn owned_tree_bytes(root: &Path) -> Result<u64, PlatformError> {

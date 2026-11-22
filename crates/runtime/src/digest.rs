@@ -18,7 +18,7 @@ pub(crate) const SYSTEM_COMPATIBILITY_FLAGS_PLACEHOLDER: &str =
 pub(crate) const SYSTEM_COMPATIBILITY_FLAGS_JSON_PLACEHOLDER: &str =
     "__OPEN_COMPUTE_SYSTEM_COMPATIBILITY_FLAGS_JSON__";
 type DurableObjectPolicyPlaceholder = (&'static str, fn(&DurableObjectsConfig) -> String);
-const DO_POLICY_PLACEHOLDERS: [DurableObjectPolicyPlaceholder; 5] = [
+const DO_POLICY_PLACEHOLDERS: [DurableObjectPolicyPlaceholder; 6] = [
     ("__OPEN_COMPUTE_DO_MAX_OBJECT_NAME_BYTES__", |v| {
         v.max_object_name_bytes.to_string()
     }),
@@ -31,8 +31,11 @@ const DO_POLICY_PLACEHOLDERS: [DurableObjectPolicyPlaceholder; 5] = [
     ("__OPEN_COMPUTE_DO_MAX_IN_FLIGHT_DISPATCHES__", |v| {
         v.max_in_flight_dispatches.to_string()
     }),
-    ("__OPEN_COMPUTE_DO_DISK_STOP_WRITES_PERCENT__", |v| {
-        v.disk_stop_writes_percent.to_string()
+    ("__OPEN_COMPUTE_DO_DISK_STOP_WRITES_FREE_BYTES__", |v| {
+        v.disk_stop_writes_free_bytes.to_string()
+    }),
+    ("__OPEN_COMPUTE_DO_DISK_DEGRADED_FREE_BYTES__", |v| {
+        v.disk_degraded_free_bytes.to_string()
     }),
 ];
 
@@ -402,6 +405,18 @@ mod tests {
                 },
             )]),
         }
+    }
+
+    #[test]
+    fn packaged_template_renders_durable_object_reserves_in_bytes() {
+        let policy = DurableObjectsConfig {
+            disk_stop_writes_free_bytes: 2_345_678_901,
+            disk_degraded_free_bytes: 12_345_678_901,
+            ..DurableObjectsConfig::default()
+        };
+        let rendered = render_do_policy(TEMPLATE.to_owned(), &policy).unwrap();
+        assert!(rendered.contains(r#"const doDiskStopWritesFreeBytes :Text = "2345678901";"#));
+        assert!(rendered.contains(r#"const doDiskDegradedFreeBytes :Text = "12345678901";"#));
     }
 
     #[test]

@@ -239,31 +239,6 @@ fn namespace_identity_dispatch_and_generation_fence_are_durable() {
         )
         .unwrap();
     assert_eq!(repeated.host_key, first.host_key);
-    let existing_at_stop_watermark = repo
-        .authorize_dispatch(
-            fixture.binding,
-            fixture.version,
-            &fixture.descriptor,
-            object,
-            21,
-            false,
-        )
-        .unwrap();
-    assert_eq!(existing_at_stop_watermark.object_generation, 1);
-    let blocked_new = public_id(fixture.namespace, 9);
-    assert_eq!(
-        repo.authorize_dispatch(
-            fixture.binding,
-            fixture.version,
-            &fixture.descriptor,
-            blocked_new,
-            21,
-            false,
-        )
-        .unwrap_err()
-        .code(),
-        ErrorCode::DoStorageLimit
-    );
     repo.finish_object_create(fixture.namespace, object, first.object_generation, 21)
         .unwrap();
 
@@ -302,6 +277,73 @@ fn namespace_identity_dispatch_and_generation_fence_are_durable() {
 
 #[path = "durable_object_dispatch_tests.rs"]
 mod dispatch;
+
+#[test]
+fn free_byte_reserves_gate_new_objects_and_allow_existing_objects() {
+    use open_compute_core::DurableObjectsConfig;
+    use open_compute_core::config::DoStorageWatermark::Stop;
+
+    let (_temp, storage) = storage();
+    let fixture = ready_fixture(&storage);
+    let repo = DurableObjectRepository::new(&storage);
+    let config = DurableObjectsConfig::default();
+    let stop = config.disk_stop_writes_free_bytes;
+    let degraded = config.disk_degraded_free_bytes;
+    let resolve = |id, available| {
+        repo.authorize_dispatch(
+            fixture.binding,
+            fixture.version,
+            &fixture.descriptor,
+            public_id(fixture.namespace, id),
+            20,
+            config.storage_watermark(available) != Stop,
+        )
+    };
+
+    let existing = public_id(fixture.namespace, 1);
+    let registered = resolve(1, degraded).unwrap();
+    repo.finish_object_create(
+        fixture.namespace,
+        existing,
+        registered.object_generation,
+        20,
+    )
+    .unwrap();
+    assert_eq!(resolve(1, stop - 1).unwrap().host_key, registered.host_key);
+    assert_eq!(
+        resolve(2, stop - 1).unwrap_err().code(),
+        ErrorCode::DoStorageLimit
+    );
+    for (id, available) in [
+        (2, stop),
+        (3, stop + 1),
+        (4, degraded - 1),
+        (5, degraded),
+        (6, degraded + 1),
+    ] {
+        resolve(id, available).unwrap();
+    }
+    assert_eq!(
+        resolve(7, stop - 1).unwrap_err().code(),
+        ErrorCode::DoStorageLimit
+    );
+    resolve(7, degraded).unwrap();
+
+    let mut stat = rustix::fs::statvfs(storage.data_dir().root()).unwrap();
+    stat.f_frsize = 4096;
+    stat.f_bavail = (36 << 30) / stat.f_frsize;
+    stat.f_bfree = (40 << 30) / stat.f_frsize;
+    for (id, total) in [(8, 926_u64 << 30), (9, 128_u64 << 30)] {
+        stat.f_blocks = total / stat.f_frsize;
+        let (available, measured_total) = crate::disk_admission::filesystem_space_from_stat(&stat);
+        assert_eq!((available, measured_total), (36 << 30, total));
+        assert_eq!(
+            config.storage_watermark(available),
+            open_compute_core::config::DoStorageWatermark::Normal
+        );
+        resolve(id, available).unwrap();
+    }
+}
 
 #[test]
 fn fenced_delete_authority_survives_worker_tombstone() {
@@ -775,3 +817,6 @@ fn namespace_catalog_pages_filter_sort_and_bind_cursors() {
         ErrorCode::ConfigInvalid
     );
 }
+
+#[path = "durable_object_alarm_repair_tests.rs"]
+mod alarm_repair;

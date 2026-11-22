@@ -541,10 +541,10 @@ pub struct DurableObjectsConfig {
     pub dispatch_timeout_ms: u64,
     /// Global number of active Durable Object dispatches.
     pub max_in_flight_dispatches: u32,
-    /// Percentage at which health becomes degraded.
-    pub disk_high_watermark_percent: u8,
-    /// Percentage at which new objects and writes fail closed.
-    pub disk_stop_writes_percent: u8,
+    /// Available byte reserve below which health becomes degraded.
+    pub disk_degraded_free_bytes: u64,
+    /// Available byte reserve below which new objects cannot be created.
+    pub disk_stop_writes_free_bytes: u64,
     /// Maximum objects processed in one reconciliation batch.
     pub reconcile_batch: u32,
 }
@@ -557,15 +557,46 @@ impl Default for DurableObjectsConfig {
             max_fetch_body_bytes: 32 * 1024 * 1024,
             dispatch_timeout_ms: 30_000,
             max_in_flight_dispatches: 256,
-            disk_high_watermark_percent: 85,
-            disk_stop_writes_percent: 95,
+            disk_degraded_free_bytes: 10 * 1024 * 1024 * 1024,
+            disk_stop_writes_free_bytes: 2 * 1024 * 1024 * 1024,
             reconcile_batch: 64,
         }
     }
 }
 
+/// Durable Object disk pressure based on available bytes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DoStorageWatermark {
+    /// Both reserves are met.
+    Normal,
+    /// The degraded reserve is unmet.
+    High,
+    /// The stop reserve is unmet.
+    Stop,
+}
+
 impl DurableObjectsConfig {
+    /// Classify current free space for health reporting and object creation.
+    #[must_use]
+    pub fn storage_watermark(&self, available_bytes: u64) -> DoStorageWatermark {
+        if available_bytes < self.disk_stop_writes_free_bytes {
+            DoStorageWatermark::Stop
+        } else if available_bytes < self.disk_degraded_free_bytes {
+            DoStorageWatermark::High
+        } else {
+            DoStorageWatermark::Normal
+        }
+    }
+
     pub(super) fn validate(&self) -> Result<(), PlatformError> {
+        if self.disk_stop_writes_free_bytes == 0
+            || self.disk_stop_writes_free_bytes >= self.disk_degraded_free_bytes
+        {
+            return Err(PlatformError::new(
+                ErrorCode::LimitInvalid,
+                "Durable Object disk reserves must be positive bytes, with disk_stop_writes_free_bytes below disk_degraded_free_bytes",
+            ));
+        }
         if self.max_namespace_name_bytes == 0
             || self.max_namespace_name_bytes > 128
             || self.max_object_name_bytes == 0
@@ -576,9 +607,6 @@ impl DurableObjectsConfig {
             || self.dispatch_timeout_ms > 5 * 60 * 1000
             || self.max_in_flight_dispatches == 0
             || self.max_in_flight_dispatches > 4096
-            || self.disk_high_watermark_percent == 0
-            || self.disk_high_watermark_percent >= self.disk_stop_writes_percent
-            || self.disk_stop_writes_percent > 99
             || self.reconcile_batch == 0
             || self.reconcile_batch > 10_000
         {

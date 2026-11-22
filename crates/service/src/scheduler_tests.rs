@@ -517,6 +517,14 @@ async fn periodic_alarm_repair_scan_stops_while_paused_and_resumes() {
         )
         .unwrap(),
     );
+    store
+        .begin_alarm_repair(
+            live.namespace,
+            live.object,
+            live.dispatch_generation,
+            "ef992bf4-463c-483f-a3d5-e92e7db067c3",
+        )
+        .unwrap();
     let clock = Arc::new(DeterministicSchedulerClock::new(10));
     let config = SchedulerConfig::default();
     let interval = Duration::from_millis(config.repair_interval_ms);

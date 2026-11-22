@@ -10,7 +10,7 @@ use rusqlite::config::DbConfig;
 use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
 use rusqlite::limits::Limit;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::time::Instant;
 
 const INTERRUPT_NONE: u8 = 0;
@@ -28,6 +28,8 @@ pub(crate) enum SqlAuthority {
 /// Shared reason state used to map SQLite's generic interrupt code.
 #[derive(Debug)]
 pub(crate) struct ExecutionControl {
+    // SQLite reports the temp catalog accesses separately from the ALTER that authorized them.
+    altering_table: AtomicBool,
     reason: AtomicU8,
     vm_steps: AtomicU64,
     deadline: Instant,
@@ -37,6 +39,7 @@ pub(crate) struct ExecutionControl {
 impl ExecutionControl {
     fn new(limits: D1QueryLimits) -> Self {
         Self {
+            altering_table: AtomicBool::new(false),
             reason: AtomicU8::new(INTERRUPT_NONE),
             vm_steps: AtomicU64::new(0),
             deadline: Instant::now()
@@ -44,6 +47,15 @@ impl ExecutionControl {
                 .unwrap_or_else(Instant::now),
             max_vm_steps: limits.max_vm_steps,
         }
+    }
+
+    /// Reset statement-local ALTER authorization while preserving the operation budget.
+    pub(super) fn prepare<T>(
+        &self,
+        compile: impl FnOnce() -> rusqlite::Result<T>,
+    ) -> Result<T, PlatformError> {
+        self.altering_table.store(false, Ordering::Relaxed);
+        compile().map_err(|error| map_sqlite_error(&error, self))
     }
 
     fn mark(&self, reason: u8) {
@@ -149,7 +161,7 @@ pub(crate) fn reinstall_guard(
 ) {
     let auth_control = control.clone();
     connection.authorizer(Some(move |context: AuthContext<'_>| {
-        let decision = authorize(context, authority);
+        let decision = authorize(context, authority, &auth_control);
         if decision == Authorization::Deny {
             auth_control.mark(INTERRUPT_AUTHORIZER);
         }
@@ -246,29 +258,54 @@ fn is_sqlite_limit_failure(error: &rusqlite::Error) -> bool {
     .any(|prefix| message.starts_with(prefix))
 }
 
-fn authorize(context: AuthContext<'_>, authority: SqlAuthority) -> Authorization {
+fn authorize(
+    context: AuthContext<'_>,
+    authority: SqlAuthority,
+    control: &ExecutionControl,
+) -> Authorization {
     use AuthAction::{
         AlterTable, Attach, CreateTempIndex, CreateTempTable, CreateTempTrigger, CreateTempView,
         CreateVtable, Delete, Detach, DropTempIndex, DropTempTable, DropTempTrigger, DropTempView,
         DropVtable, Function, Insert, Pragma, Read, Savepoint, Transaction, Unknown, Update,
     };
+    // SQLite supplies the target database in the ALTER action. For DROP COLUMN the
+    // generic database field can contain the column name.
+    if let AlterTable {
+        database_name,
+        table_name,
+    } = context.action
+    {
+        if database_name != "main" || protected_table(table_name) {
+            return Authorization::Deny;
+        }
+        control.altering_table.store(true, Ordering::Relaxed);
+        return Authorization::Allow;
+    }
     if context
         .database_name
         .is_some_and(|database| database != "main")
     {
-        return Authorization::Deny;
+        // SQLite recompiles temporary triggers and views while editing the main schema.
+        return if context.database_name == Some("temp")
+            && control.altering_table.load(Ordering::Relaxed)
+            && matches!(
+                context.action,
+                Read {
+                    table_name: "sqlite_temp_master" | "sqlite_temp_schema",
+                    ..
+                } | Update {
+                    table_name: "sqlite_temp_master" | "sqlite_temp_schema",
+                    column_name: "sql" | "tbl_name"
+                }
+            ) {
+            Authorization::Allow
+        } else {
+            Authorization::Deny
+        };
     }
-    let internal = match context.action {
-        Read { table_name, .. }
-        | Insert { table_name }
-        | Delete { table_name }
-        | Update { table_name, .. } => {
-            table_name.starts_with("__open_compute_")
-                || table_name == crate::schema_migrations::HISTORY_TABLE
-        }
-        _ => false,
-    };
-    if internal {
+    if matches!(context.action, Read { table_name, .. } | Insert { table_name }
+        | Delete { table_name } | Update { table_name, .. } if protected_table(table_name))
+    {
         return Authorization::Deny;
     }
     match context.action {
@@ -285,7 +322,6 @@ fn authorize(context: AuthContext<'_>, authority: SqlAuthority) -> Authorization
         | DropTempTrigger { .. }
         | DropTempView { .. }
         | Unknown { .. } => Authorization::Deny,
-        AlterTable { database_name, .. } if database_name != "main" => Authorization::Deny,
         CreateVtable { module_name, .. } | DropVtable { module_name, .. }
             if !module_name.eq_ignore_ascii_case("fts5") =>
         {
@@ -300,6 +336,10 @@ fn authorize(context: AuthContext<'_>, authority: SqlAuthority) -> Authorization
         } => authorize_pragma(pragma_name, pragma_value, authority),
         _ => Authorization::Allow,
     }
+}
+
+fn protected_table(name: &str) -> bool {
+    name.starts_with("__open_compute_") || name == crate::schema_migrations::HISTORY_TABLE
 }
 
 fn authorize_pragma(name: &str, value: Option<&str>, authority: SqlAuthority) -> Authorization {
@@ -321,8 +361,23 @@ fn authorize_pragma(name: &str, value: Option<&str>, authority: SqlAuthority) ->
     if value.is_none()
         && matches!(
             name.as_str(),
-            "user_version" | "application_id" | "data_version"
+            "user_version"
+                | "application_id"
+                | "data_version"
+                | "foreign_keys"
+                | "defer_foreign_keys"
         )
+    {
+        return Authorization::Allow;
+    }
+    // Deferral ends at COMMIT. Clearing it mid-transaction can discard SQLite's violation counter.
+    if name == "defer_foreign_keys"
+        && value.is_some_and(|value| {
+            value == "1"
+                || value.eq_ignore_ascii_case("on")
+                || value.eq_ignore_ascii_case("true")
+                || value.eq_ignore_ascii_case("yes")
+        })
     {
         return Authorization::Allow;
     }

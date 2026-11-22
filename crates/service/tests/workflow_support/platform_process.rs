@@ -350,6 +350,9 @@ max_retries = 1
 [runtime]
 startup_timeout_ms = 20000
 shutdown_grace_ms = 500
+[durable_objects]
+disk_stop_writes_free_bytes = 1
+disk_degraded_free_bytes = 2
 [workflows]
 lease_ms = 6000
 heartbeat_ms = 1000

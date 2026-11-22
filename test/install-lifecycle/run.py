@@ -117,7 +117,7 @@ class Qualification:
         assert payload["success"], "control API refused qualification operation"
         return payload["result"]
 
-    def seed(self):
+    def seed(self, *, worker=True):
         accounts = self.api("/client/v4/accounts")
         assert len(accounts) == 1
         account = accounts[0]["id"]
@@ -125,29 +125,49 @@ class Qualification:
         namespace = self.api(prefix + "/storage/kv/namespaces", "POST", {"title": "installation-state"})["id"]
         self.value_path = prefix + f"/storage/kv/namespaces/{namespace}/values/state"
         self.api(self.value_path, "PUT", b"installation-state", "text/plain")
-        metadata = {"main_module": "index.js", "compatibility_date": "2026-09-08",
-                    "bindings": [{"type": "kv_namespace", "name": "DATA", "namespace_id": namespace}]}
-        boundary = "installation-boundary"
-        source = 'export default {async fetch(request,env){return new Response(await env.DATA.get("state"));}}'
-        multipart = (f'--{boundary}\r\nContent-Disposition: form-data; name="metadata"\r\n'
-                     f'Content-Type: application/json\r\n\r\n{json.dumps(metadata)}\r\n'
-                     f'--{boundary}\r\nContent-Disposition: form-data; name="index.js"; filename="index.js"\r\n'
-                     f'Content-Type: application/javascript+module\r\n\r\n{source}\r\n--{boundary}--\r\n').encode()
-        self.api(prefix + "/workers/scripts/installation-worker", "PUT", multipart,
-                 "multipart/form-data; boundary=" + boundary)
-        self.worker_host = f"installation-worker.{account}.localhost"
+        databases = prefix + "/d1/database"
+        self.d1_uuid = self.api(databases, "POST", {"name": "installation-state"})["uuid"]
+        self.d1_path = f"{databases}/{self.d1_uuid}"
+        self.d1_table, self.d1_column = "entries", "value"
+        # These statements also run on the previous release.
+        self.d1_query("CREATE TABLE entries (id INTEGER PRIMARY KEY, value TEXT NOT NULL)")
+        self.d1_query("INSERT INTO entries (id, value) VALUES (1, 'alpha'), (7, 'beta')")
+        self.worker_host = None
+        if worker:
+            metadata = {"main_module": "index.js", "compatibility_date": "2026-09-08",
+                        "bindings": [{"type": "kv_namespace", "name": "DATA", "namespace_id": namespace}]}
+            boundary = "installation-boundary"
+            source = 'export default {async fetch(request,env){return new Response(await env.DATA.get("state"));}}'
+            multipart = (f'--{boundary}\r\nContent-Disposition: form-data; name="metadata"\r\n'
+                         f'Content-Type: application/json\r\n\r\n{json.dumps(metadata)}\r\n'
+                         f'--{boundary}\r\nContent-Disposition: form-data; name="index.js"; filename="index.js"\r\n'
+                         f'Content-Type: application/javascript+module\r\n\r\n{source}\r\n--{boundary}--\r\n').encode()
+            self.api(prefix + "/workers/scripts/installation-worker", "PUT", multipart,
+                     "multipart/form-data; boundary=" + boundary)
+            self.worker_host = f"installation-worker.{account}.localhost"
         self.verify_data()
+
+    def d1_query(self, sql):
+        result, = self.api(self.d1_path + "/query", "POST", {"sql": sql})
+        assert result["success"], "D1 query failed"
+        return result["results"]
 
     def verify_data(self):
         assert self.api(self.value_path) == b"installation-state"
-        assert self.api("/", host=self.worker_host) == b"installation-state"
+        if self.worker_host is not None:
+            assert self.api("/", host=self.worker_host) == b"installation-state"
+        assert self.api(self.d1_path)["uuid"] == self.d1_uuid
+        assert self.d1_query(f"SELECT * FROM {self.d1_table} ORDER BY id") == [
+            {"id": 1, self.d1_column: "alpha"},
+            {"id": 7, self.d1_column: "beta"},
+        ]
 
     def identity(self):
         paths = [self.config, self.root / "ocd.toml", *self.root.glob("**/keys/*")]
         assert any(p.name == "master.key" for p in paths)
         return {str(p.relative_to(self.root)): digest(p) for p in paths if p.is_file()}
 
-    def install(self, tag, mask):
+    def install(self, tag, mask, *, worker=True):
         assert all(not p.exists() and not p.is_symlink() for p in (self.root, self.binary, self.unit)), "requires empty product scope"
         os.umask(mask)
         directory = self.args.inputs / "download" / tag
@@ -175,7 +195,7 @@ class Qualification:
             output = self.command("service enabled", *self.prefix, "systemctl",
                                   *([] if self.system else ["--user"]), "is-enabled", self.unit.name)
             assert output.stdout.strip() == "enabled"
-        self.seed()
+        self.seed(worker=worker)
         self.initial_identity = self.identity()
 
     def stop(self):
@@ -248,35 +268,84 @@ class Qualification:
         assert not self.root.is_symlink() and self.root.stat().st_uid == os.getuid()
         self.command("remove owned fixture scope", *self.prefix, "rm", "-r", "--", str(self.root))
 
+    def upgrade(self, label):
+        return self.command(label, *self.prefix, str(self.args.driver),
+                            "--binary", str(self.binary), "--download-base", self.mirror + "/download",
+                            "--version", self.inputs["candidate"][1:],
+                            *(["--system"] if self.system else []), check=False)
+
+    def prepare_previous_config(self, check_rejection):
+        assert self.config.is_file() and not self.config.is_symlink()
+        original = self.config.read_bytes()
+        section = re.search(rb"(?ms)^\[durable_objects\][ \t]*\r?\n(.*?)(?=^\[|\Z)", original)
+        assert section is not None, "previous setup omitted the Durable Object defaults"
+        defaults = rb"(?m)^disk_(?:high_watermark_percent = 85|stop_writes_percent = 95)[ \t]*\r?\n"
+        fields = re.findall(rb"(?m)^disk_(?:high_watermark|stop_writes)_percent\s*=", section[1])
+        if not fields:
+            return
+        prepared, replaced = re.subn(defaults, b"", section[1])
+        assert replaced == len(fields) == 2, "previous setup changed the historical disk defaults"
+        if check_rejection:
+            receipt = self.root / "install-receipt.json"
+            before = (self.pid(), digest(self.binary), digest(receipt))
+            self.verify_upgrade_rejection(
+                self.upgrade("unmodified legacy config upgrade"), "INSTANCE_REGISTRY_INVALID")
+            self.verify_unchanged_installation(before)
+        # Both releases supply their own defaults when the historical keys are absent.
+        self.config.write_bytes(original[:section.start(1)] + prepared + original[section.end(1):])
+        self.initial_identity[str(self.config.relative_to(self.root))] = digest(self.config)
+
+    def verify_upgrade_rejection(self, result, code):
+        assert result.returncode != 0 and result.stderr.rstrip().split("\n")[-1].startswith(code + ":"), f"expected upgrade rejection {code}"
+
+    def verify_unchanged_installation(self, before):
+        receipt = self.root / "install-receipt.json"
+        assert (self.pid(), digest(self.binary), digest(receipt)) == before
+        assert self.identity() == self.initial_identity
+        self.verify_data()
+
     def run(self):
         self.install(self.inputs["candidate"], 0o002)
         self.restart()
         self.remove()
-        self.install(self.inputs["previous"], 0o022)
-        before_pid = self.pid()
-        before_binary = digest(self.binary)
+
+        self.install(self.inputs["previous"], 0o022, worker=not bool(self.args.reject_code))
         receipt = self.root / "install-receipt.json"
-        before_receipt = digest(receipt)
-        result = self.command("production upgrade", *self.prefix, str(self.args.driver),
-                              "--binary", str(self.binary), "--download-base", self.mirror + "/download",
-                              "--version", self.inputs["candidate"][1:],
-                              *(["--system"] if self.system else []), check=False)
-        if self.args.reject_code:
-            assert result.returncode != 0 and result.stderr.splitlines()[-1].startswith(self.args.reject_code + ":"), "unexpected upgrade failure"
-            assert digest(self.binary) == before_binary and digest(receipt) == before_receipt
-            assert self.pid() == before_pid
-        else:
-            assert result.returncode == 0, "production upgrade failed"
-            expected = self.args.inputs / "download" / self.inputs["candidate"] / f'ocd-{self.inputs["candidate"]}-{self.inputs["target"]}'
-            assert digest(self.binary) == digest(expected)
-            installed = json.loads(receipt.read_text())
-            assert installed["version"] == self.inputs["candidate"][1:] and installed["sha256"] == digest(expected)
-            self.ready()
-            assert self.pid() != before_pid
+        before = (self.pid(), digest(self.binary), digest(receipt))
+        self.prepare_previous_config(check_rejection=True)
+        self.verify_unchanged_installation(before)
+        result = self.upgrade("D1 and KV production upgrade")
+        if result.returncode:
+            self.verify_data()
+            raise AssertionError("D1 and KV production upgrade failed")
+        tag, target = self.inputs["candidate"], self.inputs["target"]
+        expected = self.args.inputs / "download" / tag / f"ocd-{tag}-{target}"
+        assert digest(self.binary) == digest(expected)
+        installed = json.loads(self.command("read upgraded receipt", *self.prefix, "cat", str(receipt)).stdout)
+        assert installed["version"] == tag[1:] and installed["target"] == target
+        assert installed["binary_path"] == str(self.binary.resolve())
+        self.ready()
+        assert self.pid() != before[0]
         assert self.identity() == self.initial_identity
+        self.verify_data()
+        self.d1_query("ALTER TABLE entries RENAME COLUMN value TO label")
+        self.d1_query("ALTER TABLE entries RENAME TO items")
+        self.d1_table, self.d1_column = "items", "label"
         self.verify_data()
         self.restart()
         self.remove()
+
+        if self.args.reject_code:
+            self.install(self.inputs["previous"], 0o022)
+            self.prepare_previous_config(check_rejection=False)
+            before = (self.pid(), digest(self.binary), digest(receipt))
+            result = self.upgrade("legacy Worker production upgrade")
+            self.verify_upgrade_rejection(result, self.args.reject_code)
+            if self.args.reject_code == "MIGRATION_FAILED":
+                assert "stored Worker loader schema is not supported by this release" in result.stderr
+            self.verify_unchanged_installation(before)
+            self.restart()
+            self.remove()
 
 
 class QuietFiles(http.server.SimpleHTTPRequestHandler):
@@ -322,7 +391,7 @@ def main():
                                   "--no-update-check", *(["--system"] if qualification.system else []), "stop", check=False)
         server.shutdown()
         server.server_close()
-    print(f'PASS {sys.platform} {args.scope}: fresh install, service lifecycle, persisted KV/Worker, {qualification.inputs["previous"]} upgrade')
+    print(f'PASS {sys.platform} {args.scope}: fresh install, service lifecycle, persisted KV/Worker/D1, {qualification.inputs["previous"]} upgrade')
 
 
 if __name__ == "__main__":

@@ -53,8 +53,8 @@ async fn p0_8_real_scheduler_alarm_matrix() {
 
 fn durable_objects_config() -> DurableObjectsConfig {
     DurableObjectsConfig {
-        disk_high_watermark_percent: 98,
-        disk_stop_writes_percent: 99,
+        disk_degraded_free_bytes: 2,
+        disk_stop_writes_free_bytes: 1,
         ..DurableObjectsConfig::default()
     }
 }
@@ -212,10 +212,11 @@ export class AlarmObject extends DurableObject {
     this.ctx.storage.sql.exec(
       "CREATE TABLE IF NOT EXISTS alarm_events(" +
       "id INTEGER PRIMARY KEY CHECK(id = 1), deliveries INTEGER NOT NULL, failures INTEGER NOT NULL, " +
-      "last_release TEXT, last_retry_count INTEGER, last_is_retry INTEGER)"
+      "last_release TEXT, last_retry_count INTEGER, last_is_retry INTEGER, constructors INTEGER NOT NULL)"
     );
     this.ctx.storage.sql.exec(
-      "INSERT INTO alarm_events(id, deliveries, failures) VALUES(1, 0, 0) ON CONFLICT(id) DO NOTHING"
+      "INSERT INTO alarm_events(id, deliveries, failures, constructors) VALUES(1, 0, 0, 1) " +
+      "ON CONFLICT(id) DO UPDATE SET constructors = constructors + 1"
     );
   }
   proxyStable() {
@@ -262,12 +263,13 @@ export class AlarmObject extends DurableObject {
   }
   async status() {
     const rows = this.ctx.storage.sql.exec(
-      "SELECT deliveries, failures, last_release, last_retry_count, last_is_retry FROM alarm_events WHERE id = 1"
+      "SELECT deliveries, failures, last_release, last_retry_count, last_is_retry, constructors FROM alarm_events WHERE id = 1"
     ).toArray();
     const row = rows[0];
     return {
       alarm: await this.ctx.storage.getAlarm(),
       deliveries: Number(row.deliveries),
+      constructors: Number(row.constructors),
       failures: Number(row.failures),
       lastRelease: row.last_release,
       lastRetryCount: row.last_retry_count === null ? null : Number(row.last_retry_count),
@@ -295,10 +297,10 @@ export class AlarmObject extends DurableObject {
     this.ctx.storage.sql.exec(
       "CREATE TABLE IF NOT EXISTS alarm_events(" +
       "id INTEGER PRIMARY KEY CHECK(id = 1), deliveries INTEGER NOT NULL, failures INTEGER NOT NULL, " +
-      "last_release TEXT, last_retry_count INTEGER, last_is_retry INTEGER)"
+      "last_release TEXT, last_retry_count INTEGER, last_is_retry INTEGER, constructors INTEGER NOT NULL)"
     );
     this.ctx.storage.sql.exec(
-      "INSERT INTO alarm_events(id, deliveries, failures) VALUES(1, 0, 0) ON CONFLICT(id) DO NOTHING"
+      "INSERT INTO alarm_events(id, deliveries, failures, constructors) VALUES(1, 0, 0, 1)"
     );
     return kvGone && tables.length === 0;
   }
@@ -334,7 +336,7 @@ export class AlarmObject extends DurableObject {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    const stub = env.ALARM.getByName("singleton");
+    const stub = env.ALARM.getByName(url.searchParams.get("object") ?? "singleton");
     const time = Number(url.searchParams.get("time"));
     if (url.pathname === "/proxy-rpc") return new Response(String(await stub.proxyStable()));
     if (url.pathname === "/proxy-fetch") {

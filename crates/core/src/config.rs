@@ -196,12 +196,36 @@ pub struct PlatformConfig {
     pub private_services: std::collections::BTreeMap<String, PrivateHttpServiceConfig>,
 }
 
+fn platform_toml_error(source: &str) -> PlatformError {
+    if let Ok(table) = toml::from_str::<toml::Table>(source)
+        && let Some(durable_objects) = table.get("durable_objects").and_then(toml::Value::as_table)
+    {
+        let migration = match (
+            durable_objects.contains_key("disk_stop_writes_percent"),
+            durable_objects.contains_key("disk_high_watermark_percent"),
+        ) {
+            (true, true) => Some(
+                "[durable_objects] replace disk_stop_writes_percent with disk_stop_writes_free_bytes and disk_high_watermark_percent with disk_degraded_free_bytes in bytes",
+            ),
+            (true, false) => Some(
+                "[durable_objects] replace disk_stop_writes_percent with disk_stop_writes_free_bytes in bytes",
+            ),
+            (false, true) => Some(
+                "[durable_objects] replace disk_high_watermark_percent with disk_degraded_free_bytes in bytes",
+            ),
+            (false, false) => None,
+        };
+        if let Some(message) = migration {
+            return PlatformError::new(ErrorCode::ConfigParseFailed, message);
+        }
+    }
+    PlatformError::new(ErrorCode::ConfigParseFailed, "invalid platform config TOML")
+}
+
 impl PlatformConfig {
     /// Parse TOML without resolving secrets or reading the environment.
     pub fn from_toml_str(toml: &str) -> Result<Self, PlatformError> {
-        let mut config: Self = toml::from_str(toml).map_err(|_| {
-            PlatformError::new(ErrorCode::ConfigParseFailed, "invalid platform config TOML")
-        })?;
+        let mut config: Self = toml::from_str(toml).map_err(|_| platform_toml_error(toml))?;
         if let Some(gateway) = &mut config.public_gateway {
             gateway.normalize()?;
         }
@@ -214,9 +238,7 @@ impl PlatformConfig {
     /// Parse TOML, resolve every host path against `config_base`, then validate.
     pub fn from_toml_str_at(toml: &str, config_base: &Path) -> Result<Self, PlatformError> {
         require_absolute(config_base, "config_base")?;
-        let mut config: Self = toml::from_str(toml).map_err(|_| {
-            PlatformError::new(ErrorCode::ConfigParseFailed, "invalid platform config TOML")
-        })?;
+        let mut config: Self = toml::from_str(toml).map_err(|_| platform_toml_error(toml))?;
         if let Some(gateway) = &mut config.public_gateway {
             gateway.normalize()?;
         }

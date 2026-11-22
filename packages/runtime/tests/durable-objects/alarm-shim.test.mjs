@@ -35,6 +35,7 @@ const {
   prepareDurableObjectContext,
   activateDurableObjectAlarm,
   dispatchDurableObjectAlarm,
+  repairDurableObjectAlarm,
   runWithOutputGate,
   FLUSH_OUTPUT,
   registerOutputPublisher,
@@ -203,13 +204,15 @@ function memoryStorage() {
     },
     async sync() {},
     async transaction(callback) {
-      const saved = snapshot();
+      let saved = snapshot();
       try {
         storage._rollbackRequested = false;
         if (storage._retryOnce === true) {
           storage._retryOnce = false;
           await callback(storage);
           restore(saved);
+          await storage._betweenAttempts?.();
+          saved = snapshot();
           storage._rollbackRequested = false;
         }
         const value = await callback(storage);
@@ -267,6 +270,7 @@ function context(storage) {
 }
 
 const index = {
+  async begin() {},
   async upsert() {},
   async delete() {},
   async clear() {},
@@ -476,6 +480,7 @@ test("transactionSync uses the stable zero-argument callback and rejects alarms 
 test("committed transaction keeps its alarm authority when index projection is unavailable", async () => {
   const storage = memoryStorage();
   const failingIndex = {
+    ...index,
     async upsert() {
       throw new Error("index-down");
     },
@@ -494,12 +499,21 @@ test("committed transaction keeps its alarm authority when index projection is u
   });
   assert.equal(await prepared.storage.get("committed"), true);
   assert.equal(await prepared.storage.getAlarm(), scheduled);
+  assert.equal(
+    (await repairDurableObjectAlarm(prepared)).scheduledTimeMs,
+    scheduled,
+  );
 });
 
 test("alarm dispatch applies six exponential retries then exhausts", async () => {
   const storage = memoryStorage();
   const projections = [];
+  const marks = [];
   const retryIndex = {
+    ...index,
+    async begin(revision) {
+      marks.push(revision);
+    },
     async upsert(value) {
       projections.push(value);
     },
@@ -538,6 +552,7 @@ test("alarm dispatch applies six exponential retries then exhausts", async () =>
     assert.equal(exhausted.outcome, "exhausted");
     assert.equal((storage._sql.get("alarm") ?? []).length, 0);
     assert.equal(projections.length, 7);
+    assert.equal(new Set(marks).size, 8);
   } finally {
     Date.now = originalNow;
   }
@@ -550,6 +565,7 @@ test("deleteAll refuses index failure before deleting tenant state", async () =>
   await prepared.storage.put("user", true);
   await prepared.storage.setAlarm(scheduled);
   const rejectingIndex = {
+    ...index,
     async upsert() {},
     async delete() {
       throw new Error("index-down");
@@ -593,6 +609,96 @@ test("deleteAll drops alarms then recreates internal gate tables", async () => {
   assert.deepEqual(published, ["after-delete-all"]);
 });
 
+test("deleteAll marks each retry with an alarm and updates only the relevant projection", async () => {
+  const first = crypto.randomUUID();
+  const second = crypto.randomUUID();
+  for (const [initial, retry, expected] of [
+    [null, first, ["clear", "begin", first]],
+    [first, first, ["begin", first, "begin"]],
+    [first, second, ["begin", first, "begin", second]],
+    [first, null, ["begin", first, "clear"]],
+  ]) {
+    const raw = memoryStorage();
+    const events = [];
+    const prepared = prepareDurableObjectContext(context(raw), {
+      ...index,
+      async begin() {
+        assert.equal(raw._kv.get("ordinary"), true);
+        assert.equal(raw._sql.get("alarm").length, 1);
+        events.push("begin");
+      },
+      async delete(token) {
+        assert.equal(raw._sql.get("alarm")[0].row_token, token);
+        events.push(token);
+      },
+      async clear() {
+        assert.equal(raw._sql.get("alarm").length, 0);
+        events.push("clear");
+      },
+    });
+    const seedAlarm = (token) => {
+      raw._sql.set(
+        "alarm",
+        token === null
+          ? []
+          : [
+              {
+                id: 1,
+                scheduled_time_ms: 1,
+                retry_count: 0,
+                in_flight: 0,
+                row_token: token,
+                last_error_code: null,
+                updated_at_ms: 1,
+              },
+            ],
+      );
+    };
+    await prepared.storage.put("ordinary", true);
+    seedAlarm(initial);
+    raw._retryOnce = true;
+    raw._betweenAttempts = () => seedAlarm(retry);
+
+    await prepared.storage.deleteAll();
+
+    assert.deepEqual(events, expected);
+    assert.equal(await prepared.storage.get("ordinary"), undefined);
+    assert.deepEqual(await repairDurableObjectAlarm(prepared), {
+      exists: false,
+    });
+  }
+});
+
+test("deleteAll rollback restores the projection for the row that survived a retry", async () => {
+  const raw = memoryStorage();
+  const restored = [];
+  const prepared = prepareDurableObjectContext(context(raw), {
+    ...index,
+    async upsert(row) {
+      restored.push(row.rowToken);
+    },
+  });
+  await prepared.storage.setAlarm(1);
+  await prepared.storage.put("ordinary", true);
+  restored.length = 0;
+  const retryToken = crypto.randomUUID();
+  raw._retryOnce = true;
+  raw._betweenAttempts = () => {
+    raw._sql.get("alarm")[0].row_token = retryToken;
+    const exec = raw.sql.exec;
+    raw.sql.exec = (query, ...args) => {
+      if (query.startsWith("DROP ")) throw new Error("local-delete-failed");
+      return exec(query, ...args);
+    };
+  };
+
+  await assert.rejects(prepared.storage.deleteAll(), /local-delete-failed/);
+
+  assert.deepEqual(restored, [retryToken]);
+  assert.equal(await prepared.storage.get("ordinary"), true);
+  assert.equal((await repairDurableObjectAlarm(prepared)).rowToken, retryToken);
+});
+
 test("corrupt alarm authority fails closed without deleting the row", async () => {
   const storage = memoryStorage();
   const prepared = prepareDurableObjectContext(context(storage), index);
@@ -627,7 +733,12 @@ test("tenant SQL cannot read or mutate private alarm and output authority", () =
 test("tenant global edits cannot read native storage or the private alarm index", async () => {
   const raw = memoryStorage();
   const ctx = { storage: raw, props: {}, exports: {} };
-  const index = { async upsert() {}, async delete() {}, async clear() {} };
+  const index = {
+    async begin() {},
+    async upsert() {},
+    async delete() {},
+    async clear() {},
+  };
   const secrets = new Set([raw, ctx, index]);
   const observed = [];
   const get = Reflect.get;
@@ -687,4 +798,202 @@ test("private alarm activation retains the native input-gate receiver before ten
   await Promise.all(pending);
   assert.equal(cleared, 1);
   assert.equal(pending.length, 1);
+});
+
+test("empty object access and stale delivery do not mark alarm authority", async () => {
+  let marks = 0;
+  let clears = 0;
+  const prepared = prepareDurableObjectContext(context(memoryStorage()), {
+    ...index,
+    async begin() {
+      marks += 1;
+    },
+    async clear() {
+      clears += 1;
+    },
+  });
+  activateDurableObjectAlarm(prepared);
+  assert.equal(await prepared.storage.getAlarm(), null);
+  await prepared.storage.deleteAlarm();
+  await prepared.storage.transaction(async (txn) => {
+    await txn.put("ordinary", true);
+    await txn.deleteAlarm();
+  });
+  assert.deepEqual(
+    await dispatchDurableObjectAlarm({}, undefined, prepared, {
+      rowToken: crypto.randomUUID(),
+      retryCount: 0,
+    }),
+    { outcome: "stale" },
+  );
+  assert.deepEqual(await repairDurableObjectAlarm(prepared), { exists: false });
+  assert.equal(marks, 0);
+
+  const clearsBeforeDeleteAll = clears;
+  await prepared.storage.deleteAll();
+  assert.equal(marks, 0);
+  assert.equal(clears, clearsBeforeDeleteAll + 1);
+  assert.equal(await prepared.storage.get("ordinary"), undefined);
+});
+
+test("failed begin leaves local state untouched for every alarm mutation", async () => {
+  const raw = memoryStorage();
+  let fail = true;
+  let projected = 0;
+  const prepared = prepareDurableObjectContext(context(raw), {
+    ...index,
+    async begin() {
+      if (fail) throw new Error("index-down");
+    },
+    async upsert() {
+      projected += 1;
+    },
+    async delete() {
+      projected += 1;
+    },
+  });
+  const storage = prepared.storage;
+  await assert.rejects(storage.setAlarm(1), /DO_ALARM_INDEX_UNAVAILABLE/);
+  assert.deepEqual(await repairDurableObjectAlarm(prepared), { exists: false });
+
+  fail = false;
+  await storage.setAlarm(1);
+  await storage.put("value", 1);
+  const before = await repairDurableObjectAlarm(prepared);
+  fail = true;
+  await assert.rejects(storage.deleteAlarm(), /DO_ALARM_INDEX_UNAVAILABLE/);
+  await assert.rejects(storage.deleteAll(), /DO_ALARM_INDEX_UNAVAILABLE/);
+  await assert.rejects(
+    storage.transaction(async (txn) => {
+      await txn.put("value", 2);
+      await txn.setAlarm(2);
+    }),
+    /DO_ALARM_INDEX_UNAVAILABLE/,
+  );
+  let delivered = false;
+  await assert.rejects(
+    dispatchDurableObjectAlarm(
+      {},
+      () => {
+        delivered = true;
+      },
+      prepared,
+      {
+        rowToken: before.rowToken,
+        retryCount: 0,
+      },
+    ),
+    /DO_ALARM_INDEX_UNAVAILABLE/,
+  );
+  assert.equal(delivered, false);
+  assert.equal(raw._sql.get("alarm")[0].in_flight, 0);
+  assert.equal(await storage.get("value"), 1);
+  assert.deepEqual(await repairDurableObjectAlarm(prepared), before);
+  assert.equal(projected, 1);
+});
+
+test("alarm transaction rollback keeps the original row and skips projection", async () => {
+  const events = [];
+  const prepared = prepareDurableObjectContext(context(memoryStorage()), {
+    ...index,
+    async begin() {
+      events.push("begin");
+    },
+    async upsert() {
+      events.push("upsert");
+    },
+    async delete() {
+      events.push("delete");
+    },
+  });
+  await prepared.storage.setAlarm(1);
+  const before = await repairDurableObjectAlarm(prepared);
+  await prepared.storage.transaction(async (txn) => {
+    await txn.deleteAlarm();
+    txn.rollback();
+  });
+  assert.deepEqual(await repairDurableObjectAlarm(prepared), before);
+  assert.deepEqual(events, ["begin", "upsert", "begin"]);
+});
+
+test(
+  "repair rejects during begin, retry, and post-commit projection",
+  { timeout: 2000 },
+  async () => {
+    const raw = memoryStorage();
+    const beginStarted = Promise.withResolvers();
+    const finishBegin = Promise.withResolvers();
+    const projectionStarted = Promise.withResolvers();
+    const finishProjection = Promise.withResolvers();
+    const marks = [];
+    const prepared = prepareDurableObjectContext(context(raw), {
+      ...index,
+      async begin(revision) {
+        marks.push(revision);
+        if (marks.length === 1) {
+          beginStarted.resolve();
+          await finishBegin.promise;
+        }
+      },
+      async upsert(row) {
+        projectionStarted.resolve(row);
+        await finishProjection.promise;
+      },
+    });
+    const assertBusy = () =>
+      assert.rejects(
+        repairDurableObjectAlarm(prepared),
+        /DO_ALARM_INDEX_UNAVAILABLE/,
+      );
+    raw._retryOnce = true;
+    raw._betweenAttempts = assertBusy;
+    const transaction = prepared.storage.transaction(async (txn) => {
+      await Promise.all([txn.setAlarm(1), txn.setAlarm(2)]);
+      await assertBusy();
+      await txn.deleteAlarm();
+      await txn.setAlarm(3);
+    });
+    try {
+      await beginStarted.promise;
+      assert.equal(raw._sql.get("alarm").length, 0);
+      await assertBusy();
+      finishBegin.resolve();
+
+      const projected = await projectionStarted.promise;
+      assert.equal(raw._sql.get("alarm")[0].row_token, projected.rowToken);
+      assert.equal(projected.scheduledTimeMs, 3);
+      await assertBusy();
+      assert.equal(marks.length, 2);
+      assert.equal(new Set(marks).size, 2);
+    } finally {
+      finishBegin.resolve();
+      finishProjection.resolve();
+      await transaction;
+    }
+    assert.equal((await repairDurableObjectAlarm(prepared)).scheduledTimeMs, 3);
+  },
+);
+
+test("failed standalone projection removes the unprojected local row", async () => {
+  const raw = memoryStorage();
+  let prepared;
+  prepared = prepareDurableObjectContext(context(raw), {
+    ...index,
+    async begin() {
+      assert.equal(raw._sql.get("alarm").length, 0);
+    },
+    async upsert(row) {
+      assert.equal(raw._sql.get("alarm")[0].row_token, row.rowToken);
+      await assert.rejects(
+        repairDurableObjectAlarm(prepared),
+        /DO_ALARM_INDEX_UNAVAILABLE/,
+      );
+      throw new Error("index-down");
+    },
+  });
+  await assert.rejects(
+    prepared.storage.setAlarm(1),
+    /DO_ALARM_INDEX_UNAVAILABLE/,
+  );
+  assert.deepEqual(await repairDurableObjectAlarm(prepared), { exists: false });
 });

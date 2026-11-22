@@ -24,6 +24,21 @@ fn config() -> (tempfile::TempDir, PlatformConfig) {
 }
 
 #[test]
+fn bootstrap_rejects_durable_object_disk_reserve_above_filesystem_capacity() {
+    let (temp, mut config) = config();
+    let stat = rustix::fs::statvfs(temp.path()).unwrap();
+    let total_bytes = stat.f_blocks * stat.f_frsize;
+    config.durable_objects.disk_stop_writes_free_bytes = 1;
+    config.durable_objects.disk_degraded_free_bytes = total_bytes + 1;
+    let error = bootstrap(&config).unwrap_err();
+    assert_eq!(error.code(), ErrorCode::LimitInvalid);
+    assert!(error.message().contains("disk_degraded_free_bytes"));
+
+    config.durable_objects.disk_degraded_free_bytes = total_bytes;
+    bootstrap(&config).unwrap();
+}
+
+#[test]
 fn bootstrap_provisions_gateway_namespace_from_config_and_handles_domain_change() {
     let (_temp, mut config) = config();
     config.public_gateway = Some(PublicDomainConfig {

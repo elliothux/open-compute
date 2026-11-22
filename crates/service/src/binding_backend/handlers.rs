@@ -443,7 +443,7 @@ async fn handle_alarm_index(state: BackendState, request: Request) -> Response {
         .to_owned();
     if !matches!(
         operation.as_str(),
-        "resolve" | "upsert" | "delete" | "clear"
+        "resolve" | "begin" | "upsert" | "delete" | "clear"
     ) {
         return backend_error(
             ErrorCode::SchedulerInternalProtocolError,
@@ -474,7 +474,7 @@ async fn handle_alarm_index(state: BackendState, request: Request) -> Response {
         "clear" => Some(AlarmMutation::Clear),
         _ => None,
     };
-    let admission = if operation == "upsert" {
+    let admission = if matches!(operation.as_str(), "begin" | "upsert") {
         let result = state.storage.reserve_mutation(64 * 1024);
         if let Some(metrics) = &state.metrics {
             metrics.observe_admission(
@@ -507,6 +507,20 @@ async fn handle_alarm_index(state: BackendState, request: Request) -> Response {
                 serde_json::to_vec(&authority)
                     .map(Some)
                     .map_err(|_| alarm_protocol_error())
+            }
+            "begin" => {
+                let store = scheduler.as_ref().ok_or_else(alarm_unavailable)?;
+                let revision = body.row_token.as_deref().ok_or_else(alarm_protocol_error)?;
+                if body.scheduled_time_ms.is_some() || body.retry_count.is_some() {
+                    return Err(alarm_protocol_error());
+                }
+                store.begin_alarm_repair(
+                    body.namespace_resource_id,
+                    body.object_id,
+                    body.object_generation,
+                    revision,
+                )?;
+                Ok(None)
             }
             "upsert" => {
                 let store = scheduler.as_ref().ok_or_else(alarm_unavailable)?;
@@ -680,21 +694,16 @@ async fn resolve_durable_object(state: BackendState, request: Request) -> Respon
     let Ok(object_id) = DurableObjectId::from_str(&body.object_id) else {
         return backend_error(ErrorCode::DoIdInvalid, StatusCode::BAD_REQUEST);
     };
-    let used_percent = match state.storage.filesystem_used_percent() {
-        Ok(value) => value,
+    use open_compute_core::config::DoStorageWatermark;
+    let available_bytes = match state.storage.filesystem_space() {
+        Ok((available_bytes, _)) => available_bytes,
         Err(error) => return platform_error(&error),
     };
+    let watermark = state.do_config.storage_watermark(available_bytes);
     if let Some(metrics) = &state.metrics {
-        let watermark = if used_percent >= state.do_config.disk_stop_writes_percent {
-            2
-        } else if used_percent >= state.do_config.disk_high_watermark_percent {
-            1
-        } else {
-            0
-        };
-        metrics.set_do_storage_watermark(watermark);
+        metrics.set_do_storage_watermark(watermark as usize);
     }
-    let allow_create = used_percent < state.do_config.disk_stop_writes_percent;
+    let allow_create = watermark != DoStorageWatermark::Stop;
     let admission = state.storage.reserve_mutation(64 * 1024);
     if let Some(metrics) = &state.metrics {
         metrics.observe_admission(

@@ -346,38 +346,112 @@ impl SchedulerStore {
         projection: &AlarmProjection,
         now_ms: i64,
     ) -> Result<(), PlatformError> {
-        validate_projection(projection)?;
         let connection = self.lock()?;
-        connection
+        write_alarm(&connection, projection, now_ms)?;
+        drop(connection);
+        self.wake.notify();
+        Ok(())
+    }
+
+    /// Mark a live generation dirty before changing its object-local alarm.
+    /// The caller supplies a fresh random UUID for each begin.
+    pub fn begin_alarm_repair(
+        &self,
+        namespace: ResourceId,
+        object: DurableObjectId,
+        generation: u64,
+        revision: &str,
+    ) -> Result<(), PlatformError> {
+        Uuid::parse_str(revision).map_err(|_| invalid())?;
+        let affected = self.lock()?
             .execute(
-                "INSERT INTO scheduled_jobs
-                 (id, kind, namespace_resource_id, object_id, object_generation, row_token,
-                  due_at_ms, target_version_id, execution_generation, state, retry_count,
-                  last_error_code, created_at_ms, updated_at_ms)
-                 VALUES (?1, 'do_alarm', ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'scheduled', ?9,
-                         NULL, ?10, ?10)
-                 ON CONFLICT(namespace_resource_id, object_id, object_generation) DO UPDATE SET
-                   row_token = excluded.row_token,
-                   due_at_ms = excluded.due_at_ms,
-                   target_version_id = excluded.target_version_id,
-                   execution_generation = excluded.execution_generation,
-                   state = 'scheduled', retry_count = excluded.retry_count,
-                   last_error_code = NULL,
-                   updated_at_ms = excluded.updated_at_ms",
+                "INSERT INTO do_alarm_repair (namespace_resource_id, object_id, generation, revision)
+                 SELECT namespace_resource_id, object_id, generation, ?4 FROM do_objects
+                 WHERE (namespace_resource_id, object_id, generation) = (?1, ?2, ?3)
+                   AND state IN ('creating', 'ready')
+                 ON CONFLICT(namespace_resource_id, object_id, generation) DO UPDATE SET
+                   revision = excluded.revision, expected_row_token = NULL,
+                   expected_due_at_ms = NULL, expected_retry_count = NULL",
                 params![
-                    Uuid::now_v7().hyphenated().to_string(),
-                    projection.namespace_resource_id.to_string(),
-                    projection.object_id.to_string(),
-                    i64::try_from(projection.object_generation).map_err(|_| invalid())?,
-                    projection.row_token,
-                    projection.due_at_ms,
-                    projection.target_version_id.to_string(),
-                    i64::try_from(projection.execution_generation).map_err(|_| invalid())?,
-                    i64::from(projection.retry_count),
-                    now_ms,
+                    namespace.to_string(),
+                    object.to_string(),
+                    i64::try_from(generation).map_err(|_| invalid())?,
+                    revision,
                 ],
             )
             .map_err(map_sql_error)?;
+        if affected == 0 {
+            return Err(PlatformError::new(
+                ErrorCode::DoObjectDeleting,
+                "Durable Object generation is no longer live",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Publish the alarm projection only while its repair revision is current.
+    pub fn finish_alarm_repair(
+        &self,
+        namespace: ResourceId,
+        object: DurableObjectId,
+        generation: u64,
+        revision: &str,
+        projection: Option<&AlarmProjection>,
+        now_ms: i64,
+    ) -> Result<(), PlatformError> {
+        Uuid::parse_str(revision).map_err(|_| invalid())?;
+        let mut connection = self.lock()?;
+        let tx = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(map_sql_error)?;
+        let namespace_key = namespace.to_string();
+        let object_key = object.to_string();
+        let generation_key = i64::try_from(generation).map_err(|_| invalid())?;
+        let affected = if let Some(projection) = projection {
+            tx.execute(
+                "UPDATE do_alarm_repair
+                 SET expected_row_token = ?5, expected_due_at_ms = ?6, expected_retry_count = ?7
+                 WHERE (namespace_resource_id, object_id, generation, revision) = (?1, ?2, ?3, ?4)",
+                params![
+                    namespace_key,
+                    object_key,
+                    generation_key,
+                    revision,
+                    projection.row_token,
+                    projection.due_at_ms,
+                    projection.retry_count,
+                ],
+            )
+        } else {
+            tx.execute(
+                "DELETE FROM do_alarm_repair
+                 WHERE (namespace_resource_id, object_id, generation, revision) = (?1, ?2, ?3, ?4)",
+                params![namespace_key, object_key, generation_key, revision],
+            )
+        }
+        .map_err(map_sql_error)?;
+        if affected == 0 {
+            return Ok(());
+        }
+        if let Some(projection) = projection {
+            if (
+                projection.namespace_resource_id,
+                projection.object_id,
+                projection.object_generation,
+            ) != (namespace, object, generation)
+            {
+                return Err(invalid());
+            }
+            write_alarm(&tx, projection, now_ms)?;
+        } else {
+            tx.execute(
+                "DELETE FROM scheduled_jobs
+                 WHERE (namespace_resource_id, object_id, object_generation) = (?1, ?2, ?3)",
+                params![namespace_key, object_key, generation_key],
+            )
+            .map_err(map_sql_error)?;
+        }
+        tx.commit().map_err(map_sql_error)?;
         drop(connection);
         self.wake.notify();
         Ok(())
@@ -492,9 +566,12 @@ impl SchedulerStore {
         result: ClaimResult,
         now_ms: i64,
     ) -> Result<bool, PlatformError> {
-        let connection = self.lock()?;
+        let mut connection = self.lock()?;
+        let tx = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(map_sql_error)?;
         let affected = match result {
-            ClaimResult::Delete => connection.execute(
+            ClaimResult::Delete => tx.execute(
                 "DELETE FROM scheduled_jobs
                  WHERE id = ?1 AND state = 'claimed' AND row_token = ?2",
                 params![job.id, job.row_token],
@@ -507,7 +584,7 @@ impl SchedulerStore {
                 if due_at_ms <= 0 || retry_count > 6 {
                     return Err(invalid());
                 }
-                connection.execute(
+                let affected = tx.execute(
                     "UPDATE scheduled_jobs SET state = 'scheduled', due_at_ms = ?1,
                             retry_count = ?2,
                             last_error_code = ?3, updated_at_ms = ?4
@@ -521,9 +598,29 @@ impl SchedulerStore {
 
                         job.row_token,
                     ],
-                )
+                ).map_err(map_sql_error)?;
+                if affected == 1 {
+                    // An accepted retry advances an intact projection's expected values.
+                    tx.execute(
+                        "UPDATE do_alarm_repair SET expected_due_at_ms = ?1, expected_retry_count = ?2
+                         WHERE (namespace_resource_id, object_id, generation) = (?3, ?4, ?5)
+                           AND (expected_row_token, expected_due_at_ms, expected_retry_count)
+                               = (?6, ?7, ?8)",
+                        params![
+                            due_at_ms,
+                            retry_count,
+                            job.namespace_resource_id.to_string(),
+                            job.object_id.to_string(),
+                            i64::try_from(job.object_generation).map_err(|_| invalid())?,
+                            job.row_token,
+                            job.due_at_ms,
+                            job.retry_count,
+                        ],
+                    ).map_err(map_sql_error)?;
+                }
+                Ok(affected)
             }
-            ClaimResult::MarkDiscarding { last_error_code } => connection.execute(
+            ClaimResult::MarkDiscarding { last_error_code } => tx.execute(
                 "UPDATE scheduled_jobs SET state = 'discarding', last_error_code = ?1, updated_at_ms = ?2
                  WHERE id = ?3 AND state = 'claimed' AND row_token = ?4",
                 params![
@@ -536,6 +633,7 @@ impl SchedulerStore {
             ),
         }
         .map_err(map_sql_error)?;
+        tx.commit().map_err(map_sql_error)?;
         drop(connection);
         if affected > 0 {
             self.wake.notify();

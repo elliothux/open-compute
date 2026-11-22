@@ -697,17 +697,34 @@ fn d1_policy_defaults_and_hard_bounds_are_validated() {
 fn durable_object_policy_defaults_and_hard_bounds_are_validated() {
     let config = parse_ok("");
     assert_eq!(config.durable_objects, DurableObjectsConfig::default());
+    assert_eq!(config.durable_objects.disk_stop_writes_free_bytes, 2 << 30);
+    assert_eq!(config.durable_objects.disk_degraded_free_bytes, 10 << 30);
     for input in [
         "[durable_objects]\nmax_namespace_name_bytes = 0\n",
         "[durable_objects]\nmax_object_name_bytes = 1025\n",
         "[durable_objects]\nmax_fetch_body_bytes = 67108865\n",
         "[durable_objects]\ndispatch_timeout_ms = 300001\n",
         "[durable_objects]\nmax_in_flight_dispatches = 0\n",
-        "[durable_objects]\ndisk_high_watermark_percent = 95\ndisk_stop_writes_percent = 95\n",
-        "[durable_objects]\ndisk_stop_writes_percent = 100\n",
+        "[durable_objects]\ndisk_degraded_free_bytes = 95\ndisk_stop_writes_free_bytes = 95\n",
+        "[durable_objects]\ndisk_stop_writes_free_bytes = 0\n",
         "[durable_objects]\nreconcile_batch = 10001\n",
     ] {
         assert_eq!(parse_err(input).code(), ErrorCode::LimitInvalid, "{input}");
+    }
+}
+
+#[test]
+fn durable_object_legacy_disk_keys_report_the_replacement_and_unit() {
+    for (old, new) in [
+        ("disk_stop_writes_percent", "disk_stop_writes_free_bytes"),
+        ("disk_high_watermark_percent", "disk_degraded_free_bytes"),
+    ] {
+        let source = complete_config(&format!("[durable_objects]\n{old} = 95\n"));
+        let err = PlatformConfig::from_toml_str_at(&source, Path::new("/")).unwrap_err();
+        assert_eq!(err.code(), ErrorCode::ConfigParseFailed);
+        assert!(err.message().contains(old));
+        assert!(err.message().contains(new));
+        assert!(err.message().contains("in bytes"));
     }
 }
 

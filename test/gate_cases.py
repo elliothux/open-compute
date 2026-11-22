@@ -24,6 +24,7 @@ SERVICE_PROCESS_CASES = (
 )
 
 ONCE = {
+    'd1': ('http_migrations::public_d1_schema_migrations_preserve_rows_across_daemon_restart',),
     'recorded': ('portable_recordings_match_local_ocd',),
     'containers': (
         'exec_options_probe::native_exec_streams_and_code_updates_preserve_owned_processes',

@@ -14,17 +14,6 @@ fn scoped_daemon_requires_nonroot_user() {
 
 #[test]
 fn do_storage_health_tracks_watermarks_and_component_state() {
-    let root = tempfile::tempdir().unwrap();
-    std::fs::create_dir(root.path().join("keys")).unwrap();
-    let data = open_compute_core::config::DataConfig {
-        path: root.path().join("data"),
-        master_key_file: root.path().join("keys/master.key"),
-        master_key_env: None,
-        sqlite_busy_timeout_ms: 5_000,
-        free_space_soft_bytes: 1,
-        free_space_hard_bytes: 1,
-    };
-    let storage = PlatformStorage::bootstrap(&data, &SystemClock).unwrap();
     let health = HealthCoordinator::new();
     let metrics = MetricsRegistry::new(
         &open_compute_core::MetricsConfig::default(),
@@ -41,37 +30,68 @@ fn do_storage_health_tracks_watermarks_and_component_state() {
             .unwrap()
     };
 
-    // Real disk usage on the test host is nonzero; drive each watermark explicitly so
-    // the assertions do not depend on the host's actual filesystem usage. The clear
-    // policy must place both watermarks above the clampable used-percent domain;
-    // inheriting the stop-writes default would re-introduce host dependence.
-    let clear = open_compute_core::DurableObjectsConfig {
-        disk_high_watermark_percent: 101,
-        disk_stop_writes_percent: 102,
-        ..open_compute_core::DurableObjectsConfig::default()
-    };
-    update_do_storage_health(&storage, &clear, &health, &metrics).unwrap();
-    assert_eq!(component().state, ComponentState::Healthy);
-    assert_eq!(component().reason, Some(ReadinessReason::Ready));
-
-    // A soft watermark below real usage reports the soft limit while the stop-writes
-    // threshold stays above it.
-    let soft = open_compute_core::DurableObjectsConfig {
-        disk_high_watermark_percent: 1,
-        disk_stop_writes_percent: 101,
-        ..open_compute_core::DurableObjectsConfig::default()
-    };
-    update_do_storage_health(&storage, &soft, &health, &metrics).unwrap();
-    assert_eq!(component().state, ComponentState::Degraded);
-    assert_eq!(component().reason, Some(ReadinessReason::DiskSoftLimit));
-
-    // A policy at the stop-writes watermark reports the hard limit.
-    let hard = open_compute_core::DurableObjectsConfig {
-        disk_high_watermark_percent: 1,
-        disk_stop_writes_percent: 2,
-        ..open_compute_core::DurableObjectsConfig::default()
-    };
-    update_do_storage_health(&storage, &hard, &health, &metrics).unwrap();
-    assert_eq!(component().state, ComponentState::Degraded);
-    assert_eq!(component().reason, Some(ReadinessReason::DiskHardLimit));
+    let config = open_compute_core::DurableObjectsConfig::default();
+    let stop = config.disk_stop_writes_free_bytes;
+    let degraded = config.disk_degraded_free_bytes;
+    for (available, state, reason, active_label) in [
+        (
+            stop - 1,
+            ComponentState::Degraded,
+            ReadinessReason::DiskHardLimit,
+            "stop",
+        ),
+        (
+            stop,
+            ComponentState::Degraded,
+            ReadinessReason::DiskSoftLimit,
+            "high",
+        ),
+        (
+            stop + 1,
+            ComponentState::Degraded,
+            ReadinessReason::DiskSoftLimit,
+            "high",
+        ),
+        (
+            degraded - 1,
+            ComponentState::Degraded,
+            ReadinessReason::DiskSoftLimit,
+            "high",
+        ),
+        (
+            degraded,
+            ComponentState::Healthy,
+            ReadinessReason::Ready,
+            "normal",
+        ),
+        (
+            degraded + 1,
+            ComponentState::Healthy,
+            ReadinessReason::Ready,
+            "normal",
+        ),
+        (
+            stop - 1,
+            ComponentState::Degraded,
+            ReadinessReason::DiskHardLimit,
+            "stop",
+        ),
+        (
+            degraded,
+            ComponentState::Healthy,
+            ReadinessReason::Ready,
+            "normal",
+        ),
+    ] {
+        report_do_storage_health(&config, available, &health, &metrics).unwrap();
+        assert_eq!(component().state, state, "{available} bytes");
+        assert_eq!(component().reason, Some(reason), "{available} bytes");
+        let rendered = metrics.render(&health.snapshot());
+        for label in ["normal", "high", "stop"] {
+            let value = u8::from(label == active_label);
+            assert!(rendered.lines().any(|line| {
+                line == format!("oc_do_storage_watermark{{state=\"{label}\"}} {value}")
+            }));
+        }
+    }
 }

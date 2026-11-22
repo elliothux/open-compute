@@ -230,23 +230,9 @@ impl PlatformStorage {
         self.admission.begin_draining();
     }
 
-    /// Filesystem block utilization containing the owned data directory, rounded down.
-    pub fn filesystem_used_percent(&self) -> Result<u8, PlatformError> {
-        let stat = rustix::fs::statvfs(self.data_dir.root()).map_err(|_| {
-            PlatformError::new(
-                open_compute_core::ErrorCode::DoStorageUnavailable,
-                "Durable Object filesystem capacity is unavailable",
-            )
-        })?;
-        if stat.f_blocks == 0 {
-            return Err(PlatformError::new(
-                open_compute_core::ErrorCode::DoStorageUnavailable,
-                "Durable Object filesystem capacity is unavailable",
-            ));
-        }
-        let used = stat.f_blocks.saturating_sub(stat.f_bfree);
-        let percent = used.saturating_mul(100) / stat.f_blocks;
-        u8::try_from(percent.min(100)).map_err(|_| {
+    /// Available and total bytes on the filesystem containing the data directory.
+    pub fn filesystem_space(&self) -> Result<(u64, u64), PlatformError> {
+        disk_admission::filesystem_space(self.data_dir.root()).map_err(|_| {
             PlatformError::new(
                 open_compute_core::ErrorCode::DoStorageUnavailable,
                 "Durable Object filesystem capacity is unavailable",

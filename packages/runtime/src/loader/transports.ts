@@ -496,6 +496,12 @@ export class AlarmIndex extends WorkerEntrypoint<BindingEnv, AlarmIdentity> {
     }
   }
 
+  async begin(revision: string) {
+    if (typeof revision !== "string")
+      throw bindingError("SCHEDULER_INTERNAL_PROTOCOL_ERROR");
+    await this.#request("begin", { rowToken: revision });
+  }
+
   async upsert(row: AlarmProjection) {
     if (
       !row ||

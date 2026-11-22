@@ -103,8 +103,8 @@ pub(super) async fn run() {
                 None,
                 None,
                 DurableObjectsConfig {
-                    disk_high_watermark_percent: 98,
-                    disk_stop_writes_percent: 99,
+                    disk_degraded_free_bytes: 2,
+                    disk_stop_writes_free_bytes: 1,
                     ..DurableObjectsConfig::default()
                 },
                 open_compute_core::QueuesConfig::default(),

@@ -20,7 +20,8 @@ export interface DoPolicy {
 export interface DoHostEnv extends LoaderEnv {
   NATIVE_DO_ID: { create: DoNativeIdFactory };
   DO_HOST: DurableObjectNamespace<DoHost>;
-  DO_DISK_STOP_WRITES_PERCENT: string;
+  DO_DISK_STOP_WRITES_FREE_BYTES: string;
+  DO_DISK_DEGRADED_FREE_BYTES: string;
 }
 
 /** Native transport with explicit per-stub ordering coordinates. */
@@ -102,6 +103,7 @@ export interface AlarmIdentity {
   objectGeneration: number;
 }
 export interface AlarmIndexCapability {
+  begin(revision: string): Promise<void>;
   upsert(row: AlarmProjection): Promise<void>;
   delete(rowToken: string): Promise<void>;
   clear(): Promise<void>;

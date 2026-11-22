@@ -55,8 +55,8 @@ pub(super) fn append_resource_config(
 external_control_origin = "http://{}"
 
 [durable_objects]
-disk_high_watermark_percent = 98
-disk_stop_writes_percent = 99
+disk_degraded_free_bytes = 2
+disk_stop_writes_free_bytes = 1
 
 {}"#,
         admin_addr,

@@ -441,6 +441,14 @@ fn platform_limits(config: &PlatformConfig) -> BTreeMap<String, u64> {
             u64::from(config.durable_objects.max_in_flight_dispatches),
         ),
         (
+            "durable_objects.disk_stop_writes_free_bytes".to_owned(),
+            config.durable_objects.disk_stop_writes_free_bytes,
+        ),
+        (
+            "durable_objects.disk_degraded_free_bytes".to_owned(),
+            config.durable_objects.disk_degraded_free_bytes,
+        ),
+        (
             "scheduler.max_in_flight".to_owned(),
             u64::from(config.scheduler.max_in_flight),
         ),

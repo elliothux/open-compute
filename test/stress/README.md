@@ -13,6 +13,25 @@ source .temp/stress-run/.deploy_env
 
 `deploy-stress-demo.sh` resolves the live KV namespace and D1 database IDs from the running ocd instance (via `cf kv namespaces list` / `cf d1 list`), supplies their IDs through explicit environment values without modifying tracked configuration. On first deploy it uses a two-pass flow: bootstrap without the self-referencing `SERVICE` binding, then redeploy with `SERVICE` once `stress-demo` exists.
 
+## Passive workerd memory sampling (#201)
+
+On Linux with cgroup v2, use the PID of an already running workerd and the path to its service cgroup as seen by the sampler. Run with permission to read `/proc/<pid>/smaps_rollup` and the cgroup's `memory.stat`. Use an existing output directory and a new file for each phase.
+
+```bash
+python3 test/stress/sample-workerd-memory.py \
+  --pid "$WORKERD_PID" --cgroup "$SERVICE_CGROUP" \
+  --interval 10 --duration 600 --run reference-01 --phase idle \
+  --output .temp/stress-run/reference-01/idle.jsonl
+```
+
+The sampler reads local kernel counters and sends no requests. Each JSONL sample has a monotonic timestamp, the PID start time in kernel clock ticks, process `Private_Dirty` and RSS in KiB, and cgroup `anon` in bytes. Cgroup `anon` covers the whole selected group and its descendants.
+
+Use `ok` rows for comparisons. A `missing` row contains one or more null readings, including when the PID disappears. A changed start time for the same PID produces `pid_reused` and ends the run. After a workerd restart, start a new capture with the current PID and keep the captures separate. An absent end record or an end status other than `complete` marks an incomplete run. Check `missing_samples` even on completed runs.
+
+Compare the reference and candidate on the same machine with the same application, configuration, cgroup scope, and limits. Use matching sample intervals and phase durations. Run an idle baseline, a brief burst of ordinary healthy checks at an already permitted rate, and a phase with those checks spaced farther apart. Use existing low-frequency application checks and permitted monitoring. Record the request count, timing, health outcomes, and restart times alongside each phase. If the fixture returns a module-instance identifier, record it with each response so the comparison shows whether successive requests reused the same instance. For the #201 release comparison, use native Linux x86_64 and cover the reported 8–16 hour window.
+
+Compare changes from each phase's first stable reading and compare values after equal numbers of successful checks. Use the idle baseline to estimate normal drift. Keep periods with missing readings or restarts visible. Avoid high-load profiles, crash tests, and restart injections for this comparison.
+
 ## Release qualification
 
 `./test/stress/qualify-release.sh ABS_CANDIDATE ABS_PACKAGE_REPORT` verifies the packaged Linux x64 executable and its source/runtime identity. The qualifier builds local images and runs five stages within a 40-minute suite budget. Docker enforces 2 CPUs and 4 GiB memory. The qualifier must not search or signal host workerd processes. Injected restarts select this project's `ocd` service. Each restart requires readiness and reconciliation checks.

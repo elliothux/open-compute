@@ -14,13 +14,14 @@ fn refinery_history_is_current_and_future_schema_fails_closed() {
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .unwrap();
-    assert_eq!(
-        history,
-        (
-            current_scheduler_schema_version(),
-            "external_proxy_worker_origins".to_owned()
-        )
-    );
+    assert_eq!(history, (27, "do_alarm_repair".to_owned()));
+    let migration_count: i64 = connection
+        .query_row("SELECT COUNT(*) FROM refinery_schema_history", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(migration_count, 27);
+    assert_eq!(current_scheduler_schema_version(), 27);
     connection
         .execute(
             "INSERT INTO refinery_schema_history(version,name,applied_on,checksum)

@@ -386,7 +386,6 @@ pub(super) async fn compose(prepared: PreparedPlatform) -> Result<ComposedPlatfo
         transport.clone(),
         loaded.config.workflows.clone(),
     );
-    metrics.set_do_storage_watermark(0);
     let maintenance_do_lifecycle = do_lifecycle.clone();
     let binding_executor = compose_kv(&storage, &loaded.config, &metrics);
     let binding_ai_search = Arc::new(

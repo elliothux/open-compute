@@ -162,7 +162,7 @@ pub(super) fn write_do_metrics(out: &mut String, metrics: &Inner) {
         out,
         "oc_do_storage_watermark",
         "gauge",
-        "Durable Object localDisk watermark state",
+        "Durable Object disk pressure state based on available bytes and configured reserves",
     );
     for (index, state) in ["normal", "high", "stop"].into_iter().enumerate() {
         writeln!(

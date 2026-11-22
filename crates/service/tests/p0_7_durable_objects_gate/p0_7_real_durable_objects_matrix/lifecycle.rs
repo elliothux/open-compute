@@ -257,7 +257,9 @@ pub(super) async fn promote(case: &MatrixCase<'_>) -> (VersionRecord, u64) {
         "/increment?name=alpha",
     )
     .await;
-    assert_eq!(stale.status, 500);
+    assert_eq!(stale.status, 409);
+    let body: serde_json::Value = serde_json::from_str(&stale.body).unwrap();
+    assert_eq!(body["error"]["code"], "DO_VERSION_STALE");
     (version_b, generation_b)
 }
 

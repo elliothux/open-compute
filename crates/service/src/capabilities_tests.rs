@@ -2,6 +2,19 @@ use super::*;
 use open_compute_core::{CapabilityStatus, ProductKind};
 
 #[test]
+fn durable_object_capabilities_expose_configured_disk_reserves_in_bytes() {
+    let mut config = PlatformConfig::local_test_config();
+    config.durable_objects.disk_stop_writes_free_bytes = 3 << 30;
+    config.durable_objects.disk_degraded_free_bytes = 11 << 30;
+    let limits = limit_registry(&config);
+    assert_eq!(
+        limits["durable_objects.disk_stop_writes_free_bytes"],
+        3 << 30
+    );
+    assert_eq!(limits["durable_objects.disk_degraded_free_bytes"], 11 << 30);
+}
+
+#[test]
 fn browser_capabilities_expose_only_configured_numeric_limits() {
     use open_compute_core::{BrowserBackendConfig, BrowserConfig};
     let mut config = PlatformConfig::local_test_config();

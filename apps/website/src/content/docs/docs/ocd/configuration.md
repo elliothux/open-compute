@@ -233,6 +233,31 @@ The instance template also includes `[instance]`, `[auth]`, `[runtime]`, `[cache
 
 Browser Run is opt-in; see [Browser Run](/docs/browser-run/) for the explicit backend and capacity fields.
 
+### Durable Object disk reserves
+
+Set the reserves in bytes under `[durable_objects]`. Both values must be positive integers. The stop reserve must be smaller than the degraded reserve. At startup, the service checks that both fit within the total capacity of the filesystem that contains the data directory.
+
+| Setting                       | Default                    |
+| ----------------------------- | -------------------------- |
+| `disk_stop_writes_free_bytes` | 2 GiB (2147483648 bytes)   |
+| `disk_degraded_free_bytes`    | 10 GiB (10737418240 bytes) |
+
+| Available bytes on the data filesystem                      | Health   | `oc_do_storage_watermark` state | New objects                      |
+| ----------------------------------------------------------- | -------- | ------------------------------- | -------------------------------- |
+| At or above the degraded reserve                            | Healthy  | `normal`                        | Allowed                          |
+| At or above the stop reserve and below the degraded reserve | Degraded | `high`                          | Allowed                          |
+| Below the stop reserve                                      | Degraded | `stop`                          | Rejected with `DO_STORAGE_LIMIT` |
+
+Existing objects can still resolve subject to the usual storage admission rules.
+
+#### Upgrade from v0.4.0
+
+The v0.4.0 `setup` command writes `disk_stop_writes_percent` and `disk_high_watermark_percent` even in the default instance configuration. Before running `ocd upgrade`, remove both keys from the instance's actual `compute.toml`. With both keys omitted, v0.4.0 keeps its 95% stop and 85% degraded defaults, and the upgraded version uses its 2 GiB stop and 10 GiB degraded reserves.
+
+If you use custom thresholds, choose the new reserves explicitly in bytes. After switching to the new binary, set `disk_stop_writes_free_bytes` and `disk_degraded_free_bytes` and run `config check`. The upgrade does not convert percentages automatically.
+
+When the scoped daemon is running, `ocd upgrade` checks the registered instance configurations with the staged binary before replacing the installed binary. A legacy key fails that check.
+
 ## Containers
 
 `[containers]` is optional. Without this section, the instance does not admit Containers. Configure a qualified Broker socket, its contract digest, reservation and snapshot ceilings, and resource ceilings. The Broker configuration is a separate file. See [Container configuration](/docs/containers/#instance-configuration).

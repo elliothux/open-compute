@@ -1341,7 +1341,7 @@ test("Durable Object methods share the root Service scope and tracked waitUntil 
     },
     exports: cloudflareModule.workerExports,
   };
-  const alarmMethods = { upsert() {}, delete() {}, clear() {} };
+  const alarmMethods = { begin() {}, upsert() {}, delete() {}, clear() {} };
   const index = new Proxy(() => undefined, {
     get: (_target, name) => alarmMethods[name],
   });
@@ -1460,6 +1460,7 @@ test("Durable Object WebSocket responses hand ownership to native hibernation", 
   const waits = [];
   Object.assign(privateEnvironment, {
     __OPEN_COMPUTE_PRIVATE_ALARM_INDEX: {
+      begin() {},
       upsert() {},
       delete() {},
       clear() {},
@@ -1886,6 +1887,7 @@ test("DO constructor input-gate failure completes its scope before native actor 
   };
   const privateEnvironment = {
     __OPEN_COMPUTE_PRIVATE_ALARM_INDEX: {
+      begin() {},
       upsert() {},
       delete() {},
       clear() {},

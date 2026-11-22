@@ -180,8 +180,8 @@ pub(super) async fn run() {
             open_compute_core::WorkflowsConfig::default(),
             Arc::new(SystemSchedulerClock),
         )
-        .with_metrics(scheduler_metrics)
-        .with_health(scheduler_health),
+        .with_metrics(scheduler_metrics.clone())
+        .with_health(scheduler_health.clone()),
     );
     assert!(format!("{scheduler:?}").contains("SchedulerService"));
     assert!(Arc::ptr_eq(scheduler.store(), &scheduler_store));
@@ -454,10 +454,10 @@ pub(super) async fn run() {
         )
         .await,
     );
-    let object = DurableObjectRepository::new(&storage)
-        .alarm_repair_candidates(None, 1)
+    let [object] = DurableObjectRepository::new(&storage)
+        .list_objects(account, namespace)
         .unwrap()
-        .pop()
+        .try_into()
         .unwrap();
     scheduler_store
         .delete_object(namespace, object.object_id, object.generation)
@@ -483,8 +483,7 @@ pub(super) async fn run() {
     let _ = status(&transport, account, worker.id, &version_a, generation_a).await;
     assert_eq!(scheduler_store.summary(now_ms()).unwrap().scheduled, 1);
 
-    // A bounded private scan independently reconstructs a missing projection and advances/reset
-    // its stable cursor. With no authority row, the same path exact-clears a stale projection.
+    // A bounded private scan independently reconstructs a missing projection.
     scheduler_store
         .delete_object(namespace, object.object_id, object.generation)
         .unwrap();
@@ -502,9 +501,119 @@ pub(super) async fn run() {
         )
         .await,
     );
+    // Deletion leaves a marker until one probe confirms the object-local alarm is gone.
     assert_eq!(scheduler.repair_once().await.unwrap(), 1);
     assert_eq!(scheduler.summary().unwrap(), SchedulerSummary::default());
     assert_eq!(scheduler.repair_once().await.unwrap(), 0);
+    assert_eq!(scheduler.repair_once().await.unwrap(), 0);
+
+    let deleted = status(&transport, account, worker.id, &version_a, generation_a).await;
+    assert_eq!(deleted["alarm"], serde_json::Value::Null);
+    let never_set = dispatch_path(
+        &transport,
+        account,
+        worker.id,
+        &version_a,
+        generation_a,
+        "/status?object=never-set",
+    )
+    .await;
+    assert_ok(&never_set);
+    let never_set: serde_json::Value = serde_json::from_str(&never_set.body).unwrap();
+    assert_eq!(never_set["alarm"], serde_json::Value::Null);
+    assert_eq!(never_set["constructors"], 1);
+
+    let due = now_ms().saturating_sub(1).max(1);
+    assert_ok(
+        &dispatch_path(
+            &transport,
+            account,
+            worker.id,
+            &version_a,
+            generation_a,
+            &format!("/set?object=pending&time={due}"),
+        )
+        .await,
+    );
+    let [pending] = scheduler_store
+        .claim_due(now_ms(), 1)
+        .unwrap()
+        .try_into()
+        .unwrap();
+    assert_ne!(pending.object_id, object.object_id);
+    scheduler_store
+        .delete_object(namespace, pending.object_id, pending.object_generation)
+        .unwrap();
+
+    let scan_metrics = || {
+        scheduler_metrics
+            .render(&scheduler_health.snapshot())
+            .lines()
+            .filter(|line| line.starts_with("oc_do_alarm_repair_total{source=\"scan\","))
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+    };
+    // Only the pending object needs a probe. Run through the cursor reset and scan again.
+    for projection_missing in [true, false] {
+        if !projection_missing {
+            scheduler_store
+                .upsert_alarm(
+                    &AlarmProjection {
+                        namespace_resource_id: namespace,
+                        object_id: pending.object_id,
+                        object_generation: pending.object_generation,
+                        row_token: "00000000-0000-4000-8000-00000000000b".to_owned(),
+                        due_at_ms: now_ms().saturating_add(120_000),
+                        target_version_id: version_a.id,
+                        execution_generation: generation_a,
+                        retry_count: 1,
+                    },
+                    now_ms(),
+                )
+                .unwrap();
+        }
+        let old_pid = supervisor.snapshot().pid.unwrap();
+        supervisor.force_restart_for_test();
+        wait_pid_change(&supervisor, old_pid, Duration::from_secs(30)).await;
+        assert_eq!(
+            scheduler.repair_once().await.unwrap(),
+            1,
+            "missing={projection_missing}"
+        );
+        assert_eq!(scheduler.summary().unwrap().scheduled, 1);
+        let before = scan_metrics();
+        assert_eq!(before.len(), 2);
+        assert_eq!(scheduler.repair_once().await.unwrap(), 0);
+        assert_eq!(scheduler.repair_once().await.unwrap(), 0);
+        assert_eq!(scan_metrics(), before, "converged scan attempted a repair");
+    }
+
+    assert_eq!(scheduler.poll_once().await.unwrap(), 1);
+    assert_eq!(scheduler.summary().unwrap(), SchedulerSummary::default());
+    // Delivery also leaves a marker that needs one final confirmation.
+    assert_eq!(scheduler.repair_once().await.unwrap(), 1);
+    let before = scan_metrics();
+    assert_eq!(scheduler.repair_once().await.unwrap(), 0);
+    assert_eq!(scheduler.repair_once().await.unwrap(), 0);
+    assert_eq!(
+        scan_metrics(),
+        before,
+        "post-delivery scan attempted a repair"
+    );
+
+    // Restart before reading counters so the observation itself adds exactly one construction.
+    let old_pid = supervisor.snapshot().pid.unwrap();
+    supervisor.force_restart_for_test();
+    wait_pid_change(&supervisor, old_pid, Duration::from_secs(30)).await;
+    assert_alarm_objects_after_repair(
+        &transport,
+        account,
+        worker.id,
+        &version_a,
+        generation_a,
+        &deleted,
+    )
+    .await;
 
     // Pending alarms always execute current promoted or rolled-back code.
     assert_ok(
@@ -725,4 +834,35 @@ pub(super) async fn run() {
     source_task.await.unwrap().unwrap();
     binding_task.await.unwrap().unwrap();
     println!("P0.8 scheduler/alarm API/token/retry/repair/promotion/deleteAll PASS");
+}
+
+async fn assert_alarm_objects_after_repair(
+    transport: &WorkerdTransport,
+    account: InstanceId,
+    worker: WorkerId,
+    version: &VersionRecord,
+    generation: u64,
+    deleted: &serde_json::Value,
+) {
+    for (path, constructors, deliveries) in [
+        (
+            "/status",
+            Some(deleted["constructors"].as_u64().unwrap() + 1),
+            deleted["deliveries"].as_u64().unwrap(),
+        ),
+        ("/status?object=never-set", Some(2), 0),
+        ("/status?object=pending", None, 1),
+    ] {
+        let response = dispatch_path(transport, account, worker, version, generation, path).await;
+        assert_ok(&response);
+        let observed: serde_json::Value = serde_json::from_str(&response.body).unwrap();
+        assert_eq!(observed["alarm"], serde_json::Value::Null, "{path}");
+        assert_eq!(observed["deliveries"], deliveries, "{path}");
+        if let Some(constructors) = constructors {
+            assert_eq!(observed["constructors"], constructors, "{path}");
+        } else {
+            assert_eq!(observed["lastRelease"], "A");
+            assert_eq!(observed["lastRetryCount"], 0);
+        }
+    }
 }

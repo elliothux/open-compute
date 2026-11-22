@@ -235,7 +235,7 @@ impl SchedulerService {
             .map_err(|_| scheduler_task_failed())?
     }
 
-    /// Probe one stable page of live objects and converge the due projection.
+    /// Probe one page of unresolved alarm changes and repair their scheduler entries.
     pub async fn repair_once(&self) -> Result<u32, PlatformError> {
         let after = *self
             .repair_cursor
@@ -244,7 +244,7 @@ impl SchedulerService {
         let storage = self.storage.clone();
         let batch = self.config.repair_batch;
         let candidates = tokio::task::spawn_blocking(move || {
-            DurableObjectRepository::new(&storage).alarm_repair_candidates(after, batch)
+            DurableObjectRepository::new(&storage).pending_alarm_repairs(after, batch)
         })
         .await
         .map_err(|_| scheduler_task_failed())??;
@@ -255,10 +255,10 @@ impl SchedulerService {
                 .map_err(|_| scheduler_task_failed())? = None;
             return Ok(0);
         }
-        let last = candidates.last().map(repair_cursor);
+        let last = candidates.last().map(|(object, _)| repair_cursor(object));
         let mut repaired = 0_u32;
-        for object in candidates {
-            let result = self.repair_object(object).await;
+        for (object, revision) in candidates {
+            let result = self.repair_object(object, revision).await;
             if let Some(metrics) = &self.metrics {
                 metrics.inc_alarm_repair(AlarmRepairSource::Scan, result.is_ok());
             }
@@ -289,7 +289,11 @@ impl SchedulerService {
         Ok(repaired)
     }
 
-    async fn repair_object(&self, object: DurableObjectRecord) -> Result<(), PlatformError> {
+    async fn repair_object(
+        &self,
+        object: DurableObjectRecord,
+        revision: String,
+    ) -> Result<(), PlatformError> {
         let authority = {
             let storage = self.storage.clone();
             tokio::task::spawn_blocking(move || {
@@ -321,44 +325,39 @@ impl SchedulerService {
         })??;
         #[cfg(any(test, feature = "test-support"))]
         self.hit_fault(SchedulerFaultPoint::DuringProjectionRefresh);
-        self.apply_repair(object, authority, result).await
+        self.apply_repair(object, revision, authority, result).await
     }
 
     async fn apply_repair(
         &self,
         object: DurableObjectRecord,
+        revision: String,
         authority: open_compute_storage::durable_objects::AuthorizedDurableObjectDispatch,
         result: AlarmRepairResult,
     ) -> Result<(), PlatformError> {
         let store = self.store.clone();
         let now_ms = self.observed_wall_time_ms();
         tokio::task::spawn_blocking(move || {
-            if !result.exists {
-                store.delete_object(
-                    object.namespace_resource_id,
-                    object.object_id,
-                    object.generation,
-                )?;
-                return Ok(());
-            }
-            let (Some(due_at_ms), Some(retry_count), Some(row_token)) = (
-                result.scheduled_time_ms,
-                result.retry_count,
-                result.row_token,
-            ) else {
-                return Err(scheduler_task_failed());
-            };
-            store.upsert_alarm(
-                &AlarmProjection {
+            let projection = if result.exists {
+                Some(AlarmProjection {
                     namespace_resource_id: object.namespace_resource_id,
                     object_id: object.object_id,
                     object_generation: object.generation,
-                    row_token,
-                    due_at_ms,
+                    row_token: result.row_token.ok_or_else(scheduler_task_failed)?,
+                    due_at_ms: result.scheduled_time_ms.ok_or_else(scheduler_task_failed)?,
                     target_version_id: authority.version_id,
                     execution_generation: authority.route_generation,
-                    retry_count,
-                },
+                    retry_count: result.retry_count.ok_or_else(scheduler_task_failed)?,
+                })
+            } else {
+                None
+            };
+            store.finish_alarm_repair(
+                object.namespace_resource_id,
+                object.object_id,
+                object.generation,
+                &revision,
+                projection.as_ref(),
                 now_ms,
             )
         })

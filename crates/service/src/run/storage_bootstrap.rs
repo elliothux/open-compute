@@ -19,6 +19,13 @@ pub(super) fn bootstrap(
         &config.hardening,
         &SystemClock,
     )?);
+    let (_, total_bytes) = storage.filesystem_space()?;
+    if config.durable_objects.disk_degraded_free_bytes > total_bytes {
+        return Err(PlatformError::new(
+            open_compute_core::ErrorCode::LimitInvalid,
+            "[durable_objects] disk_degraded_free_bytes exceeds the data filesystem capacity in bytes",
+        ));
+    }
     let now = open_compute_core::wall_time_ms();
     let scheduler = Arc::new(SchedulerStore::open(
         &storage.data_dir().ensure_scheduler_db()?,

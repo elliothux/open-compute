@@ -215,8 +215,8 @@ max_object_name_bytes = 1024
 max_fetch_body_bytes = 33554432
 dispatch_timeout_ms = 30000
 max_in_flight_dispatches = 256
-disk_high_watermark_percent = 85
-disk_stop_writes_percent = 95
+disk_degraded_free_bytes = 10737418240
+disk_stop_writes_free_bytes = 2147483648
 reconcile_batch = 64
 
 [scheduler]

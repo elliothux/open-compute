@@ -196,7 +196,7 @@ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s test -p 'test_gate.py'
 
 - 长构建和 Gate 前后检查空闲空间和 `docker system df -v`。
 - 本任务的可丢弃数据不超过 32 GiB。
-- Durable Objects 在磁盘用量达到 95% 时拒绝新对象，因此测试数据所在文件系统要保留超过总容量 5% 的空闲。
+- Durable Objects 在数据目录所在文件系统的可用空间低于 `disk_stop_writes_free_bytes` 时拒绝新对象。磁盘压力测试使用固定读数，创建对象的 Gate fixture 使用较小的字节预留值。
 - Docker 容器用 `--rm`，卷要有明确归属，结束后删除。不要运行全局 `docker prune`。
 
 ## 日志与保留证据

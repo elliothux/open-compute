@@ -8,12 +8,18 @@ interface AlarmRow extends AlarmProjection {
   lastErrorCode: string | null;
   updatedAtMs: number;
 }
+interface AlarmMutation {
+  active: boolean;
+}
 interface AlarmTransaction {
+  mutation: AlarmMutation;
+  begin?: Promise<void>;
   mutated: boolean;
   rolledBack: boolean;
 }
 interface StorageScope {
   syncDepth: number;
+  activeAlarmMutations: number;
 }
 export interface PreparedAlarm {
   context: DurableObjectState;
@@ -22,6 +28,7 @@ export interface PreparedAlarm {
   rawStorage: DurableObjectStorage;
   index: AlarmIndexCapability;
   gate: DoOutputGate;
+  scope: StorageScope;
 }
 type AlarmSqlRow = Record<string, SqlStorageValue> & {
   row_token: string;
@@ -204,6 +211,42 @@ function projection(row: AlarmRow): AlarmProjection {
   };
 }
 
+async function beginAlarmMutation(
+  index: AlarmIndexCapability,
+  scope: StorageScope,
+  mutation: AlarmMutation,
+) {
+  if (!mutation.active) {
+    mutation.active = true;
+    scope.activeAlarmMutations += 1;
+  }
+  try {
+    await index.begin(crypto.randomUUID());
+  } catch {
+    throw alarmFailure("DO_ALARM_INDEX_UNAVAILABLE");
+  }
+}
+
+async function mutateAlarm<T>(
+  index: AlarmIndexCapability,
+  scope: StorageScope,
+  transaction: AlarmTransaction | null,
+  write: () => Promise<T>,
+): Promise<T> {
+  const mutation = transaction?.mutation ?? { active: false };
+  try {
+    if (transaction) {
+      transaction.begin ??= beginAlarmMutation(index, scope, mutation);
+      await transaction.begin;
+    } else {
+      await beginAlarmMutation(index, scope, mutation);
+    }
+    return await write();
+  } finally {
+    if (!transaction && mutation.active) scope.activeAlarmMutations -= 1;
+  }
+}
+
 function setAlarm(
   storage: DurableObjectStorage,
   index: AlarmIndexCapability,
@@ -216,29 +259,31 @@ function setAlarm(
   }
   return (async () => {
     const scheduledTimeMs = alarmTime(value);
-    const rowToken = crypto.randomUUID();
-    ensureTable(storage);
-    storage.sql.exec(
-      `INSERT INTO ${TABLE}
+    return mutateAlarm(index, scope, transaction, async () => {
+      const rowToken = crypto.randomUUID();
+      ensureTable(storage);
+      storage.sql.exec(
+        `INSERT INTO ${TABLE}
          (id, scheduled_time_ms, retry_count, in_flight, row_token, last_error_code, updated_at_ms)
        VALUES (1, ?, 0, 0, ?, NULL, ?)
        ON CONFLICT(id) DO UPDATE SET scheduled_time_ms = excluded.scheduled_time_ms,
          retry_count = 0, in_flight = 0, row_token = excluded.row_token,
          last_error_code = NULL, updated_at_ms = excluded.updated_at_ms`,
-      scheduledTimeMs,
-      rowToken,
-      Date.now(),
-    );
-    if (transaction) {
-      transaction.mutated = true;
-      return;
-    }
-    try {
-      await index.upsert({ scheduledTimeMs, retryCount: 0, rowToken });
-    } catch {
-      exactDelete(storage, rowToken);
-      throw alarmFailure("DO_ALARM_INDEX_UNAVAILABLE");
-    }
+        scheduledTimeMs,
+        rowToken,
+        Date.now(),
+      );
+      if (transaction) {
+        transaction.mutated = true;
+        return;
+      }
+      try {
+        await index.upsert({ scheduledTimeMs, retryCount: 0, rowToken });
+      } catch {
+        exactDelete(storage, rowToken);
+        throw alarmFailure("DO_ALARM_INDEX_UNAVAILABLE");
+      }
+    });
   })();
 }
 
@@ -275,17 +320,20 @@ function deleteAlarm(
   return (async () => {
     const row = readRow(storage);
     if (!row) return;
-    exactDelete(storage, row.rowToken);
-    if (transaction) {
-      transaction.mutated = true;
-      return;
-    }
-    try {
-      await index.delete(row.rowToken);
-    } catch {
-      restoreIfAbsent(storage, row);
-      throw alarmFailure("DO_ALARM_INDEX_UNAVAILABLE");
-    }
+    return mutateAlarm(index, scope, transaction, async () => {
+      if (readRow(storage)?.rowToken !== row.rowToken) return;
+      exactDelete(storage, row.rowToken);
+      if (transaction) {
+        transaction.mutated = true;
+        return;
+      }
+      try {
+        await index.delete(row.rowToken);
+      } catch {
+        restoreIfAbsent(storage, row);
+        throw alarmFailure("DO_ALARM_INDEX_UNAVAILABLE");
+      }
+    });
   })();
 }
 
@@ -408,12 +456,18 @@ function wrapStorage<T extends DurableObjectStorage | DurableObjectTransaction>(
           } = {};
           let txnCommitted = false;
           let attemptStarted = false;
+          // Native retries replace the attempt and keep its repair guard active.
+          const mutation = { active: false };
           try {
             const result = await target.transaction(
               async (nativeTransaction) => {
                 if (attemptStarted) gate.retryTransaction();
                 else attemptStarted = true;
-                const attempt = { mutated: false, rolledBack: false };
+                const attempt: AlarmTransaction = {
+                  mutation,
+                  mutated: false,
+                  rolledBack: false,
+                };
                 const value = await callback(
                   wrapStorage(
                     nativeTransaction,
@@ -449,6 +503,8 @@ function wrapStorage<T extends DurableObjectStorage | DurableObjectTransaction>(
             if (!txnCommitted && attemptStarted)
               await gate.exitTransaction("failed");
             throw error;
+          } finally {
+            if (mutation.active) scope.activeAlarmMutations -= 1;
           }
         };
       }
@@ -471,24 +527,38 @@ function wrapStorage<T extends DurableObjectStorage | DurableObjectTransaction>(
             throw new TypeError(
               "deleteAll() accepts at most one options argument",
             );
-          const row = readRow(target);
+          const mutation = { active: false };
+          let removedProjection: AlarmRow | null | undefined;
           try {
-            if (row) await index.delete(row.rowToken);
-            else await index.clear();
-          } catch {
-            throw alarmFailure("DO_ALARM_INDEX_UNAVAILABLE");
-          }
-          try {
-            await target.transaction((txn) => deleteAllStorage(target, txn));
+            await target.transaction(async (txn) => {
+              const row = readRow(target);
+              if (row) await beginAlarmMutation(index, scope, mutation);
+              if (
+                removedProjection === undefined ||
+                !sameProjection(removedProjection, row)
+              ) {
+                try {
+                  if (row) await index.delete(row.rowToken);
+                  else await index.clear();
+                } catch {
+                  throw alarmFailure("DO_ALARM_INDEX_UNAVAILABLE");
+                }
+                removedProjection = row;
+              }
+              await deleteAllStorage(target, txn);
+            });
           } catch (error) {
-            if (row) {
+            if (removedProjection !== undefined) {
               try {
-                await index.upsert(projection(row));
+                const row = readRow(target);
+                if (row) await index.upsert(projection(row));
               } catch {
                 /* activation repair owns convergence */
               }
             }
             throw error;
+          } finally {
+            if (mutation.active) scope.activeAlarmMutations -= 1;
           }
           ensureTable(rootStorage);
           gate.ensureTable();
@@ -513,9 +583,8 @@ export function prepareDurableObjectContext(
   const nativeBlockConcurrencyWhile = ctx.blockConcurrencyWhile;
   ensureTable(rawStorage);
   const gate = new DoOutputGate(rawStorage);
-  const storage = wrapStorage(rawStorage, index, null, rawStorage, gate, {
-    syncDepth: 0,
-  });
+  const scope = { syncDepth: 0, activeAlarmMutations: 0 };
+  const storage = wrapStorage(rawStorage, index, null, rawStorage, gate, scope);
   let context = ctx;
   try {
     nativeDefine(ctx, "storage", {
@@ -544,6 +613,7 @@ export function prepareDurableObjectContext(
     rawStorage,
     index,
     gate,
+    scope,
   });
 }
 
@@ -566,6 +636,8 @@ export function activateDurableObjectAlarm(
 
 /// Return the strict object-local DTO used by startup and periodic projection repair.
 export async function repairDurableObjectAlarm(prepared: PreparedAlarm) {
+  if (prepared.scope.activeAlarmMutations > 0)
+    throw alarmFailure("DO_ALARM_INDEX_UNAVAILABLE");
   const row = readRow(prepared.rawStorage);
   if (!row) return { exists: false };
   return {
@@ -597,8 +669,9 @@ export async function dispatchDurableObjectAlarm(
   ) {
     throw alarmFailure("SCHEDULER_INTERNAL_PROTOCOL_ERROR");
   }
+  const { rowToken, retryCount: claimedRetryCount } = payload;
   const row = readRow(prepared.rawStorage);
-  if (!row || row.rowToken !== payload.rowToken) return { outcome: "stale" };
+  if (!row || row.rowToken !== rowToken) return { outcome: "stale" };
   const now = Date.now();
   if (row.scheduledTimeMs > now) {
     return {
@@ -607,57 +680,61 @@ export async function dispatchDurableObjectAlarm(
       retryCount: row.retryCount,
     };
   }
-  prepared.rawStorage.sql.exec(
-    `UPDATE ${TABLE} SET in_flight = 1, retry_count = ?, updated_at_ms = ?
-     WHERE id = 1 AND row_token = ?`,
-    payload.retryCount,
-    now,
-    payload.rowToken,
-  );
-  try {
-    if (
-      typeof handler === "function" &&
-      !INTERNAL_METHOD.test(handler.name || "")
-    ) {
-      await nativeApply(handler, instance, [
-        {
-          retryCount: payload.retryCount,
-          isRetry: payload.retryCount > 0,
-        },
-      ]);
-    }
-    exactDelete(prepared.rawStorage, payload.rowToken);
-    return { outcome: "success" };
-  } catch {
-    const current = readRow(prepared.rawStorage);
-    if (!current || current.rowToken !== payload.rowToken)
+  return mutateAlarm(prepared.index, prepared.scope, null, async () => {
+    if (readRow(prepared.rawStorage)?.rowToken !== rowToken)
       return { outcome: "stale" };
-    if (payload.retryCount >= 6) {
-      exactDelete(prepared.rawStorage, payload.rowToken);
-      return { outcome: "exhausted", errorCode: "DO_RUNTIME_EXCEPTION" };
-    }
-    const retryCount = payload.retryCount + 1;
-    const scheduledTimeMs = Date.now() + 2000 * 2 ** payload.retryCount;
     prepared.rawStorage.sql.exec(
-      `UPDATE ${TABLE} SET scheduled_time_ms = ?, retry_count = ?, in_flight = 0,
+      `UPDATE ${TABLE} SET in_flight = 1, retry_count = ?, updated_at_ms = ?
+     WHERE id = 1 AND row_token = ?`,
+      claimedRetryCount,
+      now,
+      rowToken,
+    );
+    try {
+      if (
+        typeof handler === "function" &&
+        !INTERNAL_METHOD.test(handler.name || "")
+      ) {
+        await nativeApply(handler, instance, [
+          {
+            retryCount: claimedRetryCount,
+            isRetry: claimedRetryCount > 0,
+          },
+        ]);
+      }
+      exactDelete(prepared.rawStorage, rowToken);
+      return { outcome: "success" };
+    } catch {
+      const current = readRow(prepared.rawStorage);
+      if (!current || current.rowToken !== rowToken)
+        return { outcome: "stale" };
+      if (claimedRetryCount >= 6) {
+        exactDelete(prepared.rawStorage, rowToken);
+        return { outcome: "exhausted", errorCode: "DO_RUNTIME_EXCEPTION" };
+      }
+      const retryCount = claimedRetryCount + 1;
+      const scheduledTimeMs = Date.now() + 2000 * 2 ** claimedRetryCount;
+      prepared.rawStorage.sql.exec(
+        `UPDATE ${TABLE} SET scheduled_time_ms = ?, retry_count = ?, in_flight = 0,
               last_error_code = 'DO_RUNTIME_EXCEPTION', updated_at_ms = ?
        WHERE id = 1 AND row_token = ?`,
-      scheduledTimeMs,
-      retryCount,
-      Date.now(),
-      payload.rowToken,
-    );
-    const retry = { scheduledTimeMs, retryCount, rowToken: payload.rowToken };
-    try {
-      await prepared.index.upsert(retry);
-    } catch {
-      /* dispatcher response repairs it */
+        scheduledTimeMs,
+        retryCount,
+        Date.now(),
+        rowToken,
+      );
+      const retry = { scheduledTimeMs, retryCount, rowToken };
+      try {
+        await prepared.index.upsert(retry);
+      } catch {
+        /* dispatcher response repairs it */
+      }
+      return {
+        outcome: "retry",
+        scheduledTimeMs,
+        retryCount,
+        errorCode: "DO_RUNTIME_EXCEPTION",
+      };
     }
-    return {
-      outcome: "retry",
-      scheduledTimeMs,
-      retryCount,
-      errorCode: "DO_RUNTIME_EXCEPTION",
-    };
-  }
+  });
 }
