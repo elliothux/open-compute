@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 import type { Page } from "@playwright/test";
 import Cloudflare from "cloudflare";
+import { externalProxyTest } from "./external-proxy-fixture";
 import { expect, test } from "./fixtures";
 import { adminToken, expectNoLoadErrors, signIn } from "./helpers";
 
@@ -35,6 +36,20 @@ async function openCatalog(page: Page, name: string) {
 
 async function returnToCatalog(page: Page, name: string) {
   await openCatalog(page, name);
+}
+
+async function uploadWorkerModule(page: Page, name: string, source: string) {
+  await openCatalog(page, "Workers");
+  await page.getByRole("button", { name: "Create Worker" }).first().click();
+  await page.getByRole("button", { name: "Upload a Worker module" }).click();
+  await page.getByLabel("Worker name").fill(name);
+  await page.getByLabel("Worker module").setInputFiles({
+    name: "index.js",
+    mimeType: "application/javascript",
+    buffer: Buffer.from(source),
+  });
+  await page.getByRole("button", { name: "Deploy", exact: true }).click();
+  await expect(page.getByRole("heading", { name, level: 1 })).toBeVisible();
 }
 
 async function createCatalogResource(
@@ -174,19 +189,11 @@ test.describe("operator dashboard live lifecycle", () => {
     page,
   }) => {
     const name = `pw-upload-${crypto.randomUUID().replaceAll("-", "")}`;
-    await openCatalog(page, "Workers");
-    await page.getByRole("button", { name: "Create Worker" }).first().click();
-    await page.getByRole("button", { name: "Upload a Worker module" }).click();
-    await page.getByLabel("Worker name").fill(name);
-    await page.getByLabel("Worker module").setInputFiles({
-      name: "index.js",
-      mimeType: "application/javascript",
-      buffer: Buffer.from(
-        "export default { fetch() { return new Response('uploaded'); } };",
-      ),
-    });
-    await page.getByRole("button", { name: "Deploy", exact: true }).click();
-    await expect(page.getByRole("heading", { name, level: 1 })).toBeVisible();
+    await uploadWorkerModule(
+      page,
+      name,
+      "export default { fetch() { return new Response('uploaded'); } };",
+    );
     await returnToCatalog(page, "Workers");
     await deleteCatalogResource(page, name);
   });
@@ -1302,4 +1309,123 @@ test.describe("operator dashboard live lifecycle", () => {
       });
     }
   });
+});
+
+externalProxyTest.describe("operator dashboard external ingress", () => {
+  externalProxyTest.skip(
+    process.env.OPEN_COMPUTE_DASHBOARD_E2E_EXTERNAL_PROXY !== "1",
+    "Requires the isolated daemon and Caddy fixture",
+  );
+  externalProxyTest.setTimeout(300_000);
+
+  externalProxyTest(
+    "external proxy Worker origin can be visited and removed",
+    async ({ page, externalProxy: { origin } }) => {
+      const name = "pw-external-origin";
+      const publicURL = `${origin}/`;
+      await signIn(page);
+      await uploadWorkerModule(
+        page,
+        name,
+        `export default { fetch(request) { return new Response(${JSON.stringify(name)} + " served " + request.url, { headers: { "cache-control": "no-store" } }); } };`,
+      );
+
+      const routes = page.locator("section").filter({
+        has: page.getByRole("heading", { name: "Domains and routes" }),
+      });
+      const endpoints = page
+        .getByText("Endpoints", { exact: true })
+        .locator("..");
+      const localRoute = routes
+        .getByText("Local origin", { exact: true })
+        .locator("..")
+        .getByRole("link");
+      const publicRoute = routes.getByRole("link", {
+        name: publicURL,
+        exact: true,
+      });
+      await expect(endpoints).toHaveText(/Endpoints\s*1$/);
+      await expect(localRoute).toHaveAttribute(
+        "href",
+        /^http:\/\/[^/]+\.localhost:\d+\/$/,
+      );
+      const localURL = (await localRoute.getAttribute("href"))!;
+
+      await page.getByRole("tab", { name: "Settings" }).click();
+      await page.getByLabel("Transport", { exact: true }).click();
+      await page
+        .getByRole("option", { name: "External proxy", exact: true })
+        .click();
+      await page.getByLabel("Origin", { exact: true }).fill(origin);
+      await page.getByRole("button", { name: "Save", exact: true }).click();
+      await expect(
+        page.getByText(
+          "External proxy / operator-managed TLS · OCD ingress available",
+        ),
+      ).toBeVisible();
+
+      await page.getByRole("tab", { name: "Overview" }).click();
+      await expect(endpoints).toHaveText(/Endpoints\s*2$/);
+      await expect(
+        routes.getByText("Public origin (external proxy)", { exact: true }),
+      ).toBeVisible();
+      await expect(publicRoute).toHaveAttribute("href", publicURL);
+      await expect(localRoute).toHaveAttribute("href", localURL);
+
+      const visit = async (url: string) => {
+        const [visited, response] = await Promise.all([
+          page.context().waitForEvent("page"),
+          page
+            .context()
+            .waitForEvent(
+              "response",
+              (response) =>
+                response.url() === url &&
+                response.request().isNavigationRequest(),
+            ),
+          page.getByRole("button", { name: "Visit", exact: true }).click(),
+        ]);
+        expect(response.status()).toBe(200);
+        await expect(visited).toHaveURL(url);
+        await expect(visited.locator("body")).toHaveText(
+          `${name} served ${url}`,
+        );
+        return visited;
+      };
+      const publicPage = await visit(publicURL);
+
+      await page.getByRole("tab", { name: "Settings" }).click();
+      await page.getByRole("button", { name: "Disable", exact: true }).click();
+      await expect(
+        page.getByRole("button", { name: "Disable", exact: true }),
+      ).toHaveCount(0);
+      await page.getByRole("tab", { name: "Overview" }).click();
+      await page.reload();
+      await expect(endpoints).toHaveText(/Endpoints\s*1$/);
+      await expect(publicRoute).toHaveCount(0);
+      await expect(localRoute).toHaveAttribute("href", localURL);
+      const [removed] = await Promise.all([
+        publicPage.waitForResponse(
+          (response) =>
+            response.url() === publicURL &&
+            response.request().isNavigationRequest(),
+          { timeout: 15_000 },
+        ),
+        publicPage.reload().catch((error: unknown) => {
+          // Firefox can reject a document load for OCD's empty 404 response.
+          if (
+            !(error instanceof Error) ||
+            !error.message.includes("NS_ERROR_NET_EMPTY_RESPONSE")
+          )
+            throw error;
+        }),
+      ]);
+      expect(removed.status()).toBe(404);
+      await publicPage.close();
+      await (await visit(localURL)).close();
+
+      await returnToCatalog(page, "Workers");
+      await deleteCatalogResource(page, name);
+    },
+  );
 });

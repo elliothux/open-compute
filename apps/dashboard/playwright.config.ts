@@ -5,6 +5,8 @@ const baseURL =
   process.env.OPEN_COMPUTE_DASHBOARD_E2E_BASE_URL ??
   "http://127.0.0.1:8787/operator/";
 const adminToken = process.env.OPEN_COMPUTE_ADMIN_TOKEN ?? "dev-admin-token";
+const externalProxy =
+  process.env.OPEN_COMPUTE_DASHBOARD_E2E_EXTERNAL_PROXY === "1";
 const browserChannel = process.env.OPEN_COMPUTE_DASHBOARD_E2E_BROWSER_CHANNEL;
 const browserExecutable = process.env.OPEN_COMPUTE_TEST_BROWSER;
 if (browserChannel !== undefined && browserExecutable !== undefined)
@@ -28,18 +30,22 @@ export default defineConfig({
     screenshot: "only-on-failure",
     extraHTTPHeaders: {},
   },
-  projects: [
-    {
-      name: "chromium",
-      use: {
-        ...devices["Desktop Chrome"],
-        ...(browserChannel === undefined ? {} : { channel: browserChannel }),
-        ...(browserExecutable === undefined
-          ? {}
-          : { launchOptions: { executablePath: browserExecutable } }),
-      },
-    },
-  ],
+  projects: externalProxy
+    ? [{ name: "firefox", use: devices["Desktop Firefox"] }]
+    : [
+        {
+          name: "chromium",
+          use: {
+            ...devices["Desktop Chrome"],
+            ...(browserChannel === undefined
+              ? {}
+              : { channel: browserChannel }),
+            ...(browserExecutable === undefined
+              ? {}
+              : { launchOptions: { executablePath: browserExecutable } }),
+          },
+        },
+      ],
   metadata: {
     adminToken,
   },

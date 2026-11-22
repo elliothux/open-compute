@@ -43,6 +43,15 @@ CI 的 `test/containers-fixture/with-ci-linux-engine.sh` 只用于 GitHub Action
 Dashboard 的 Browser Run 绑定测试：启动配置了 Browser Run 的隔离 ocd，设置 `OPEN_COMPUTE_DASHBOARD_E2E_BASE_URL` 为其 `/operator/` 地址
 和 `OPEN_COMPUTE_TEST_BROWSER`，运行 `bun run --filter @open-compute/dashboard test:e2e worker-browser-binding.spec.ts`。
 
+Dashboard 的外部代理 Worker origin 测试使用已安装的 Playwright Firefox 和 `curl`。在仓库根目录运行下列命令，依次传入带 `test-support` 和嵌入式 Dashboard 的 ocd、固定版本的 Caddy 和 NSS 的 `certutil`。
+
+```sh
+apps/dashboard/scripts/run-e2e.sh --external-proxy \
+  target/debug/ocd .temp/runtime-inputs/caddy/caddy "$(command -v certutil)"
+```
+
+日志保存在 `.temp/ep-*/`。
+
 ## 运行 Gate
 
 `test/gate.py` 需要 Python 3.11+。macOS 上它自动经 `caffeinate -is` 运行。
@@ -187,7 +196,7 @@ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s test -p 'test_gate.py'
 
 - 长构建和 Gate 前后检查空闲空间和 `docker system df -v`。
 - 本任务的可丢弃数据不超过 32 GiB。
-- Durable Objects 在磁盘用量达到 95% 时拒绝新对象，因此测试数据所在文件系统要保留超过总容量 5% 的空闲。
+- Durable Objects 在数据目录所在文件系统的可用空间低于 `disk_stop_writes_free_bytes` 时拒绝新对象。磁盘压力测试使用固定读数，创建对象的 Gate fixture 使用较小的字节预留值。
 - Docker 容器用 `--rm`，卷要有明确归属，结束后删除。不要运行全局 `docker prune`。
 
 ## 日志与保留证据
